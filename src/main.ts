@@ -62,14 +62,22 @@ function renderAll() {
     renderer.initGrid(currentCluster.width, currentCluster.height);
   }
 
-  renderer.render(currentCluster, state.entities, state.player.position);
-  renderSelfPanel(panelEl, state.player, state.currentClusterId, state.tick);
+  renderer.render(currentCluster, state.entities, state.player.position, state.debugMode);
+  renderSelfPanel(panelEl, state.player, state.currentClusterId, state.tick, state.debugMode);
   renderMessageLog(logEl, state.messages);
 }
 
 // ── Input handling ──
 
 function onAction(action: PlayerAction) {
+  // Debug toggle doesn't advance turns
+  if (action.kind === 'debug_toggle') {
+    state.debugMode = !state.debugMode;
+    addMessage(state, `[DEBUG] Map reveal ${state.debugMode ? 'ON' : 'OFF'}`, 'debug');
+    renderAll();
+    return;
+  }
+
   // Cancel auto-walk on manual input
   stopAutoWalk();
   state.autoPath = [];

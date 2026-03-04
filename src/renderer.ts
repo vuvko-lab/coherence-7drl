@@ -1,4 +1,25 @@
-import { Cluster, Entity, Position, COLORS } from './types';
+import { Cluster, Entity, Position, COLORS, Room } from './types';
+
+const ROOM_TYPE_SHORT: Record<string, string> = {
+  normal: 'N', corrupted: 'C', trigger_trap: 'T', memory_leak: 'M',
+  firewall: 'F', unstable: 'U', quarantine: 'Q', echo_chamber: 'E',
+  gravity_well: 'G',
+};
+
+const ROOM_TYPE_COLOR: Record<string, string> = {
+  normal: '#446644', corrupted: '#ff4444', trigger_trap: '#ff8844',
+  memory_leak: '#4488ff', firewall: '#ffcc00', unstable: '#ffff44',
+  quarantine: '#cc44cc', echo_chamber: '#557744', gravity_well: '#aa44ff',
+};
+
+function debugRoomLabel(room: Room): string {
+  const typeChar = ROOM_TYPE_SHORT[room.roomType] ?? '?';
+  return `${room.id}${typeChar}`;
+}
+
+function debugRoomColor(room: Room): string {
+  return ROOM_TYPE_COLOR[room.roomType] ?? '#666666';
+}
 
 export class Renderer {
   private container: HTMLElement;
@@ -61,20 +82,21 @@ export class Renderer {
     this.pathHighlight = path;
   }
 
-  render(cluster: Cluster, entities: Entity[], playerPos: Position) {
+  render(cluster: Cluster, entities: Entity[], playerPos: Position, debugMode = false) {
     const pathSet = new Set(this.pathHighlight.map(p => `${p.x},${p.y}`));
 
     for (let y = 0; y < this.height; y++) {
       for (let x = 0; x < this.width; x++) {
         const tile = cluster.tiles[y][x];
         const cell = this.cells[y][x];
+        const isVisible = tile.visible || debugMode;
 
         let glyph = tile.glyph;
         let fg = tile.fg;
         let bg: string = COLORS.bg;
 
         // Hazard overlay (only when visible)
-        if (tile.visible && tile.hazardOverlay) {
+        if (isVisible && tile.hazardOverlay) {
           const ho = tile.hazardOverlay;
           switch (ho.type) {
             case 'corruption':
@@ -102,20 +124,15 @@ export class Renderer {
               else if (ho.stage === 1) { glyph = '◉'; fg = '#8833cc'; bg = '#140a1a'; }
               else { fg = '#6622aa'; bg = '#0a0a14'; }
               break;
-            case 'collapse':
-              if (ho.stage === 0) { fg = '#aa8800'; } // warning flicker
-              else if (ho.stage === 1) { glyph = '░'; fg = '#cc6600'; bg = '#1a0a00'; }
-              else { glyph = '▓'; fg = '#331100'; bg = '#0a0500'; } // collapsed
-              break;
           }
         }
 
-        if (!tile.seen && !tile.visible) {
+        if (!tile.seen && !isVisible) {
           // Unexplored
           glyph = ' ';
           fg = COLORS.unexplored;
           bg = COLORS.unexplored;
-        } else if (tile.seen && !tile.visible) {
+        } else if (tile.seen && !isVisible) {
           // Remembered but not visible
           fg = COLORS.rememberedFg;
           bg = COLORS.bg;
@@ -124,20 +141,20 @@ export class Renderer {
 
         // Hover highlight
         const isHovered = this.hoveredCell?.x === x && this.hoveredCell?.y === y;
-        if (isHovered && tile.visible) {
+        if (isHovered && isVisible) {
           bg = '#1a3a1a';
         }
 
         // Path highlight
-        if (pathSet.has(`${x},${y}`) && tile.visible) {
+        if (pathSet.has(`${x},${y}`) && isVisible) {
           bg = '#2a3a1a';
         }
 
         cell.textContent = glyph;
         cell.style.color = fg;
         cell.style.backgroundColor = bg;
-        cell.classList.toggle('highlight', isHovered && tile.visible);
-        cell.classList.toggle('path', pathSet.has(`${x},${y}`) && tile.visible);
+        cell.classList.toggle('highlight', isHovered && isVisible);
+        cell.classList.toggle('path', pathSet.has(`${x},${y}`) && isVisible);
       }
     }
 
@@ -147,7 +164,7 @@ export class Renderer {
       const { x, y } = entity.position;
       if (x >= 0 && x < this.width && y >= 0 && y < this.height) {
         const tile = cluster.tiles[y][x];
-        if (tile.visible) {
+        if (tile.visible || debugMode) {
           this.cells[y][x].textContent = entity.glyph;
           this.cells[y][x].style.color = entity.fg;
         }
@@ -160,12 +177,33 @@ export class Renderer {
       this.cells[py][px].textContent = '@';
       this.cells[py][px].style.color = COLORS.player;
     }
+
+    // Debug overlay: room IDs and types
+    if (debugMode) {
+      for (const room of cluster.rooms) {
+        const cx = Math.floor(room.x + room.w / 2);
+        const cy = Math.floor(room.y + room.h / 2);
+        const label = debugRoomLabel(room);
+        // Place label chars centered in the room
+        const startX = cx - Math.floor(label.length / 2);
+        for (let i = 0; i < label.length; i++) {
+          const lx = startX + i;
+          if (lx >= 0 && lx < this.width && cy >= 0 && cy < this.height) {
+            // Don't overwrite player
+            if (lx === px && cy === py) continue;
+            this.cells[cy][lx].textContent = label[i];
+            this.cells[cy][lx].style.color = debugRoomColor(room);
+            this.cells[cy][lx].style.backgroundColor = '#0a0a0a';
+          }
+        }
+      }
+    }
   }
 }
 
 // ── SELF panel renderer ──
 
-export function renderSelfPanel(el: HTMLElement, player: Entity, clusterId: number, tick: number) {
+export function renderSelfPanel(el: HTMLElement, player: Entity, clusterId: number, tick: number, debugMode = false) {
   const hexId = '0x' + player.id.toString(16).toUpperCase().padStart(4, '0');
   const coherence = player.coherence ?? 100;
   const maxCoherence = player.maxCoherence ?? 100;
@@ -203,6 +241,7 @@ export function renderSelfPanel(el: HTMLElement, player: Entity, clusterId: numb
 ${moduleRows}
 <div class="panel-sep"><span class="fill"></span><span class="label">perms</span><span class="fill"></span></div>
 <div class="stat-row"><span class="stat-label">engineer / r+w+x</span></div>
+${debugMode ? '<div class="panel-sep"><span class="fill"></span></div>\n<div class="stat-row"><span class="stat-value debug-indicator">[DEBUG MODE]</span></div>' : ''}
 </div>
 <div class="panel-edge"><span class="corner">└</span><span class="fill"></span><span class="corner">┘</span></div>`;
 }
@@ -215,7 +254,7 @@ export function renderMessageLog(el: HTMLElement, messages: { text: string; type
   // Show last 20 messages, newest first
   const recent = messages.slice(-20).reverse();
   body.innerHTML = recent.map(m => {
-    const cls = m.type === 'system' ? 'msg msg-system' : m.type === 'important' ? 'msg msg-important' : m.type === 'hazard' ? 'msg msg-hazard' : 'msg';
+    const cls = m.type === 'debug' ? 'msg msg-debug' : m.type === 'system' ? 'msg msg-system' : m.type === 'important' ? 'msg msg-important' : m.type === 'hazard' ? 'msg msg-hazard' : 'msg';
     return `<div class="${cls}">${m.text}</div>`;
   }).join('');
 }

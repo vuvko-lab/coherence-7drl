@@ -38,6 +38,7 @@ export function createGame(): GameState {
     tick: 0,
     messages: [],
     autoPath: [],
+    debugMode: false,
   };
 
   addMessage(state, 'System boot... ego-fragment loaded from backup.', 'system');

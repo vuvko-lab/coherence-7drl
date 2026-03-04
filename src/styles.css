@@ -245,6 +245,14 @@ body {
   color: #ff4444;
 }
 
+#message-log .msg-debug {
+  color: #6688cc;
+}
+
+.debug-indicator {
+  color: #6688cc;
+}
+
 /* --- Settings overlay --- */
 #settings-overlay {
   display: none;

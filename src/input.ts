@@ -64,6 +64,13 @@ export class InputHandler {
       this.onAction({ kind: 'transfer' });
       return;
     }
+
+    // Debug toggle
+    if (e.key === '`') {
+      e.preventDefault();
+      this.onAction({ kind: 'debug_toggle' });
+      return;
+    }
   };
 
   handleMapClick(pos: Position) {
