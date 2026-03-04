@@ -29,6 +29,7 @@ body {
   max-height: 800px;
   gap: 4px;
   padding: 4px;
+  position: relative;
 }
 
 /* --- Shared panel edge / separator components --- */
@@ -207,13 +208,28 @@ body {
 }
 
 /* --- Message log --- */
-#message-log {
+#log-placeholder {
   grid-area: log;
+}
+
+#message-log {
+  position: absolute;
+  bottom: 4px;
+  left: 4px;
+  right: 4px;
+  height: 120px;
   padding: 0;
   overflow: hidden;
   color: #338855;
   display: flex;
   flex-direction: column;
+  background: #0a0a0a;
+  z-index: 10;
+  transition: height 0.35s ease;
+}
+
+#message-log.log-expanded {
+  height: calc(100% - 8px);
 }
 
 #message-log > .panel-edge {
@@ -227,6 +243,21 @@ body {
   line-height: 1.5;
   display: flex;
   flex-direction: column-reverse;
+}
+
+.log-toggle {
+  background: none;
+  border: none;
+  color: #2a6a3a;
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.log-toggle:hover {
+  color: #00ff88;
 }
 
 #message-log .msg {
@@ -365,4 +396,141 @@ body {
 
 #settings-btn:hover {
   color: #00ff88;
+}
+
+/* --- ADMIN panel (debug only, fixed right side) --- */
+#panel-admin {
+  display: none;
+  position: fixed;
+  top: 4px;
+  right: 4px;
+  width: 200px;
+  z-index: 50;
+  padding: 0;
+  line-height: 1.4;
+  color: #6688cc;
+  background: #0a0a0a;
+}
+
+#panel-admin.visible {
+  display: block;
+}
+
+#panel-admin .panel-edge {
+  color: #6688cc;
+}
+
+#panel-admin .panel-body {
+  padding: 2px 2ch;
+}
+
+#panel-admin .admin-btn {
+  display: block;
+  width: 100%;
+  background: none;
+  border: 1px solid #334466;
+  color: #6688cc;
+  font-family: inherit;
+  font-size: inherit;
+  padding: 2px 1ch;
+  margin-bottom: 3px;
+  cursor: pointer;
+  text-align: left;
+}
+
+#panel-admin .admin-btn:hover {
+  color: #88aaee;
+  border-color: #4466aa;
+  background: #0a0a1a;
+}
+
+#panel-admin .admin-btn:active {
+  color: #aaccff;
+  background: #0f0f2a;
+}
+
+/* === GLITCH EFFECTS === */
+
+/* Shake — rapid translational jitter */
+#game.glitch-shake {
+  animation: glitch-shake 0.4s ease-in-out;
+}
+
+@keyframes glitch-shake {
+  0%, 100% { transform: translate(0, 0); }
+  10% { transform: translate(-3px, 1px); }
+  20% { transform: translate(3px, -2px); }
+  30% { transform: translate(-1px, -3px); }
+  40% { transform: translate(2px, 2px); }
+  50% { transform: translate(-3px, 0px); }
+  60% { transform: translate(3px, 1px); }
+  70% { transform: translate(0px, -2px); }
+  80% { transform: translate(-2px, 1px); }
+  90% { transform: translate(1px, -3px); }
+}
+
+/* Chromatic aberration — red/blue split overlay */
+#game.glitch-chromatic::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 100;
+  background:
+    linear-gradient(90deg, rgba(255, 0, 0, 0.06) 0%, transparent 33%),
+    linear-gradient(90deg, transparent 66%, rgba(0, 100, 255, 0.06) 100%);
+  animation: chromatic-shift 0.3s ease-in-out 3;
+}
+
+@keyframes chromatic-shift {
+  0%, 100% { opacity: 0; }
+  25% { opacity: 1; transform: translateX(-4px); }
+  50% { opacity: 1; transform: translateX(4px); }
+  75% { opacity: 1; transform: translateX(-2px); }
+}
+
+/* Bar sweep — horizontal bar sweeps down */
+#game.glitch-bars::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0;
+  height: 3px;
+  pointer-events: none;
+  z-index: 101;
+  background: #00ff88;
+  opacity: 0.15;
+  animation: glitch-bar-sweep 0.6s linear 2;
+}
+
+@keyframes glitch-bar-sweep {
+  0%   { top: 5%;  transform: scaleX(0.8) translateX(-5%); opacity: 0.2; }
+  25%  { top: 30%; transform: scaleX(1.2) translateX(3%);  opacity: 0.15; }
+  50%  { top: 55%; transform: scaleX(0.6) translateX(-2%); opacity: 0.25; }
+  75%  { top: 80%; transform: scaleX(1.1) translateX(4%);  opacity: 0.1; }
+  100% { top: 95%; transform: scaleX(0.9) translateX(0);   opacity: 0; }
+}
+
+/* Text flicker — skew + opacity jitter */
+#game.glitch-text-flicker {
+  animation: glitch-text-flicker 0.15s linear 5;
+}
+
+@keyframes glitch-text-flicker {
+  0%, 100% { opacity: 1; transform: translateX(0); }
+  20% { opacity: 0.8; transform: translateX(2px) skewX(2deg); }
+  40% { opacity: 1; transform: translateX(-1px) skewX(-1deg); }
+  60% { opacity: 0.6; transform: translateX(1px); }
+  80% { opacity: 1; transform: translateX(-2px) skewX(1deg); }
+}
+
+/* Hue distort — hue-rotate + skew sweep */
+#game.glitch-hue-distort {
+  animation: glitch-hue-distort 0.5s ease;
+}
+
+@keyframes glitch-hue-distort {
+  0%   { opacity: 0.8; transform: translateX(-20px) skewX(-5deg); filter: hue-rotate(90deg); }
+  30%  { opacity: 1;   transform: translateX(5px) skewX(2deg);    filter: hue-rotate(45deg); }
+  60%  { transform: translateX(-2px) skewX(-1deg); filter: hue-rotate(0deg); }
+  100% { transform: translateX(0) skewX(0deg); filter: none; }
 }

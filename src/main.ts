@@ -2,6 +2,7 @@ import { createGame, processAction, handleMapClick, stepAutoPath, addMessage } f
 import { Renderer, renderSelfPanel, renderMessageLog } from './renderer';
 import { InputHandler } from './input';
 import { PlayerAction, Position, TileType } from './types';
+import { GLITCH_EFFECTS } from './glitch';
 
 // ── Bootstrap ──
 
@@ -13,6 +14,7 @@ renderer.initGrid(cluster.width, cluster.height);
 
 const panelEl = document.getElementById('panel-self')!;
 const logEl = document.getElementById('message-log')!;
+const adminEl = document.getElementById('panel-admin')!;
 
 // ── Auto-walk timer ──
 
@@ -54,6 +56,35 @@ function stopAutoWalk() {
 
 // ── Render ──
 
+let adminInitialized = false;
+
+function initAdminPanel() {
+  if (adminInitialized) return;
+  adminInitialized = true;
+
+  const buttons = GLITCH_EFFECTS.map(effect => {
+    return `<button class="admin-btn" data-effect="${effect.name}">&gt; ${effect.name}</button>`;
+  }).join('\n');
+
+  adminEl.innerHTML = `\
+<div class="panel-edge"><span class="corner">┌</span><span class="label">[ ADMIN ]</span><span class="fill"></span><span class="corner">┐</span></div>
+<div class="panel-body">
+${buttons}
+</div>
+<div class="panel-edge"><span class="corner">└</span><span class="fill"></span><span class="corner">┘</span></div>`;
+
+  // Wire up buttons
+  adminEl.querySelectorAll('.admin-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const name = (btn as HTMLElement).dataset.effect;
+      const effect = GLITCH_EFFECTS.find(e => e.name === name);
+      if (effect) {
+        effect.fn().then(() => renderAll());
+      }
+    });
+  });
+}
+
 function renderAll() {
   const currentCluster = state.clusters.get(state.currentClusterId)!;
 
@@ -65,6 +96,14 @@ function renderAll() {
   renderer.render(currentCluster, state.entities, state.player.position, state.debugMode);
   renderSelfPanel(panelEl, state.player, state.currentClusterId, state.tick, state.debugMode);
   renderMessageLog(logEl, state.messages);
+
+  // Show/hide admin panel based on debug mode
+  if (state.debugMode) {
+    initAdminPanel();
+    adminEl.classList.add('visible');
+  } else {
+    adminEl.classList.remove('visible');
+  }
 }
 
 // ── Input handling ──
@@ -236,6 +275,15 @@ document.addEventListener('keydown', (e) => {
 });
 
 cfgFont.addEventListener('change', applySettings);
+
+// ── Log expand/collapse ──
+
+const logExpandBtn = document.getElementById('log-expand-btn')!;
+
+logExpandBtn.addEventListener('click', () => {
+  const expanded = logEl.classList.toggle('log-expanded');
+  logExpandBtn.textContent = expanded ? '[ - ]' : '[ + ]';
+});
 
 // ── Initial render ──
 
