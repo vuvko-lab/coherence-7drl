@@ -8,7 +8,7 @@ export enum TileType {
   InterfaceExit,
 }
 
-export type HazardOverlayType = 'corruption' | 'flood' | 'spark' | 'scorch' | 'beam' | 'gravity' | 'collapse';
+export type HazardOverlayType = 'corruption' | 'flood' | 'spark' | 'scorch' | 'beam' | 'gravity';
 
 export interface HazardOverlay {
   type: HazardOverlayType;
@@ -54,8 +54,7 @@ export type RoomType =
   | 'unstable'
   | 'quarantine'
   | 'echo_chamber'
-  | 'gravity_well'
-  | 'cascade';
+  | 'gravity_well';
 
 export type CorruptionStage = 'degrading' | 'corrupted' | 'collapsed';
 
@@ -98,11 +97,6 @@ export interface RoomHazardState {
   pullInterval?: number;
   lastPullTick?: number;
 
-  // Cascade failure
-  cascadeEdge?: 'top' | 'bottom' | 'left' | 'right';
-  cascadeProgress?: number;
-  cascadeActivated?: boolean;
-
 }
 
 export interface Room {
@@ -113,6 +107,7 @@ export interface Room {
   h: number;
   roomType: RoomType;
   hazardState?: RoomHazardState;
+  containedHazards: Set<HazardOverlayType>;
 }
 
 export interface InterfaceExit {
@@ -169,11 +164,12 @@ export interface GameState {
   tick: number;
   messages: GameMessage[];
   autoPath: Position[];
+  debugMode: boolean;
 }
 
 export interface GameMessage {
   text: string;
-  type: 'normal' | 'system' | 'important' | 'hazard';
+  type: 'normal' | 'system' | 'important' | 'hazard' | 'debug';
   tick: number;
 }
 
@@ -194,7 +190,11 @@ export interface ActionWait {
   kind: 'wait';
 }
 
-export type PlayerAction = ActionMove | ActionTransfer | ActionWait;
+export interface ActionDebugToggle {
+  kind: 'debug_toggle';
+}
+
+export type PlayerAction = ActionMove | ActionTransfer | ActionWait | ActionDebugToggle;
 
 // ── Constants ──
 

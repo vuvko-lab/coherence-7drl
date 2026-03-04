@@ -1,6 +1,7 @@
 import {
   GameState, Cluster, Room, Position, TileType,
   CorruptionStage, CLUSTER_WIDTH, CLUSTER_HEIGHT, COLORS,
+  HazardOverlayType,
 } from './types';
 import { addMessage } from './game';
 
@@ -21,6 +22,14 @@ function posInRoom(pos: Position, room: Room): boolean {
 
 function playerRoom(state: GameState, cluster: Cluster): Room | undefined {
   return cluster.rooms.find(r => posInRoom(state.player.position, r));
+}
+
+/** Mark a room as containing a hazard overlay type (for tiles that spread across room boundaries) */
+function markTileHazardInRoom(cluster: Cluster, x: number, y: number, type: HazardOverlayType) {
+  const roomId = cluster.tiles[y]?.[x]?.roomId;
+  if (roomId == null || roomId < 0) return;
+  const room = cluster.rooms.find(r => r.id === roomId);
+  if (room) room.containedHazards.add(type);
 }
 
 /** BFS distance between two rooms via adjacency graph. Returns -1 if unreachable. */
@@ -124,6 +133,7 @@ function updateCorruption(state: GameState, cluster: Cluster, room: Room) {
         const degradeChance = target.type === TileType.Wall ? 0.25 : 0.50;
         // Always show corruption overlay (visual cracking)
         target.hazardOverlay = { type: 'corruption', stage: 0 };
+        markTileHazardInRoom(cluster, nx, ny, 'corruption');
 
         if (Math.random() < degradeChance) {
           const integrity = tileIntegrity(cluster, nx, ny);
@@ -148,6 +158,7 @@ function updateCorruption(state: GameState, cluster: Cluster, room: Room) {
       type: 'corruption',
       stage: corruptionOverlayStage(stage),
     };
+    markTileHazardInRoom(cluster, cx, cy, 'corruption');
   }
 
   // Sound propagation
@@ -163,6 +174,10 @@ function updateCorruption(state: GameState, cluster: Cluster, room: Room) {
         addMessage(state, 'A faint crackling echoes from somewhere.', 'normal');
       }
     }
+  }
+
+  if (state.debugMode) {
+    addMessage(state, `[DBG] Corruption room ${room.id}: ${hz.corruptionTiles.size} tiles, +${newEntries.length} new`, 'debug');
   }
 }
 
@@ -206,6 +221,7 @@ function updateTriggerTrap(state: GameState, cluster: Cluster, room: Room) {
         if (cluster.tiles[y][x].type === TileType.Door) {
           breachTile(cluster, x, y);
           cluster.tiles[y][x].hazardOverlay = { type: 'scorch' };
+          markTileHazardInRoom(cluster, x, y, 'scorch');
         }
       }
     }
@@ -224,6 +240,10 @@ function updateTriggerTrap(state: GameState, cluster: Cluster, room: Room) {
         addMessage(state, 'A distant explosion rumbles through the structure.', 'normal');
       }
     }
+  }
+
+  if (state.debugMode) {
+    addMessage(state, `[DBG] Trap room ${room.id}: ${hz.detonated ? 'DETONATED' : `ticks=${hz.ticksRemaining}`}`, 'debug');
   }
 }
 
@@ -291,10 +311,15 @@ function updateMemoryLeak(state: GameState, cluster: Cluster, room: Room) {
         if (adjacentToFlood && Math.random() < 0.30) {
           breachTile(cluster, x, y);
           cluster.tiles[y][x].hazardOverlay = { type: 'flood', stage: 0 };
+          markTileHazardInRoom(cluster, x, y, 'flood');
           addMessage(state, 'A door bursts open under flood pressure!', 'hazard');
         }
       }
     }
+  }
+
+  if (state.debugMode) {
+    addMessage(state, `[DBG] Leak room ${room.id}: flood=${hz.floodLevel ?? 0}/${maxFlood}`, 'debug');
   }
 }
 
@@ -471,101 +496,6 @@ function updateGravityWell(state: GameState, cluster: Cluster, room: Room) {
   }
 }
 
-// ── Cascade Failure ──
-
-function updateCascade(state: GameState, cluster: Cluster, room: Room) {
-  const hz = room.hazardState!;
-  if (!hz.cascadeActivated) return;
-
-  // Advance every 2 ticks
-  if (state.tick % 2 !== 0) return;
-
-  const { x1, y1, x2, y2 } = roomInterior(room);
-  const edge = hz.cascadeEdge ?? 'left';
-  const progress = hz.cascadeProgress ?? 0;
-
-  // Calculate max dimension along collapse axis
-  const maxProgress = (edge === 'left' || edge === 'right')
-    ? (x2 - x1) - 1  // leave 1-tile safe strip
-    : (y2 - y1) - 1;
-
-  if (progress >= maxProgress) return;
-
-  hz.cascadeProgress = progress + 1;
-  const p = hz.cascadeProgress;
-
-  // Apply collapse based on edge direction
-  for (let stage = 0; stage <= 2; stage++) {
-    const offset = p - stage; // 0=collapsed, 1=crumbling, 2=warning
-    if (offset < 0) continue;
-
-    const collapseStage = 2 - stage; // 2=collapsed, 1=crumble, 0=warning
-
-    if (edge === 'left') {
-      const x = x1 + offset;
-      if (x > x2) continue;
-      for (let y = y1; y <= y2; y++) {
-        if (cluster.tiles[y][x].type === TileType.Floor) {
-          cluster.tiles[y][x].hazardOverlay = { type: 'collapse', stage: collapseStage };
-          if (collapseStage === 2) cluster.tiles[y][x].walkable = false;
-        }
-      }
-    } else if (edge === 'right') {
-      const x = x2 - offset;
-      if (x < x1) continue;
-      for (let y = y1; y <= y2; y++) {
-        if (cluster.tiles[y][x].type === TileType.Floor) {
-          cluster.tiles[y][x].hazardOverlay = { type: 'collapse', stage: collapseStage };
-          if (collapseStage === 2) cluster.tiles[y][x].walkable = false;
-        }
-      }
-    } else if (edge === 'top') {
-      const y = y1 + offset;
-      if (y > y2) continue;
-      for (let x = x1; x <= x2; x++) {
-        if (cluster.tiles[y][x].type === TileType.Floor) {
-          cluster.tiles[y][x].hazardOverlay = { type: 'collapse', stage: collapseStage };
-          if (collapseStage === 2) cluster.tiles[y][x].walkable = false;
-        }
-      }
-    } else {
-      const y = y2 - offset;
-      if (y < y1) continue;
-      for (let x = x1; x <= x2; x++) {
-        if (cluster.tiles[y][x].type === TileType.Floor) {
-          cluster.tiles[y][x].hazardOverlay = { type: 'collapse', stage: collapseStage };
-          if (collapseStage === 2) cluster.tiles[y][x].walkable = false;
-        }
-      }
-    }
-  }
-
-  // Damage if player on collapsed tile
-  const pp = state.player.position;
-  const overlay = cluster.tiles[pp.y]?.[pp.x]?.hazardOverlay;
-  if (overlay?.type === 'collapse' && overlay.stage === 2) {
-    addMessage(state, 'The floor crumbles beneath you!', 'hazard');
-    damageCoherence(state, randInt(10, 20));
-  }
-
-  // Sound
-  const pRoom = playerRoom(state, cluster);
-  if (pRoom) {
-    const dist = roomDistance(cluster.roomAdjacency, pRoom.id, room.id);
-    if (dist === 0 && p === 1) {
-      addMessage(state, 'The floor begins to collapse!', 'hazard');
-    } else if (dist === 1 && p === 1) {
-      addMessage(state, 'You hear crumbling from the next room.', 'normal');
-    }
-  }
-}
-
-function onPlayerEnterCascade(_state: GameState, room: Room) {
-  const hz = room.hazardState!;
-  if (hz.cascadeActivated) return;
-  hz.cascadeActivated = true;
-}
-
 // ── Main update ──
 
 export function updateHazards(state: GameState) {
@@ -595,9 +525,6 @@ export function updateHazards(state: GameState) {
       case 'gravity_well':
         updateGravityWell(state, cluster, room);
         break;
-      case 'cascade':
-        updateCascade(state, cluster, room);
-        break;
     }
   }
 }
@@ -607,9 +534,6 @@ export function onPlayerEnterRoom(state: GameState, room: Room) {
   switch (room.roomType) {
     case 'trigger_trap':
       onPlayerEnterTriggerTrap(state, room);
-      break;
-    case 'cascade':
-      onPlayerEnterCascade(state, room);
       break;
     case 'echo_chamber':
       addMessage(state, 'Residual process echoes shimmer around you...', 'system');
@@ -685,15 +609,24 @@ export function updateAlertModule(state: GameState) {
     if (pRoom.roomType === 'firewall' && hz.beams) detected = true;
     if (pRoom.roomType === 'unstable' && !hz.coreDestroyed) detected = true;
     if (pRoom.roomType === 'gravity_well') detected = true;
-    if (pRoom.roomType === 'cascade' && hz.cascadeActivated) detected = true;
   }
 
-  // Check adjacent rooms
+  // Check current room for spread hazards (from other rooms)
+  if (!detected && pRoom.containedHazards.size > 0) {
+    detected = true;
+  }
+
+  // Check adjacent rooms (native hazards)
   if (!detected) {
     const adjacentIds = cluster.roomAdjacency.get(pRoom.id) ?? [];
     for (const adjId of adjacentIds) {
       const adjRoom = cluster.rooms.find(r => r.id === adjId);
-      if (!adjRoom || adjRoom.roomType === 'normal' || adjRoom.roomType === 'echo_chamber') continue;
+      if (!adjRoom) continue;
+
+      // Check spread hazards in adjacent room
+      if (adjRoom.containedHazards.size > 0) { detected = true; break; }
+
+      if (adjRoom.roomType === 'normal' || adjRoom.roomType === 'echo_chamber') continue;
       const hz = adjRoom.hazardState;
       if (!hz) continue;
 
@@ -704,9 +637,13 @@ export function updateAlertModule(state: GameState) {
       if (adjRoom.roomType === 'unstable' && !hz.coreDestroyed) { detected = true; break; }
       if (adjRoom.roomType === 'gravity_well') { detected = true; break; }
       if (adjRoom.roomType === 'quarantine' && hz.locked) { detected = true; break; }
-      if (adjRoom.roomType === 'cascade' && !hz.cascadeActivated) { detected = true; break; }
     }
   }
 
   alertMod.alertActive = detected;
+
+  if (state.debugMode && detected) {
+    const hazards = pRoom.containedHazards.size > 0 ? ` spread:[${[...pRoom.containedHazards].join(',')}]` : '';
+    addMessage(state, `[DBG] Alert: room ${pRoom.id} (${pRoom.roomType})${hazards}`, 'debug');
+  }
 }

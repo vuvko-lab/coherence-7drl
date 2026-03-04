@@ -227,14 +227,14 @@ function divide(
   // Stop conditions
   if (innerW < MIN_ROOM_DIM || innerH < MIN_ROOM_DIM || area < 15) {
     carveRoom(grid, x, y, w, h);
-    rooms.push({ id: nextId.value++, x, y, w, h, roomType: 'normal' });
+    rooms.push({ id: nextId.value++, x, y, w, h, roomType: 'normal', containedHazards: new Set() });
     return;
   }
 
   // Medium rooms: chance to stop
   if (area < 40 && Math.random() > 0.6) {
     carveRoom(grid, x, y, w, h);
-    rooms.push({ id: nextId.value++, x, y, w, h, roomType: 'normal' });
+    rooms.push({ id: nextId.value++, x, y, w, h, roomType: 'normal', containedHazards: new Set() });
     return;
   }
 
@@ -250,7 +250,7 @@ function divide(
     const maxSplit = y + h - MIN_ROOM_DIM - 2;
     if (minSplit > maxSplit) {
       carveRoom(grid, x, y, w, h);
-      rooms.push({ id: nextId.value++, x, y, w, h, roomType: 'normal' });
+      rooms.push({ id: nextId.value++, x, y, w, h, roomType: 'normal', containedHazards: new Set() });
       return;
     }
 
@@ -262,7 +262,7 @@ function divide(
       const corrY = splitAt;
       divide(grid, rooms, x, y, w, corrY - y + 1, depth + 1, nextId);
       carveRoom(grid, x, corrY, w, corrH);
-      rooms.push({ id: nextId.value++, x, y: corrY, w, h: corrH, roomType: 'normal' });
+      rooms.push({ id: nextId.value++, x, y: corrY, w, h: corrH, roomType: 'normal', containedHazards: new Set() });
       divide(grid, rooms, x, corrY + corrH - 1, w, y + h - (corrY + corrH - 1), depth + 1, nextId);
       return;
     }
@@ -281,7 +281,7 @@ function divide(
     const maxSplit = x + w - MIN_ROOM_DIM - 2;
     if (minSplit > maxSplit) {
       carveRoom(grid, x, y, w, h);
-      rooms.push({ id: nextId.value++, x, y, w, h, roomType: 'normal' });
+      rooms.push({ id: nextId.value++, x, y, w, h, roomType: 'normal', containedHazards: new Set() });
       return;
     }
 
@@ -293,7 +293,7 @@ function divide(
       const corrX = splitAt;
       divide(grid, rooms, x, y, corrX - x + 1, h, depth + 1, nextId);
       carveRoom(grid, corrX, y, corrW, h);
-      rooms.push({ id: nextId.value++, x: corrX, y, w: corrW, h, roomType: 'normal' });
+      rooms.push({ id: nextId.value++, x: corrX, y, w: corrW, h, roomType: 'normal', containedHazards: new Set() });
       divide(grid, rooms, corrX + corrW - 1, y, x + w - (corrX + corrW - 1), h, depth + 1, nextId);
       return;
     }
@@ -474,7 +474,6 @@ const HAZARD_WEIGHTS: { type: RoomType; weight: number }[] = [
   { type: 'quarantine', weight: 2 },
   { type: 'echo_chamber', weight: 1 },
   { type: 'gravity_well', weight: 2 },
-  { type: 'cascade', weight: 2 },
 ];
 
 function weightedPick(pool: { type: RoomType; weight: number }[]): RoomType {
@@ -670,25 +669,6 @@ function initRoomHazards(tiles: Tile[][], rooms: Room[]) {
         break;
       }
 
-      case 'cascade': {
-        // Choose a random edge for collapse direction
-        const edges: Array<'top' | 'bottom' | 'left' | 'right'> = ['top', 'bottom', 'left', 'right'];
-        const edge = edges[randInt(0, 3)];
-        room.hazardState = {
-          cascadeEdge: edge,
-          cascadeProgress: 0,
-          cascadeActivated: false,
-        };
-        // Subtle warning tint on floor
-        for (let y = innerY1; y <= innerY2; y++) {
-          for (let x = innerX1; x <= innerX2; x++) {
-            if (tiles[y]?.[x]?.type === TileType.Floor) {
-              tiles[y][x].bg = '#1a1a0a';
-            }
-          }
-        }
-        break;
-      }
     }
   }
 }
