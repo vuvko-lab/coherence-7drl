@@ -103,8 +103,6 @@ export interface RoomHazardState {
   cascadeProgress?: number;
   cascadeActivated?: boolean;
 
-  // Memory leak door pressure
-  floodPressureTicks?: Map<string, number>; // key: "x,y" of door tile
 }
 
 export interface Room {

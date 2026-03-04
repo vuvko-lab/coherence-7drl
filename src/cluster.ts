@@ -11,9 +11,9 @@ const IX = PAD;
 const IY = PAD;
 const IW = CLUSTER_WIDTH - 2 * PAD;
 const IH = CLUSTER_HEIGHT - 2 * PAD;
-const MIN_ROOM_DIM = 4; // minimum interior dimension (excluding walls)
+const MIN_ROOM_DIM = 3; // minimum interior dimension (excluding walls)
 const CORRIDOR_CHANCE = 0.20;
-const CORRIDOR_WIDTH = 3;
+const CORRIDOR_WIDTH = 4; // includes walls → 2-tile interior (no 1-tile corridors)
 
 // ── RNG helpers ──
 
@@ -144,9 +144,52 @@ function placeDoors(grid: CellGrid, rooms: Room[]): Map<number, number[]> {
     }
   }
 
-  // For each room pair, place 1-2 doors and record adjacency
-  for (const [key, candidates] of pairCandidates.entries()) {
-    if (candidates.length === 0) continue;
+  // ── Spanning-tree door selection (maze-like connectivity) ──
+  // Union-find
+  const parent = new Map<number, number>();
+  function find(x: number): number {
+    if (!parent.has(x)) parent.set(x, x);
+    if (parent.get(x) !== x) parent.set(x, find(parent.get(x)!));
+    return parent.get(x)!;
+  }
+  function union(a: number, b: number): boolean {
+    const ra = find(a), rb = find(b);
+    if (ra === rb) return false;
+    parent.set(ra, rb);
+    return true;
+  }
+
+  // Initialize all room ids in union-find
+  for (const room of rooms) find(room.id);
+
+  // Collect and shuffle all pair keys
+  const allPairs = [...pairCandidates.keys()];
+  for (let i = allPairs.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [allPairs[i], allPairs[j]] = [allPairs[j], allPairs[i]];
+  }
+
+  // Build spanning tree — guarantees all rooms are reachable
+  const selectedPairs = new Set<string>();
+  for (const key of allPairs) {
+    const [idA, idB] = key.split('-').map(Number);
+    if (union(idA, idB)) {
+      selectedPairs.add(key);
+    }
+  }
+
+  // Add ~30% of remaining pairs as extra connections (loops / alternate paths)
+  for (const key of allPairs) {
+    if (selectedPairs.has(key)) continue;
+    if (Math.random() < 0.3) {
+      selectedPairs.add(key);
+    }
+  }
+
+  // Only place doors for selected pairs
+  for (const key of selectedPairs) {
+    const candidates = pairCandidates.get(key)!;
+    if (!candidates || candidates.length === 0) continue;
 
     const [idA, idB] = key.split('-').map(Number);
 

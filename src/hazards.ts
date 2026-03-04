@@ -61,8 +61,8 @@ function tileIntegrity(cluster: Cluster, x: number, y: number): number {
   const tile = cluster.tiles[y]?.[x];
   if (!tile) return 99;
   if (tile.integrity != null) return tile.integrity;
-  if (tile.type === TileType.Wall) return 3;
-  if (tile.type === TileType.Door) return 2;
+  if (tile.type === TileType.Wall) return 6;
+  if (tile.type === TileType.Door) return 3;
   return 99;
 }
 
@@ -120,17 +120,21 @@ function updateCorruption(state: GameState, cluster: Cluster, room: Room) {
         newEntries.push([nkey, 'degrading']);
         break;
       } else if (target.type === TileType.Wall || target.type === TileType.Door) {
-        // Degrade wall/door integrity
-        const integrity = tileIntegrity(cluster, nx, ny);
-        const newIntegrity = integrity - 1;
-        if (newIntegrity <= 0) {
-          // Breach the tile — convert to corrupted floor
-          breachTile(cluster, nx, ny);
-          newEntries.push([nkey, 'degrading']);
-        } else {
-          target.integrity = newIntegrity;
-          // Visual: corruption overlay on the wall
-          target.hazardOverlay = { type: 'corruption', stage: 0 };
+        // Probabilistic degradation: walls resist more than doors
+        const degradeChance = target.type === TileType.Wall ? 0.25 : 0.50;
+        // Always show corruption overlay (visual cracking)
+        target.hazardOverlay = { type: 'corruption', stage: 0 };
+
+        if (Math.random() < degradeChance) {
+          const integrity = tileIntegrity(cluster, nx, ny);
+          const newIntegrity = integrity - 1;
+          if (newIntegrity <= 0) {
+            // Breach the tile — convert to corrupted floor
+            breachTile(cluster, nx, ny);
+            newEntries.push([nkey, 'degrading']);
+          } else {
+            target.integrity = newIntegrity;
+          }
         }
         break;
       }
@@ -266,9 +270,8 @@ function updateMemoryLeak(state: GameState, cluster: Cluster, room: Room) {
     }
   }
 
-  // Flood pressure on doors
+  // Flood pressure on doors — 30% chance per tick to breach
   if ((hz.floodLevel ?? 0) > 0) {
-    if (!hz.floodPressureTicks) hz.floodPressureTicks = new Map();
     const { x1, y1, x2, y2 } = roomInterior(room);
 
     // Check door tiles on room boundary
@@ -285,16 +288,10 @@ function updateMemoryLeak(state: GameState, cluster: Cluster, room: Room) {
             cluster.tiles[ay]?.[ax]?.hazardOverlay?.type === 'flood';
         });
 
-        if (adjacentToFlood) {
-          const dkey = `${x},${y}`;
-          const pressure = (hz.floodPressureTicks.get(dkey) ?? 0) + 1;
-          hz.floodPressureTicks.set(dkey, pressure);
-
-          if (pressure >= 5) {
-            breachTile(cluster, x, y);
-            cluster.tiles[y][x].hazardOverlay = { type: 'flood', stage: 0 };
-            addMessage(state, 'A door bursts open under flood pressure!', 'hazard');
-          }
+        if (adjacentToFlood && Math.random() < 0.30) {
+          breachTile(cluster, x, y);
+          cluster.tiles[y][x].hazardOverlay = { type: 'flood', stage: 0 };
+          addMessage(state, 'A door bursts open under flood pressure!', 'hazard');
         }
       }
     }
