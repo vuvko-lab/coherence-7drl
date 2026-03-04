@@ -15,6 +15,12 @@ const MIN_ROOM_DIM = 3; // minimum interior dimension (excluding walls)
 const CORRIDOR_CHANCE = 0.20;
 const CORRIDOR_WIDTH = 4; // includes walls → 2-tile interior (no 1-tile corridors)
 
+/** Fraction of non-spanning-tree room pairs that get extra doors (creates loops).
+ *  Tuned via graph-stats sweep: 0.5 hits MVC≥2 in 62% of clusters, avg degree ~3. */
+let EXTRA_DOOR_CHANCE = 0.5;
+export function setExtraDoorChance(v: number) { EXTRA_DOOR_CHANCE = v; }
+export function getExtraDoorChance() { return EXTRA_DOOR_CHANCE; }
+
 // ── RNG helpers ──
 
 function randInt(min: number, max: number): number {
@@ -178,10 +184,10 @@ function placeDoors(grid: CellGrid, rooms: Room[]): Map<number, number[]> {
     }
   }
 
-  // Add ~30% of remaining pairs as extra connections (loops / alternate paths)
+  // Add extra connections from remaining pairs (loops / alternate paths)
   for (const key of allPairs) {
     if (selectedPairs.has(key)) continue;
-    if (Math.random() < 0.3) {
+    if (Math.random() < EXTRA_DOOR_CHANCE) {
       selectedPairs.add(key);
     }
   }

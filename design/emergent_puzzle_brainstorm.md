@@ -221,13 +221,26 @@ Currently `assignRoomTypes()` in `cluster.ts` picks hazard rooms **randomly** fr
 
 ### Current Map Generation Recap
 
-1. BSP recursive division → 10-20 rooms per cluster
+1. BSP recursive division → ~43 rooms per cluster (empirically measured)
 2. Spanning tree (union-find on shuffled room pairs) guarantees connectivity
-3. ~30% of remaining pairs get extra doors → creates loops / alternate routes
+3. 50% of remaining pairs get extra doors → creates loops / alternate routes (**tuned up from 30%**)
 4. `roomAdjacency: Map<number, number[]>` is already built and available
 5. Entry = leftmost room, Exit = rightmost room (interface exit)
 
-The room graph is **sparse** (spanning tree + ~30% extras ≈ 1.3 edges/node average). This means there are usually few distinct routes, making strategic placement both feasible and impactful.
+### Empirical Topology (measured via `scripts/graph-stats.ts`, 1000 samples)
+
+| Metric | 0.3 (old) | **0.5 (current)** | 0.7 |
+|--------|-----------|---------------------|------|
+| Rooms | 43 | 43 | 43 |
+| Edges | 54 | 63 | 71 |
+| Cycles | 12 | 21 | 29 |
+| Avg degree | 2.52 | 2.94 | 3.31 |
+| Dead ends | 7.7 | 4.3 | 2.4 |
+| Art. points | 4.3 | 2.5 | 1.5 |
+| MVC ≥ 2 | 52% | **62%** | 67% |
+| Paths ≥ 3 | 97% | 98% | 99% |
+
+**0.5 chosen as sweet spot**: MVC≥2 hits the 60% target, dead ends halved, avg degree ~3 (good junction density). Higher values plateau on MVC (structural BSP limit) while making maps feel too open.
 
 ### Algorithms Considered
 
