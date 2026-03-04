@@ -97,6 +97,16 @@ export class Renderer {
               else if (ho.stage === 2) { fg = '#ff4400'; } // trigger trap pulse (urgent)
               else { glyph = '▓'; fg = '#664422'; } // detonated
               break;
+            case 'gravity':
+              if (ho.stage === 2) { glyph = '●'; fg = '#aa44ff'; bg = '#1a0a2a'; }
+              else if (ho.stage === 1) { glyph = '◉'; fg = '#8833cc'; bg = '#140a1a'; }
+              else { fg = '#6622aa'; bg = '#0a0a14'; }
+              break;
+            case 'collapse':
+              if (ho.stage === 0) { fg = '#aa8800'; } // warning flicker
+              else if (ho.stage === 1) { glyph = '░'; fg = '#cc6600'; bg = '#1a0a00'; }
+              else { glyph = '▓'; fg = '#331100'; bg = '#0a0500'; } // collapsed
+              break;
           }
         }
 
@@ -157,21 +167,42 @@ export class Renderer {
 
 export function renderSelfPanel(el: HTMLElement, player: Entity, clusterId: number, tick: number) {
   const hexId = '0x' + player.id.toString(16).toUpperCase().padStart(4, '0');
+  const coherence = player.coherence ?? 100;
+  const maxCoherence = player.maxCoherence ?? 100;
+  const coherencePct = Math.round((coherence / maxCoherence) * 100);
+  const barLen = 12;
+  const filled = Math.round((coherence / maxCoherence) * barLen);
+  const barClass = coherencePct <= 25 ? 'coherence-critical' : coherencePct <= 50 ? 'coherence-low' : '';
+  const barFill = '█'.repeat(filled);
+  const barEmpty = '─'.repeat(barLen - filled);
+
+  const modules = player.modules ?? [];
+  const moduleRows = modules.map(mod => {
+    const isAlertActive = mod.id === 'alert.m' && mod.alertActive;
+    const activeClass = isAlertActive ? ' module-alert-active' : '';
+    const indicator = isAlertActive ? '<span class="module-indicator"> ▲ </span>' : '';
+    const statusClass = mod.status === 'damaged' ? ' status-damaged' : mod.status === 'offline' ? ' status-offline' : '';
+    return `<div class="module-row${activeClass}">` +
+      `<span class="module-name stat-label">&gt; ${mod.id}</span>` +
+      `${indicator}` +
+      `<span class="module-status stat-value${statusClass}">[${mod.status}]</span>` +
+      `</div>`;
+  }).join('\n');
+
   el.innerHTML = `\
 <div class="panel-edge"><span class="corner">┌</span><span class="label">[ SELF ]</span><span class="fill"></span><span class="corner">┐</span></div>
 <div class="panel-body">
-<div><span class="stat-value">${player.name}</span>    <span class="stat-label">${hexId}</span></div>
-<div><span class="stat-label">State:</span> <span class="stat-value">running</span></div>
-<div><span class="stat-label">Coherence:</span> <span class="stat-value">100%</span></div>
-<div><span class="stat-label">Cluster:</span>  <span class="stat-value">${clusterId}</span></div>
-<div><span class="stat-label">Position:</span> <span class="stat-value">(${player.position.x}, ${player.position.y})</span></div>
-<div><span class="stat-label">Tick:</span>     <span class="stat-value">${tick}</span></div>
+<div class="stat-row"><span class="stat-value">${player.name}</span><span class="stat-label">${hexId}</span></div>
+<div class="stat-row"><span class="stat-label">State:</span><span class="stat-value">running</span></div>
+<div class="stat-row"><span class="stat-label">Coherence:</span><span class="stat-value">${coherencePct}%</span></div>
+<div class="coherence-bar ${barClass}"><span class="bar-fill">${barFill}</span><span class="bar-empty">${barEmpty}</span></div>
+<div class="stat-row"><span class="stat-label">Cluster:</span><span class="stat-value">${clusterId}</span></div>
+<div class="stat-row"><span class="stat-label">Position:</span><span class="stat-value">(${player.position.x}, ${player.position.y})</span></div>
+<div class="stat-row"><span class="stat-label">Tick:</span><span class="stat-value">${tick}</span></div>
 <div class="panel-sep"><span class="fill"></span><span class="label">modules</span><span class="fill"></span></div>
-<div><span class="stat-label">&gt; alert.m     [loaded]</span></div>
-<div><span class="stat-label">&gt; overclock.m [loaded]</span></div>
-<div><span class="stat-label">&gt; corrupt.m   [loaded]</span></div>
+${moduleRows}
 <div class="panel-sep"><span class="fill"></span><span class="label">perms</span><span class="fill"></span></div>
-<div><span class="stat-label">engineer / r+w+x</span></div>
+<div class="stat-row"><span class="stat-label">engineer / r+w+x</span></div>
 </div>
 <div class="panel-edge"><span class="corner">└</span><span class="fill"></span><span class="corner">┘</span></div>`;
 }

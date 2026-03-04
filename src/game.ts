@@ -5,7 +5,7 @@ import {
 import { generateCluster, placeEntryPoint } from './cluster';
 import { computeFOV } from './fov';
 import { findPath } from './pathfinding';
-import { updateHazards, onPlayerEnterRoom, getPlayerRoom, applyTileHazardToPlayer } from './hazards';
+import { updateHazards, onPlayerEnterRoom, getPlayerRoom, applyTileHazardToPlayer, updateAlertModule } from './hazards';
 
 export function createGame(): GameState {
   const cluster = generateCluster(0);
@@ -20,6 +20,13 @@ export function createGame(): GameState {
     clusterId: 0,
     speed: 10,
     energy: 0,
+    coherence: 100,
+    maxCoherence: 100,
+    modules: [
+      { id: 'alert.m', status: 'loaded' },
+      { id: 'overclock.m', status: 'loaded' },
+      { id: 'corrupt.m', status: 'loaded' },
+    ],
   };
 
   const state: GameState = {
@@ -173,6 +180,7 @@ export function processAction(state: GameState, action: PlayerAction): boolean {
     // Update hazards
     updateHazards(state);
     applyTileHazardToPlayer(state);
+    updateAlertModule(state);
 
     // Process other entities (placeholder for speed-based turns)
     for (const entity of state.entities) {
@@ -245,6 +253,7 @@ export function stepAutoPath(state: GameState): boolean {
     }
     updateHazards(state);
     applyTileHazardToPlayer(state);
+    updateAlertModule(state);
 
     return true;
   }

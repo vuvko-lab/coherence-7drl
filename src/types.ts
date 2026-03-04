@@ -8,7 +8,7 @@ export enum TileType {
   InterfaceExit,
 }
 
-export type HazardOverlayType = 'corruption' | 'flood' | 'spark' | 'scorch' | 'beam';
+export type HazardOverlayType = 'corruption' | 'flood' | 'spark' | 'scorch' | 'beam' | 'gravity' | 'collapse';
 
 export interface HazardOverlay {
   type: HazardOverlayType;
@@ -26,6 +26,7 @@ export interface Tile {
   visible: boolean;
   seen: boolean;
   hazardOverlay?: HazardOverlay;
+  integrity?: number; // wall=3, door=2; corruption degrades to 0 → floor
 }
 
 // ── Geometry ──
@@ -52,7 +53,9 @@ export type RoomType =
   | 'firewall'
   | 'unstable'
   | 'quarantine'
-  | 'echo_chamber';
+  | 'echo_chamber'
+  | 'gravity_well'
+  | 'cascade';
 
 export type CorruptionStage = 'degrading' | 'corrupted' | 'collapsed';
 
@@ -89,6 +92,19 @@ export interface RoomHazardState {
 
   // Quarantine
   locked?: boolean;
+
+  // Gravity well
+  singularityPos?: Position;
+  pullInterval?: number;
+  lastPullTick?: number;
+
+  // Cascade failure
+  cascadeEdge?: 'top' | 'bottom' | 'left' | 'right';
+  cascadeProgress?: number;
+  cascadeActivated?: boolean;
+
+  // Memory leak door pressure
+  floodPressureTicks?: Map<string, number>; // key: "x,y" of door tile
 }
 
 export interface Room {
@@ -117,6 +133,17 @@ export interface Cluster {
   roomAdjacency: Map<number, number[]>; // room id -> adjacent room ids (via doors)
 }
 
+// ── Modules ──
+
+export type ModuleStatus = 'loaded' | 'damaged' | 'offline';
+export type ModuleId = 'alert.m' | 'overclock.m' | 'corrupt.m' | 'cloak.m' | 'spoof.m';
+
+export interface PlayerModule {
+  id: ModuleId;
+  status: ModuleStatus;
+  alertActive?: boolean; // alert.m only: currently detecting a threat?
+}
+
 // ── Entity ──
 
 export interface Entity {
@@ -128,6 +155,9 @@ export interface Entity {
   clusterId: number;
   speed: number; // lower = faster
   energy: number;
+  coherence?: number;
+  maxCoherence?: number;
+  modules?: PlayerModule[];
 }
 
 // ── Game State ──

@@ -430,6 +430,8 @@ const HAZARD_WEIGHTS: { type: RoomType; weight: number }[] = [
   { type: 'unstable', weight: 3 },
   { type: 'quarantine', weight: 2 },
   { type: 'echo_chamber', weight: 1 },
+  { type: 'gravity_well', weight: 2 },
+  { type: 'cascade', weight: 2 },
 ];
 
 function weightedPick(pool: { type: RoomType; weight: number }[]): RoomType {
@@ -594,6 +596,54 @@ function initRoomHazards(tiles: Tile[][], rooms: Room[]) {
           }
         }
         room.hazardState = {};
+        break;
+      }
+
+      case 'gravity_well': {
+        // Place singularity at room center
+        const cx = Math.floor(room.x + room.w / 2);
+        const cy = Math.floor(room.y + room.h / 2);
+        room.hazardState = {
+          singularityPos: { x: cx, y: cy },
+          pullInterval: 3,
+          lastPullTick: 0,
+        };
+        // Singularity glyph
+        tiles[cy][cx].glyph = '●';
+        tiles[cy][cx].fg = '#aa44ff';
+        tiles[cy][cx].hazardOverlay = { type: 'gravity', stage: 2 };
+        // Directional arrows on interior tiles
+        for (let y = innerY1; y <= innerY2; y++) {
+          for (let x = innerX1; x <= innerX2; x++) {
+            if (x === cx && y === cy) continue;
+            if (tiles[y][x].type !== TileType.Floor) continue;
+            const dx = cx - x;
+            const dy = cy - y;
+            const dist = Math.abs(dx) + Math.abs(dy);
+            const stage = dist <= 2 ? 1 : 0;
+            tiles[y][x].hazardOverlay = { type: 'gravity', stage };
+          }
+        }
+        break;
+      }
+
+      case 'cascade': {
+        // Choose a random edge for collapse direction
+        const edges: Array<'top' | 'bottom' | 'left' | 'right'> = ['top', 'bottom', 'left', 'right'];
+        const edge = edges[randInt(0, 3)];
+        room.hazardState = {
+          cascadeEdge: edge,
+          cascadeProgress: 0,
+          cascadeActivated: false,
+        };
+        // Subtle warning tint on floor
+        for (let y = innerY1; y <= innerY2; y++) {
+          for (let x = innerX1; x <= innerX2; x++) {
+            if (tiles[y]?.[x]?.type === TileType.Floor) {
+              tiles[y][x].bg = '#1a1a0a';
+            }
+          }
+        }
         break;
       }
     }

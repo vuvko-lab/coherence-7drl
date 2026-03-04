@@ -103,6 +103,65 @@ body {
   color: #44bb77;
 }
 
+#panel-self .stat-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1ch;
+}
+
+#panel-self .module-row {
+  display: flex;
+  gap: 1ch;
+}
+
+#panel-self .module-row .module-name {
+  flex: 1;
+  min-width: 0;
+}
+
+#panel-self .module-row .module-status {
+  flex-shrink: 0;
+  text-align: right;
+}
+
+#panel-self .module-row.module-alert-active .module-name,
+#panel-self .module-row.module-alert-active .module-status {
+  color: #ff6633;
+}
+
+#panel-self .module-row.module-alert-active .module-indicator {
+  color: #ff4444;
+}
+
+#panel-self .module-row .module-status.status-damaged {
+  color: #ff8800;
+}
+
+#panel-self .module-row .module-status.status-offline {
+  color: #ff2222;
+}
+
+#panel-self .coherence-bar {
+  display: flex;
+  gap: 1ch;
+}
+
+#panel-self .coherence-bar .bar-fill {
+  color: #44bb77;
+}
+
+#panel-self .coherence-bar .bar-empty {
+  color: #1a2a1a;
+}
+
+#panel-self .coherence-bar.coherence-low .bar-fill {
+  color: #ff8800;
+}
+
+#panel-self .coherence-bar.coherence-critical .bar-fill {
+  color: #ff4444;
+}
+
 /* --- Map --- */
 #map-container {
   grid-area: map;
