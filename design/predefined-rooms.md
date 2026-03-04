@@ -200,14 +200,54 @@ Room types are assigned post-generation to leaf rooms produced by recursive divi
 
 ---
 
+## 8. Gravity Well
+
+**Lore**: A rogue gravitational subroutine has formed a singularity at the center of this room, pulling everything toward it.
+
+**Visuals**:
+
+| Element | Glyph | Color | BG |
+|---------|-------|-------|----|
+| Singularity | `●` | `#aa44ff` | `#1a0a2a` |
+| Near field (dist ≤ 2) | `◉` | `#8833cc` | `#140a1a` |
+| Far field (dist > 2) | tile glyph | `#6622aa` | `#0a0a14` |
+
+**Mechanics**:
+
+- Singularity placed at room center
+- Every 3 ticks, player is pulled 1 tile toward singularity (prefers longer axis)
+- Pull only moves along one axis at a time
+- Pull is blocked by unwalkable tiles
+- Standing on singularity: 8-15 coherence damage per pull tick
+- Directional arrows displayed on interior floor tiles indicating pull direction
+
+**Sound propagation**:
+
+- On entry: `"You feel a gravitational pull toward the center..."` (hazard)
+- On pull: `"The gravity well pulls you inward!"` (hazard)
+- On singularity: `"The singularity tears at your coherence!"` (hazard)
+
+**Alert.m interaction**: Always detected from current room and adjacent rooms.
+
+**Tactical decision**: Move perpendicular to the pull direction to traverse safely. Time your movements between pull ticks. Standing still means being dragged to the center.
+
+---
+
+## ~~9. Cascade Failure~~ (removed)
+
+~~**Lore**: A structural subsystem is failing, causing the room's floor to progressively collapse from one edge inward.~~
+
+~~**Mechanics**: Room picks a random collapse edge at generation. Activated on player entry. 3-stage wave (warning → crumble → collapsed) sweeps from chosen edge every 2 ticks. Collapsed tiles become impassable. Standing on collapsed tile: 10-20 coherence damage.~~
+
+---
+
 ## Room Assignment Rules
 
 - Assigned post-generation to leaf rooms from recursive division
-- 1-3 special rooms per cluster (scales: +1 per 3 cluster depth)
-- No duplicate types in same cluster
+- 1-3 special rooms per cluster (no duplicate types)
 - Minimum 3x3 interior (9 cells) for any special room
 - Entry/exit rooms are never special
-- Weighted pool: corrupted (3), trigger_trap (2), memory_leak (2), firewall (1), unstable (3), quarantine (2), echo_chamber (1)
+- Weighted pool: corrupted (3), trigger_trap (2), memory_leak (2), firewall (1), unstable (3), quarantine (2), echo_chamber (1), gravity_well (2)
 
 ## Sound Propagation
 
