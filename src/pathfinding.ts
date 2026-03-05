@@ -1,4 +1,4 @@
-import { Cluster, Position } from './types';
+import { Cluster, Position, TileType } from './types';
 
 // BFS pathfinding on walkable tiles (4-directional)
 
@@ -15,8 +15,9 @@ export function findPath(cluster: Cluster, from: Position, to: Position): Positi
   const w = cluster.width;
   const h = cluster.height;
 
-  // Target must be walkable
-  if (!cluster.tiles[to.y]?.[to.x]?.walkable) return null;
+  // Target must be walkable or a closed door
+  const toTile = cluster.tiles[to.y]?.[to.x];
+  if (!toTile || (!toTile.walkable && toTile.type !== TileType.Door)) return null;
 
   const visited = new Set<string>();
   const parent = new Map<string, string>();
@@ -46,7 +47,9 @@ export function findPath(cluster: Cluster, from: Position, to: Position): Positi
       if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
       const nk = key({ x: nx, y: ny });
       if (visited.has(nk)) continue;
-      if (!cluster.tiles[ny][nx].walkable) continue;
+      const tile = cluster.tiles[ny][nx];
+      // Allow walking through walkable tiles and closed doors (player will bump-open them)
+      if (!tile.walkable && tile.type !== TileType.Door) continue;
 
       visited.add(nk);
       parent.set(nk, key(current));

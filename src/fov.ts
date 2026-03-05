@@ -13,12 +13,12 @@ const TRANSFORMS: TransformFn[] = [
   (row, col) => ({ x: row, y: col }),     // East
 ];
 
-function isOpaque(cluster: Cluster, x: number, y: number, origin: Position): boolean {
+function isOpaque(cluster: Cluster, x: number, y: number, _origin: Position): boolean {
   if (x < 0 || x >= cluster.width || y < 0 || y >= cluster.height) return true;
   const tile = cluster.tiles[y][x];
-  // Doors block LOS unless the player is standing on them
+  // Closed doors block LOS, open doors are transparent
   if (tile.type === TileType.Door) {
-    return !(x === origin.x && y === origin.y);
+    return !tile.doorOpen;
   }
   return !tile.transparent;
 }

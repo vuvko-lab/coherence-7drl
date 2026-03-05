@@ -27,6 +27,8 @@ export interface Tile {
   seen: boolean;
   hazardOverlay?: HazardOverlay;
   integrity?: number; // wall=3, door=2; corruption degrades to 0 → floor
+  doorOpen?: boolean; // true = open, undefined/false = closed
+  doorCloseTick?: number; // tick when door was last vacated (for auto-close)
 }
 
 // ── Geometry ──

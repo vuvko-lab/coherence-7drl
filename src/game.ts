@@ -1,11 +1,29 @@
 import {
-  GameState, Entity, Cluster, Position, PlayerAction,
+  GameState, Entity, Cluster, Position, PlayerAction, Tile,
   TileType, DIR_DELTA, GameMessage,
 } from './types';
 import { generateCluster, placeEntryPoint } from './cluster';
 import { computeFOV } from './fov';
 import { findPath } from './pathfinding';
 import { updateHazards, onPlayerEnterRoom, getPlayerRoom, applyTileHazardToPlayer, updateAlertModule } from './hazards';
+
+const DOOR_CLOSE_DELAY = 5; // ticks before an unoccupied open door auto-closes
+
+function openDoor(tile: Tile) {
+  tile.doorOpen = true;
+  tile.walkable = true;
+  tile.transparent = true;
+  tile.glyph = '▯';
+  tile.doorCloseTick = undefined;
+}
+
+function closeDoor(tile: Tile) {
+  tile.doorOpen = false;
+  tile.walkable = false;
+  tile.transparent = false;
+  tile.glyph = '+';
+  tile.doorCloseTick = undefined;
+}
 
 export function createGame(): GameState {
   const cluster = generateCluster(0);
@@ -69,6 +87,15 @@ function tryMove(state: GameState, dx: number, dy: number): boolean {
   const cluster = getCurrentCluster(state);
   const nx = state.player.position.x + dx;
   const ny = state.player.position.y + dy;
+
+  if (nx < 0 || nx >= cluster.width || ny < 0 || ny >= cluster.height) return false;
+
+  // Bump-to-open: closed door (glyph '+') → open it, costs a turn, don't move
+  const targetTile = cluster.tiles[ny][nx];
+  if (targetTile.type === TileType.Door && !targetTile.doorOpen && targetTile.glyph === '+') {
+    openDoor(targetTile);
+    return true;
+  }
 
   if (!isWalkable(cluster, nx, ny)) {
     return false;
@@ -143,6 +170,37 @@ function tryTransfer(state: GameState): boolean {
   return true;
 }
 
+// ── Door auto-close ──
+
+function updateDoors(state: GameState): boolean {
+  const cluster = getCurrentCluster(state);
+  const px = state.player.position.x;
+  const py = state.player.position.y;
+  let changed = false;
+
+  for (let y = 0; y < cluster.height; y++) {
+    for (let x = 0; x < cluster.width; x++) {
+      const tile = cluster.tiles[y][x];
+      if (tile.type !== TileType.Door || !tile.doorOpen) continue;
+
+      // Check if occupied by player or entity
+      const occupied = (x === px && y === py) ||
+        state.entities.some(e => e.clusterId === state.currentClusterId && e.position.x === x && e.position.y === y);
+
+      if (occupied) {
+        tile.doorCloseTick = undefined;
+      } else if (tile.doorCloseTick === undefined) {
+        tile.doorCloseTick = state.tick;
+      } else if (state.tick - tile.doorCloseTick >= DOOR_CLOSE_DELAY) {
+        closeDoor(tile);
+        changed = true;
+      }
+    }
+  }
+
+  return changed;
+}
+
 // ── Turn processing ──
 
 export function processAction(state: GameState, action: PlayerAction): boolean {
@@ -178,6 +236,11 @@ export function processAction(state: GameState, action: PlayerAction): boolean {
       onPlayerEnterRoom(state, newRoom);
     }
 
+    // Update doors (auto-close), recompute FOV if any closed
+    if (updateDoors(state)) {
+      computeFOV(cluster, state.player.position);
+    }
+
     // Update hazards
     updateHazards(state);
     applyTileHazardToPlayer(state);
@@ -208,9 +271,9 @@ export function handleMapClick(state: GameState, target: Position): Position[] {
     return [];
   }
 
-  // Only pathfind to visible, walkable tiles
+  // Only pathfind to seen tiles that are walkable or doors
   const tile = cluster.tiles[target.y]?.[target.x];
-  if (!tile || !tile.walkable || !tile.seen) {
+  if (!tile || !tile.seen || (!tile.walkable && tile.type !== TileType.Door)) {
     state.autoPath = [];
     return [];
   }
@@ -231,6 +294,20 @@ export function stepAutoPath(state: GameState): boolean {
   const next = state.autoPath[0];
   const cluster = getCurrentCluster(state);
 
+  // Check if next step is a closed door — bump to open it
+  const nextTile = cluster.tiles[next.y]?.[next.x];
+  if (nextTile?.type === TileType.Door && !nextTile.doorOpen && nextTile.glyph === '+') {
+    openDoor(nextTile);
+    // Don't shift path — we'll walk through on the next step
+    state.tick++;
+    computeFOV(cluster, state.player.position);
+    if (updateDoors(state)) computeFOV(cluster, state.player.position);
+    updateHazards(state);
+    applyTileHazardToPlayer(state);
+    updateAlertModule(state);
+    return true;
+  }
+
   // Verify next step is still walkable
   if (!isWalkable(cluster, next.x, next.y)) {
     state.autoPath = [];
@@ -247,6 +324,8 @@ export function stepAutoPath(state: GameState): boolean {
     state.autoPath.shift();
     state.tick++;
     computeFOV(cluster, state.player.position);
+
+    if (updateDoors(state)) computeFOV(cluster, state.player.position);
 
     const newRoom = getPlayerRoom(state);
     if (newRoom && (!prevRoom || prevRoom.id !== newRoom.id)) {

@@ -35,7 +35,10 @@ function floorTile(roomId: number): Tile {
 }
 
 function doorTile(roomId: number): Tile {
-  return makeTile(TileType.Door, '+', COLORS.door, roomId);
+  const t = makeTile(TileType.Door, '+', COLORS.door, roomId);
+  t.walkable = false;    // doors start closed
+  t.transparent = false;
+  return t;
 }
 
 function interfaceTile(): Tile {
@@ -50,7 +53,7 @@ function isOuterPos(y: number, x: number): boolean {
 
 function wallGlyph(cells: CellType[][], x: number, y: number, outer: boolean): string {
   const isWall = (ty: number, tx: number) => {
-    if (ty < 0 || ty >= CLUSTER_HEIGHT || tx < 0 || tx >= CLUSTER_WIDTH) return true;
+    if (ty < 0 || ty >= CLUSTER_HEIGHT || tx < 0 || tx >= CLUSTER_WIDTH) return false;
     return cells[ty][tx] === 'wall' || cells[ty][tx] === 'door';
   };
 
@@ -428,6 +431,7 @@ function initRoomHazards(tiles: Tile[][], rooms: Room[]) {
               tiles[y][x].glyph = '▪';
               tiles[y][x].fg = '#ff2222';
               tiles[y][x].walkable = false;
+              tiles[y][x].doorOpen = false;
             }
           }
         }
