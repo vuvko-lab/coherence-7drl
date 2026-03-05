@@ -85,6 +85,8 @@ const TOGGLE_LABELS: Record<string, string> = {
   godMode: 'god mode',
   invisibleMode: 'invisible',
   showRoomLabels: 'room labels',
+  showCollapseOverlay: 'collapse heatmap',
+  showFunctionalOverlay: 'functional tags',
   showAlertOverlay: 'alert overlay',
 };
 
@@ -105,6 +107,8 @@ function initAdminPanel() {
 <button class="admin-btn admin-toggle" data-toggle="godMode">&gt; god mode: OFF</button>
 <button class="admin-btn admin-toggle" data-toggle="invisibleMode">&gt; invisible: OFF</button>
 <button class="admin-btn admin-toggle" data-toggle="showRoomLabels">&gt; room labels: OFF</button>
+<button class="admin-btn admin-toggle" data-toggle="showCollapseOverlay">&gt; collapse heatmap: OFF</button>
+<button class="admin-btn admin-toggle" data-toggle="showFunctionalOverlay">&gt; functional tags: OFF</button>
 <button class="admin-btn admin-toggle" data-toggle="showAlertOverlay">&gt; alert overlay: OFF</button>
 <div class="panel-sep"><span class="fill"></span></div>
 <div class="stat-row"><span class="stat-label">seed:</span><input class="admin-seed-input" type="text" value="${state.seed}"></div>
@@ -122,7 +126,7 @@ ${buttons}
   // Wire up toggle buttons
   adminEl.querySelectorAll('.admin-toggle').forEach(btn => {
     btn.addEventListener('click', () => {
-      const key = (btn as HTMLElement).dataset.toggle as 'mapReveal' | 'godMode' | 'invisibleMode' | 'showRoomLabels' | 'showAlertOverlay';
+      const key = (btn as HTMLElement).dataset.toggle as 'mapReveal' | 'godMode' | 'invisibleMode' | 'showRoomLabels' | 'showCollapseOverlay' | 'showFunctionalOverlay' | 'showAlertOverlay';
       (state as any)[key] = !(state as any)[key];
       const label = TOGGLE_LABELS[key] ?? key;
       const val = (state as any)[key];
@@ -205,7 +209,7 @@ ${buttons}
 
 function updateAdminPanel() {
   adminEl.querySelectorAll('.admin-toggle').forEach(btn => {
-    const key = (btn as HTMLElement).dataset.toggle as 'mapReveal' | 'godMode' | 'invisibleMode' | 'showRoomLabels' | 'showAlertOverlay';
+    const key = (btn as HTMLElement).dataset.toggle as 'mapReveal' | 'godMode' | 'invisibleMode' | 'showRoomLabels' | 'showCollapseOverlay' | 'showFunctionalOverlay' | 'showAlertOverlay';
     const label = TOGGLE_LABELS[key] ?? key;
     const val = (state as any)[key];
     (btn as HTMLElement).textContent = `> ${label}: ${val ? 'ON' : 'OFF'}`;
@@ -228,7 +232,8 @@ function renderAll() {
   const alertOverlay = state.showAlertOverlay && state.alertFill
     ? { fill: state.alertFill, threats: state.alertThreats, budget: 15 }
     : undefined;
-  renderer.render(currentCluster, state.entities, state.player.position, state.mapReveal, state.showRoomLabels, alertOverlay);
+  const collapseOverlay = state.showCollapseOverlay ? currentCluster.collapseMap : undefined;
+  renderer.render(currentCluster, state.entities, state.player.position, state.mapReveal, state.showRoomLabels, alertOverlay, collapseOverlay, state.showFunctionalOverlay);
   renderSelfPanel(panelEl, state.player, state.currentClusterId, state.tick, state.debugMode, state.mapReveal, state.godMode, state.invisibleMode, state.seed);
   renderLogs(logGeneralEl, logAlertEl, state.messages);
 

@@ -143,6 +143,7 @@ export interface Room {
   h: number;
   roomType: RoomType;
   tags: RoomTags;
+  collapse: number; // infrastructure collapse intensity [0, 1]
   hazardState?: RoomHazardState;
   containedHazards: Set<HazardOverlayType>;
 }
@@ -162,6 +163,7 @@ export interface Cluster {
   interfaces: InterfaceExit[];
   wallAdjacency: Map<number, number[]>;  // rooms sharing a wall
   doorAdjacency: Map<number, number[]>;  // rooms connected through doors
+  collapseMap: number[][];               // per-tile collapse intensity [0, 1]
 }
 
 // ── Modules ──
@@ -210,6 +212,8 @@ export interface GameState {
   godMode: boolean;
   invisibleMode: boolean;
   showRoomLabels: boolean;
+  showCollapseOverlay: boolean;
+  showFunctionalOverlay: boolean;
   showAlertOverlay: boolean;
   alertFill?: Map<string, number>;
   alertThreats?: { x: number; y: number; desc: string }[];

@@ -1,4 +1,25 @@
 import { Cluster, Entity, Position, COLORS, Room, TileType } from './types';
+import type { FunctionalTag } from './types';
+
+const FUNC_TAG_ABBREV: Record<FunctionalTag, string> = {
+  server_rack: 'SRV', reactor: 'RCT', medbay: 'MED', bridge: 'BRG',
+  cargo: 'CRG', barracks: 'BRK', lab: 'LAB', armory: 'ARM',
+  comms: 'COM', maintenance: 'MNT', hangar: 'HNG', archive: 'ARC',
+  sensor_matrix: 'SEN',
+};
+
+const FUNC_TAG_COLOR: Record<string, string> = {
+  // Infrastructure — cyan
+  server_rack: '#44cccc', maintenance: '#44cccc', reactor: '#44cccc',
+  // Military — red
+  armory: '#cc4444', bridge: '#cc4444',
+  // Science — purple
+  lab: '#aa44cc', sensor_matrix: '#aa44cc', archive: '#aa44cc',
+  // Living — green
+  barracks: '#44cc66', medbay: '#44cc66',
+  // Logistics — yellow
+  cargo: '#ccaa44', hangar: '#ccaa44', comms: '#ccaa44',
+};
 
 const ROOM_TYPE_SHORT: Record<string, string> = {
   normal: 'N', corrupted: 'C', trigger_trap: 'T', memory_leak: 'M',
@@ -100,6 +121,8 @@ export class Renderer {
     mapReveal = false,
     showRoomLabels = false,
     alertOverlay?: { fill?: Map<string, number>; threats?: { x: number; y: number }[]; budget: number },
+    collapseOverlay?: number[][],
+    showFunctionalOverlay = false,
   ) {
     const pathSet = new Set(this.pathHighlight.map(p => `${p.x},${p.y}`));
     const threatSet = alertOverlay?.threats
@@ -189,6 +212,21 @@ export class Renderer {
           }
         }
 
+        // Collapse heatmap overlay
+        if (collapseOverlay) {
+          const c = collapseOverlay[y]?.[x] ?? 0;
+          if (c < 0.3) {
+            const i = c / 0.3;
+            bg = `rgb(${Math.round(10 + i * 5)},${Math.round(15 + i * 5)},${Math.round(30 + i * 20)})`;
+          } else if (c < 0.6) {
+            const i = (c - 0.3) / 0.3;
+            bg = `rgb(${Math.round(30 + i * 20)},${Math.round(25 + i * 15)},10)`;
+          } else {
+            const i = (c - 0.6) / 0.4;
+            bg = `rgb(${Math.round(30 + i * 40)},10,10)`;
+          }
+        }
+
         cell.textContent = glyph;
         cell.style.color = fg;
         cell.style.backgroundColor = bg;
@@ -232,6 +270,28 @@ export class Renderer {
             if (lx === px && cy === py) continue;
             this.cells[cy][lx].textContent = label[i];
             this.cells[cy][lx].style.color = debugRoomColor(room);
+            this.cells[cy][lx].style.backgroundColor = '#0a0a0a';
+          }
+        }
+      }
+    }
+
+    // Debug overlay: functional tags at room centers
+    if (showFunctionalOverlay) {
+      for (const room of cluster.rooms) {
+        const tag = room.tags.functional;
+        if (!tag) continue;
+        const abbrev = FUNC_TAG_ABBREV[tag] ?? '???';
+        const color = FUNC_TAG_COLOR[tag] ?? '#888888';
+        const cx = Math.floor(room.x + room.w / 2);
+        const cy = Math.floor(room.y + room.h / 2);
+        const startX = cx - Math.floor(abbrev.length / 2);
+        for (let i = 0; i < abbrev.length; i++) {
+          const lx = startX + i;
+          if (lx >= 0 && lx < this.width && cy >= 0 && cy < this.height) {
+            if (lx === px && cy === py) continue;
+            this.cells[cy][lx].textContent = abbrev[i];
+            this.cells[cy][lx].style.color = color;
             this.cells[cy][lx].style.backgroundColor = '#0a0a0a';
           }
         }
@@ -470,6 +530,7 @@ export function renderOverviewPanel(
       `<div class="stat-row"><span class="stat-label">cosmetic</span><span class="room-tags">${cosTag}</span></div>` +
       `<div class="panel-sep"><span class="fill"></span><span class="label">geometry</span><span class="fill"></span></div>` +
       `<div class="stat-row"><span class="stat-label">bounds</span>${detailRoom.w}x${detailRoom.h} at (${detailRoom.x},${detailRoom.y})</div>` +
+      `<div class="stat-row"><span class="stat-label">collapse</span>${detailRoom.collapse.toFixed(2)}</div>` +
       `<div class="stat-row"><span class="stat-label">interior</span>${interior} tiles</div>` +
       `<div class="stat-row"><span class="stat-label">doors</span>${doorDetail}</div>` +
       `<div class="panel-sep"><span class="fill"></span><span class="label">connections</span><span class="fill"></span></div>` +

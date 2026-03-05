@@ -1,11 +1,12 @@
 import {
   Cluster, Tile, TileType, Room, Position, InterfaceExit,
-  RoomType, CorruptionStage, HazardOverlayType,
+  RoomType, CorruptionStage, HazardOverlayType, FunctionalTag,
   CLUSTER_WIDTH, CLUSTER_HEIGHT, COLORS,
   createRoomTags,
 } from './types';
 import { generate, CellType, RoomDef, Hall } from './gen-halls';
-import { random, randInt } from './rng';
+import { random, randInt, pick } from './rng';
+import { initNoise, collapseNoise } from './noise';
 
 // ── Tile factories ──
 
@@ -291,18 +292,52 @@ export function placeEntryPoint(tiles: Tile[][], _rooms: Room[]): Position {
 
 // ── Room type assignment ──
 
-const HAZARD_WEIGHTS: { type: RoomType; weight: number }[] = [
-  { type: 'corrupted', weight: 3 },
+// ── Collapse heatmap ──
+
+function generateCollapseMap(clusterId: number): number[][] {
+  initNoise();
+  const offsetX = clusterId * CLUSTER_WIDTH;
+  const map: number[][] = [];
+  for (let y = 0; y < CLUSTER_HEIGHT; y++) {
+    map[y] = [];
+    for (let x = 0; x < CLUSTER_WIDTH; x++) {
+      map[y][x] = collapseNoise(x + offsetX, y, 0.08, 2, 0.5);
+    }
+  }
+  return map;
+}
+
+function sampleRoomCollapse(room: Room, collapseMap: number[][]): number {
+  const cx = Math.floor(room.x + room.w / 2);
+  const cy = Math.floor(room.y + room.h / 2);
+  const safeX = Math.max(0, Math.min(CLUSTER_WIDTH - 1, cx));
+  const safeY = Math.max(0, Math.min(CLUSTER_HEIGHT - 1, cy));
+  return collapseMap[safeY][safeX];
+}
+
+// ── Hazard assignment by collapse ──
+
+type HazardTier = { type: RoomType; weight: number }[];
+
+const TIER_SAFE: HazardTier = [];
+const TIER_LOW: HazardTier = [
+  { type: 'echo_chamber', weight: 2 },
+  { type: 'quarantine', weight: 1 },
+];
+const TIER_MID: HazardTier = [
+  { type: 'unstable', weight: 2 },
+  { type: 'firewall', weight: 2 },
+];
+const TIER_HIGH: HazardTier = [
   { type: 'trigger_trap', weight: 2 },
   { type: 'memory_leak', weight: 2 },
-  { type: 'firewall', weight: 1 },
-  { type: 'unstable', weight: 3 },
-  { type: 'quarantine', weight: 2 },
-  { type: 'echo_chamber', weight: 1 },
+];
+const TIER_EXTREME: HazardTier = [
   { type: 'gravity_well', weight: 2 },
+  { type: 'corrupted', weight: 2 },
 ];
 
-function weightedPick(pool: { type: RoomType; weight: number }[]): RoomType {
+function weightedPick(pool: HazardTier): RoomType {
   const total = pool.reduce((s, e) => s + e.weight, 0);
   let r = random() * total;
   for (const entry of pool) {
@@ -312,37 +347,243 @@ function weightedPick(pool: { type: RoomType; weight: number }[]): RoomType {
   return pool[pool.length - 1].type;
 }
 
-function assignRoomTypes(
-  rooms: Room[],
-  _clusterId: number,
-  _roomAdjacency: Map<number, number[]>,
-) {
-  // Find entry/exit rooms (leftmost/rightmost) — never make special
-  const sortedByX = [...rooms].sort((a, b) => a.x - b.x);
-  const entryRoom = sortedByX[0];
-  const exitRoom = sortedByX[sortedByX.length - 1];
-  const excludeIds = new Set([entryRoom.id, exitRoom.id]);
+function hazardTierForCollapse(c: number): HazardTier {
+  if (c < 0.3) return TIER_SAFE;
+  if (c < 0.5) return TIER_LOW;
+  if (c < 0.7) return TIER_MID;
+  if (c < 0.85) return TIER_HIGH;
+  return TIER_EXTREME;
+}
 
-  // Filter candidates: min 3x3 interior (w>=5, h>=5 since walls take 2)
-  const candidates = rooms.filter(r =>
-    !excludeIds.has(r.id) &&
-    (r.w - 2) >= 3 && (r.h - 2) >= 3
+function assignHazardsByCollapse(allRooms: Room[]) {
+  // Find entry/exit by geometric tag — never assign hazards
+  const entryIds = new Set(
+    allRooms.filter(r => r.tags.geometric.has('entry') || r.tags.geometric.has('exit')).map(r => r.id)
   );
 
-  if (candidates.length === 0) return;
+  // Sort rooms by collapse descending so highest-collapse rooms get priority
+  const sorted = [...allRooms]
+    .filter(r => !entryIds.has(r.id))
+    .sort((a, b) => b.collapse - a.collapse);
 
-  // 1-3 special rooms per cluster
-  const numSpecial = Math.min(candidates.length, randInt(1, 3));
+  let hazardCount = 0;
+  const MAX_HAZARDS = 4;
   const usedTypes = new Set<RoomType>();
-  const shuffled = candidates.sort(() => random() - 0.5);
 
-  for (let i = 0; i < numSpecial && i < shuffled.length; i++) {
-    const available = HAZARD_WEIGHTS.filter(e => !usedTypes.has(e.type));
-    if (available.length === 0) break;
+  for (const room of sorted) {
+    if (hazardCount >= MAX_HAZARDS) break;
+
+    const isHall = room.tags.geometric.has('hall');
+    const interior = isHall ? room.w * room.h : (room.w - 2) * (room.h - 2);
+
+    // Halls need high collapse and sufficient length
+    if (isHall) {
+      if (room.collapse < 0.7 || Math.max(room.w, room.h) < 6) continue;
+    } else {
+      // Non-hall rooms need min 3x3 interior
+      if ((room.w - 2) < 3 || (room.h - 2) < 3) continue;
+    }
+    if (interior < 9) continue;
+
+    const tier = hazardTierForCollapse(room.collapse);
+    if (tier.length === 0) continue;
+
+    // Filter out already-used types
+    const available = tier.filter(e => !usedTypes.has(e.type));
+    if (available.length === 0) continue;
 
     const type = weightedPick(available);
     usedTypes.add(type);
-    shuffled[i].roomType = type;
+    room.roomType = type;
+    hazardCount++;
+  }
+}
+
+// ── Functional tag generation (three-pass) ──
+
+const ANCHOR_POOL: FunctionalTag[] = ['reactor', 'bridge', 'armory', 'lab', 'medbay', 'server_rack'];
+
+const PROPAGATION_RULES: Record<FunctionalTag, { tag: FunctionalTag; weight: number }[]> = {
+  reactor: [{ tag: 'maintenance', weight: 4 }, { tag: 'lab', weight: 2 }],
+  medbay: [{ tag: 'lab', weight: 3 }, { tag: 'barracks', weight: 2 }],
+  armory: [{ tag: 'bridge', weight: 2 }, { tag: 'cargo', weight: 2 }],
+  hangar: [{ tag: 'cargo', weight: 4 }, { tag: 'comms', weight: 2 }],
+  bridge: [{ tag: 'comms', weight: 3 }, { tag: 'server_rack', weight: 2 }],
+  lab: [{ tag: 'archive', weight: 2 }, { tag: 'sensor_matrix', weight: 2 }],
+  server_rack: [{ tag: 'comms', weight: 3 }, { tag: 'maintenance', weight: 2 }],
+  cargo: [{ tag: 'hangar', weight: 2 }, { tag: 'maintenance', weight: 2 }],
+  barracks: [{ tag: 'maintenance', weight: 2 }, { tag: 'cargo', weight: 1 }],
+  comms: [{ tag: 'bridge', weight: 2 }, { tag: 'sensor_matrix', weight: 2 }],
+  maintenance: [{ tag: 'cargo', weight: 2 }, { tag: 'maintenance', weight: 1 }],
+  archive: [{ tag: 'lab', weight: 2 }, { tag: 'server_rack', weight: 2 }],
+  sensor_matrix: [{ tag: 'comms', weight: 2 }, { tag: 'lab', weight: 1 }],
+};
+
+const GEO_PREFERENCES: Record<string, { tag: FunctionalTag; weight: number }[]> = {
+  dead_end: [{ tag: 'cargo', weight: 3 }, { tag: 'armory', weight: 2 }, { tag: 'archive', weight: 2 }],
+  hub: [{ tag: 'bridge', weight: 3 }, { tag: 'comms', weight: 2 }, { tag: 'server_rack', weight: 2 }],
+  large: [{ tag: 'cargo', weight: 3 }, { tag: 'hangar', weight: 2 }, { tag: 'reactor', weight: 2 }],
+  small: [{ tag: 'maintenance', weight: 3 }, { tag: 'barracks', weight: 2 }, { tag: 'comms', weight: 2 }],
+};
+
+const HALL_POOL: { tag: FunctionalTag | null; weight: number }[] = [
+  { tag: 'maintenance', weight: 6 },
+  { tag: 'comms', weight: 2 },
+  { tag: null, weight: 2 },
+];
+
+function pickWeighted<T>(pool: { tag: T; weight: number }[]): T {
+  const total = pool.reduce((s, e) => s + e.weight, 0);
+  let r = random() * total;
+  for (const entry of pool) {
+    r -= entry.weight;
+    if (r <= 0) return entry.tag;
+  }
+  return pool[pool.length - 1].tag;
+}
+
+/** BFS distance from a set of source room IDs using doorAdjacency */
+function bfsDistances(sources: Set<number>, doorAdj: Map<number, number[]>): Map<number, number> {
+  const dist = new Map<number, number>();
+  const queue: number[] = [];
+  for (const id of sources) {
+    dist.set(id, 0);
+    queue.push(id);
+  }
+  let head = 0;
+  while (head < queue.length) {
+    const cur = queue[head++];
+    const d = dist.get(cur)!;
+    for (const nb of (doorAdj.get(cur) ?? [])) {
+      if (!dist.has(nb)) {
+        dist.set(nb, d + 1);
+        queue.push(nb);
+      }
+    }
+  }
+  return dist;
+}
+
+function assignFunctionalTags(
+  allRooms: Room[],
+  _wallAdjacency: Map<number, number[]>,
+  doorAdjacency: Map<number, number[]>,
+) {
+  const claimed = new Set<number>(); // rooms that can't be picked as anchors
+
+  function claimWithNeighbors(roomId: number) {
+    claimed.add(roomId);
+    for (const nb of (doorAdjacency.get(roomId) ?? [])) {
+      claimed.add(nb);
+    }
+  }
+
+  // ── Pass 1: Anchor rooms ──
+  const anchorIds = new Set<number>();
+
+  // Entry room → hangar or comms
+  const entryRoom = allRooms.find(r => r.tags.geometric.has('entry'));
+  if (entryRoom) {
+    entryRoom.tags.functional = random() < 0.5 ? 'hangar' : 'comms';
+    anchorIds.add(entryRoom.id);
+    claimWithNeighbors(entryRoom.id);
+  }
+
+  // Exit room → hangar
+  const exitRoom = allRooms.find(r => r.tags.geometric.has('exit'));
+  if (exitRoom && exitRoom !== entryRoom) {
+    exitRoom.tags.functional = 'hangar';
+    anchorIds.add(exitRoom.id);
+    claimWithNeighbors(exitRoom.id);
+  }
+
+  // Pick 2-4 additional anchors, farthest from existing anchors
+  const numExtra = randInt(2, 4);
+  const shuffledPool = [...ANCHOR_POOL].sort(() => random() - 0.5);
+  let poolIdx = 0;
+
+  for (let i = 0; i < numExtra && poolIdx < shuffledPool.length; i++) {
+    const dist = bfsDistances(anchorIds, doorAdjacency);
+    // Find unclaimed non-hall room farthest from existing anchors
+    let bestRoom: Room | null = null;
+    let bestDist = -1;
+    for (const r of allRooms) {
+      if (claimed.has(r.id)) continue;
+      if (r.tags.geometric.has('hall')) continue;
+      const d = dist.get(r.id) ?? 0;
+      if (d > bestDist) { bestDist = d; bestRoom = r; }
+    }
+    if (!bestRoom) break;
+
+    bestRoom.tags.functional = shuffledPool[poolIdx++];
+    anchorIds.add(bestRoom.id);
+    claimWithNeighbors(bestRoom.id);
+  }
+
+  // ── Pass 2: Propagation (BFS from entry) ──
+  // Find entry room id for BFS start
+  const startId = entryRoom?.id ?? allRooms[0]?.id ?? 0;
+  const bfsOrder: number[] = [];
+  const visited = new Set<number>();
+  const bfsQueue = [startId];
+  visited.add(startId);
+  while (bfsQueue.length > 0) {
+    const cur = bfsQueue.shift()!;
+    bfsOrder.push(cur);
+    for (const nb of (doorAdjacency.get(cur) ?? [])) {
+      if (!visited.has(nb)) {
+        visited.add(nb);
+        bfsQueue.push(nb);
+      }
+    }
+  }
+
+  for (const roomId of bfsOrder) {
+    const room = allRooms.find(r => r.id === roomId);
+    if (!room || room.tags.functional !== null) continue;
+
+    const isHall = room.tags.geometric.has('hall');
+
+    // Hall rooms: special pool
+    if (isHall) {
+      const result = pickWeighted(HALL_POOL);
+      room.tags.functional = result;
+      continue;
+    }
+
+    // Collect influence from tagged neighbors
+    const influences: { tag: FunctionalTag; weight: number }[] = [];
+
+    for (const nbId of (doorAdjacency.get(roomId) ?? [])) {
+      const nb = allRooms.find(r => r.id === nbId);
+      if (!nb || nb.tags.functional === null) continue;
+      const rules = PROPAGATION_RULES[nb.tags.functional];
+      if (rules) influences.push(...rules);
+    }
+
+    // Add geometric preferences
+    for (const geoTag of room.tags.geometric) {
+      const prefs = GEO_PREFERENCES[geoTag];
+      if (prefs) influences.push(...prefs);
+    }
+
+    if (influences.length > 0) {
+      room.tags.functional = pickWeighted(influences);
+    }
+  }
+
+  // ── Pass 3: Fill remaining (~30% stay null for pacing) ──
+  const ALL_TAGS: FunctionalTag[] = [
+    'server_rack', 'reactor', 'medbay', 'bridge', 'cargo',
+    'barracks', 'lab', 'armory', 'comms', 'maintenance',
+    'hangar', 'archive', 'sensor_matrix',
+  ];
+
+  for (const room of allRooms) {
+    if (room.tags.functional !== null) continue;
+    // ~30% chance to stay null (generic room)
+    if (random() < 0.3) continue;
+    room.tags.functional = pick(ALL_TAGS);
   }
 }
 
@@ -561,6 +802,7 @@ export function generateCluster(id: number): Cluster {
     h: r.rect.h + 2,
     roomType: 'normal' as RoomType,
     tags: createRoomTags(['room']),
+    collapse: 0,
     containedHazards: new Set<HazardOverlayType>(),
   }));
 
@@ -574,6 +816,7 @@ export function generateCluster(id: number): Cluster {
     h: h.rect.h,
     roomType: 'normal' as RoomType,
     tags: createRoomTags(['hall']),
+    collapse: 0,
     containedHazards: new Set<HazardOverlayType>(),
   }));
 
@@ -586,22 +829,29 @@ export function generateCluster(id: number): Cluster {
   const wallAdjacency = buildWallAdjacency(allRooms, roomIdAt);
   const doorAdjacency = buildDoorAdjacency(allRooms, grid.cells, roomIdAt);
 
-  // Assign special room types (only non-hall rooms)
-  assignRoomTypes(rooms, id, doorAdjacency);
+  // Generate collapse heatmap and sample per room
+  const collapseMap = generateCollapseMap(id);
+  for (const r of allRooms) r.collapse = sampleRoomCollapse(r, collapseMap);
+
+  // Assign hazards based on collapse intensity
+  assignHazardsByCollapse(allRooms);
 
   // Convert grid cells to tiles
   const tiles = gridToTiles(grid.cells, roomIdAt);
 
   // Initialize hazard visuals on tiles
-  initRoomHazards(tiles, rooms);
+  initRoomHazards(tiles, allRooms);
 
   // Compute structural tags
   assignStructuralTags(allRooms, wallAdjacency, doorAdjacency, grid.cells);
 
+  // Assign functional tags (three-pass: anchors → propagation → fill)
+  assignFunctionalTags(allRooms, wallAdjacency, doorAdjacency);
+
   // Extract interface exits (right edge only; left interface is for entry)
   const interfaces = extractInterfaces(grid.cells);
 
-  const cluster = { id, width: CLUSTER_WIDTH, height: CLUSTER_HEIGHT, tiles, rooms: allRooms, interfaces, wallAdjacency, doorAdjacency };
+  const cluster: Cluster = { id, width: CLUSTER_WIDTH, height: CLUSTER_HEIGHT, tiles, rooms: allRooms, interfaces, wallAdjacency, doorAdjacency, collapseMap };
 
   // Debug output
   const hazardRooms = allRooms.filter(r => r.roomType !== 'normal');
