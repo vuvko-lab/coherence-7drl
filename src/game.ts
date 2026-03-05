@@ -4,7 +4,7 @@ import {
   Interactable, DialogChoice,
 } from './types';
 import { generateCluster, placeEntryPoint } from './cluster';
-import { computeFOV, floodFillReveal } from './fov';
+import { computeFOV, floodFillReveal, hasLOS } from './fov';
 import { findPath } from './pathfinding';
 import { updateHazards, onPlayerEnterRoom, getPlayerRoom, applyTileHazardToPlayer, updateAlertModule } from './hazards';
 import { seed as seedRng, generateSeed, randInt } from './rng';
@@ -13,6 +13,8 @@ import {
 } from './ai';
 
 const DOOR_CLOSE_DELAY = 5; // ticks before an unoccupied open door auto-closes
+export const CORRUPT_M_RANGE = 8;
+const MELEE_DAMAGE = 3; // weak unarmed strike (no module)
 
 function openDoor(tile: Tile) {
   tile.doorOpen = true;
@@ -193,6 +195,59 @@ function isWalkable(cluster: Cluster, x: number, y: number): boolean {
   return cluster.tiles[y][x].walkable;
 }
 
+export function getEntityAt(state: GameState, cluster: Cluster, x: number, y: number): Entity | undefined {
+  if (state.player.clusterId === cluster.id &&
+      state.player.position.x === x && state.player.position.y === y) return state.player;
+  return state.entities.find(
+    e => e.clusterId === cluster.id && e.position.x === x && e.position.y === y
+  );
+}
+
+function tryShoot(state: GameState, target: Position): boolean {
+  const cluster = getCurrentCluster(state);
+  const corrupt = state.player.modules?.find(m => m.id === 'corrupt.m' && m.status === 'loaded');
+  if (!corrupt) {
+    addMessage(state, 'No attack module — corrupt.m required.', 'alert');
+    return false;
+  }
+
+  const from = state.player.position;
+  const dx = target.x - from.x;
+  const dy = target.y - from.y;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+
+  if (dist > CORRUPT_M_RANGE) {
+    addMessage(state, 'Target out of range.', 'alert');
+    return false;
+  }
+
+  const targetTile = cluster.tiles[target.y]?.[target.x];
+  if (!targetTile?.visible) {
+    addMessage(state, 'No visible target.', 'alert');
+    return false;
+  }
+
+  if (!hasLOS(cluster, from, target)) {
+    addMessage(state, 'No line of sight.', 'alert');
+    return false;
+  }
+
+  const targetEntity = getEntityAt(state, cluster, target.x, target.y);
+  if (!targetEntity || targetEntity.id === state.player.id) {
+    addMessage(state, 'Nothing to shoot.', 'normal');
+    return false;
+  }
+
+  const damage = 10;
+  if (targetEntity.coherence !== undefined) {
+    targetEntity.coherence = Math.max(0, targetEntity.coherence - damage);
+    addMessage(state,
+      `Corrupt shot hits ${targetEntity.name} for ${damage}. (${targetEntity.coherence}/${targetEntity.maxCoherence})`,
+      'important');
+  }
+  return true;
+}
+
 // ── Player actions ──
 
 function tryMove(state: GameState, dx: number, dy: number): boolean {
@@ -234,6 +289,23 @@ function tryMove(state: GameState, dx: number, dy: number): boolean {
     bumped.currentNodeId = 'root';
     state.openInteractable = { id: bumped.id, clusterId: state.currentClusterId };
     return false;
+  }
+
+  // Bump-into-entity → melee (hostile) or examine (non-hostile)
+  const bumpedEntity = getEntityAt(state, cluster, nx, ny);
+  if (bumpedEntity && bumpedEntity.id !== state.player.id) {
+    if (bumpedEntity.ai?.faction === 'aggressive') {
+      if (bumpedEntity.coherence !== undefined) {
+        bumpedEntity.coherence = Math.max(0, bumpedEntity.coherence - MELEE_DAMAGE);
+        addMessage(state,
+          `You strike ${bumpedEntity.name} for ${MELEE_DAMAGE}. (${bumpedEntity.coherence}/${bumpedEntity.maxCoherence})`,
+          'important');
+      }
+      return true; // costs a turn
+    } else {
+      addMessage(state, `You observe ${bumpedEntity.name}. It does not react.`, 'normal');
+      return false;
+    }
   }
 
   if (!isWalkable(cluster, nx, ny)) {
@@ -367,6 +439,9 @@ export function processAction(state: GameState, action: PlayerAction): boolean {
       break;
     case 'wait':
       acted = true;
+      break;
+    case 'shoot':
+      acted = tryShoot(state, action.target);
       break;
     case 'interact': {
       // Check adjacent tiles for terminals

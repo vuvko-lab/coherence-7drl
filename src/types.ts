@@ -349,7 +349,12 @@ export interface ActionInteract {
   kind: 'interact';
 }
 
-export type PlayerAction = ActionMove | ActionTransfer | ActionWait | ActionDebugToggle | ActionInteract;
+export interface ActionShoot {
+  kind: 'shoot';
+  target: Position;
+}
+
+export type PlayerAction = ActionMove | ActionTransfer | ActionWait | ActionDebugToggle | ActionInteract | ActionShoot;
 
 // ── Constants ──
 

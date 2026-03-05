@@ -2,6 +2,7 @@ import { Direction, PlayerAction, Position } from './types';
 
 type ActionCallback = (action: PlayerAction) => void;
 type ClickCallback = (pos: Position) => void;
+type AimToggleCallback = () => void;
 
 const KEY_MAP: Record<string, Direction> = {
   'ArrowUp': 'up',
@@ -21,11 +22,13 @@ const KEY_MAP: Record<string, Direction> = {
 export class InputHandler {
   private onAction: ActionCallback;
   private onMapClick: ClickCallback;
+  private onAimToggle: AimToggleCallback;
   private bound = false;
 
-  constructor(onAction: ActionCallback, onMapClick: ClickCallback) {
+  constructor(onAction: ActionCallback, onMapClick: ClickCallback, onAimToggle: AimToggleCallback) {
     this.onAction = onAction;
     this.onMapClick = onMapClick;
+    this.onAimToggle = onAimToggle;
   }
 
   bind() {
@@ -69,6 +72,13 @@ export class InputHandler {
     if (e.key === 'e' || e.key === 'E') {
       e.preventDefault();
       this.onAction({ kind: 'interact' });
+      return;
+    }
+
+    // Aim / shoot toggle
+    if (e.key === 'f' || e.key === 'F') {
+      e.preventDefault();
+      this.onAimToggle();
       return;
     }
 

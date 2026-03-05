@@ -126,6 +126,25 @@ export function floodFillReveal(cluster: Cluster, center: Position, radius: numb
   return keys;
 }
 
+/**
+ * Line-of-sight check (Bresenham). Returns true if `to` is visible from `from`
+ * without passing through opaque tiles.
+ */
+export function hasLOS(cluster: Cluster, from: Position, to: Position): boolean {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const steps = Math.max(Math.abs(dx), Math.abs(dy));
+  if (steps === 0) return true;
+  for (let i = 1; i <= steps; i++) {
+    const x = Math.round(from.x + (dx * i) / steps);
+    const y = Math.round(from.y + (dy * i) / steps);
+    if (x === to.x && y === to.y) break;
+    const tile = cluster.tiles[y]?.[x];
+    if (!tile || !tile.transparent) return false;
+  }
+  return true;
+}
+
 export function computeFOV(cluster: Cluster, origin: Position, radius: number = 20) {
   // Clear visibility (keep seen state)
   for (let y = 0; y < cluster.height; y++) {

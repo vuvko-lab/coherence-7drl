@@ -77,6 +77,7 @@ export class Renderer {
   private fontSize = 16;
 
   onCellClick: ((pos: Position) => void) | null = null;
+  onCellRightClick: ((pos: Position) => void) | null = null;
   onCellHover: ((pos: Position | null) => void) | null = null;
 
   get displayWidth() { return this.width; }
@@ -120,6 +121,15 @@ export class Renderer {
       const [cx, cy] = this.display.eventToPosition(e);
       if (cx >= 0 && cx < this.width && cy >= 0 && cy < this.height) {
         this.onCellClick?.({ x: cx, y: cy });
+      }
+    });
+
+    canvas.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      if (!this.display) return;
+      const [cx, cy] = this.display.eventToPosition(e);
+      if (cx >= 0 && cx < this.width && cy >= 0 && cy < this.height) {
+        this.onCellRightClick?.({ x: cx, y: cy });
       }
     });
 
@@ -168,6 +178,7 @@ export class Renderer {
       revealEffects?: RevealEffect[];
       hazardFogMarks?: Map<string, HazardOverlayType>;
       markedEntities?: Set<number>;
+      aimOverlay?: { origin: Position; radius: number; target?: Position };
     },
   ) {
     if (!this.display) return;
@@ -252,9 +263,28 @@ export class Renderer {
           }
         }
 
+        // Aim range overlay
+        if (extras?.aimOverlay && isVisible) {
+          const ao = extras.aimOverlay;
+          const adx = x - ao.origin.x;
+          const ady = y - ao.origin.y;
+          const dist = Math.sqrt(adx * adx + ady * ady);
+          if (dist <= ao.radius) {
+            // Inside range: very subtle yellow tint
+            bg = '#151500';
+            // Ring edge: brighter
+            if (dist > ao.radius - 1.2) bg = '#252500';
+          }
+          // Aimed target cell: bright highlight
+          if (ao.target && ao.target.x === x && ao.target.y === y) {
+            bg = '#3a2a00';
+            fg = '#ffcc00';
+          }
+        }
+
         // Hover highlight
         if (this.hoveredCell?.x === x && this.hoveredCell?.y === y && isVisible) {
-          bg = '#1a3a1a';
+          bg = extras?.aimOverlay ? '#3a2a00' : '#1a3a1a';
         }
 
         // Path highlight
@@ -426,7 +456,7 @@ export function renderSelfPanel(el: HTMLElement, player: Entity, clusterId: numb
     const activeClass = isAlertActive ? ' module-alert-active' : '';
     const indicator = isAlertActive ? '<span class="module-indicator"> ▲ </span>' : '';
     const statusClass = mod.status === 'damaged' ? ' status-damaged' : mod.status === 'offline' ? ' status-offline' : '';
-    return `<div class="module-row${activeClass}">` +
+    return `<div class="module-row${activeClass}" data-module="${mod.id}">` +
       `<span class="module-name stat-label">&gt; ${mod.id}</span>` +
       `${indicator}` +
       `<span class="module-status stat-value${statusClass}">[${mod.status}]</span>` +

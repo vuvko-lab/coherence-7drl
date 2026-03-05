@@ -28,10 +28,11 @@ body {
 #game {
   display: grid;
   grid-template-columns: 260px 1fr;
-  grid-template-rows: 1fr 120px;
+  grid-template-rows: 1fr auto 120px;
   grid-template-areas:
-    "panel map"
-    "log   log";
+    "panel-self   map"
+    "panel-target map"
+    "log          log";
   width: 100%;
   max-width: 1200px;
   height: 100vh;
@@ -94,7 +95,7 @@ body {
 
 /* --- SELF panel --- */
 #panel-self {
-  grid-area: panel;
+  grid-area: panel-self;
   padding: 0;
   line-height: 1.4;
   overflow-y: auto;
@@ -172,6 +173,64 @@ body {
   color: #ff4444;
 }
 
+/* --- TARGET panel --- */
+#panel-target {
+  grid-area: panel-target;
+  color: var(--theme-panel);
+  line-height: 1.4;
+  overflow: hidden;
+  min-height: 0;
+}
+
+#panel-target:empty { display: none; }
+
+#panel-target .panel-body {
+  padding: 2px 6px 4px;
+  font-size: 0.85em;
+}
+
+#panel-target .target-name {
+  color: var(--theme-accent);
+  font-weight: bold;
+  letter-spacing: 0.05em;
+}
+
+#panel-target .target-faction-neutral  { color: #aaaa66; }
+#panel-target .target-faction-aggressive { color: #cc4444; }
+#panel-target .target-faction-friendly { color: #44ccaa; }
+
+#panel-target .target-stat-row {
+  display: flex;
+  gap: 6px;
+  font-size: 0.82em;
+  color: var(--theme-dim);
+}
+
+#panel-target .target-stat-row .t-val {
+  color: var(--theme-fg);
+}
+
+#panel-target .target-bar {
+  margin: 2px 0;
+  font-size: 0.8em;
+  letter-spacing: -0.02em;
+}
+
+#panel-target .target-bar .bar-fill { color: #44cc66; }
+#panel-target .target-bar .bar-low  { color: #cc8800; }
+#panel-target .target-bar .bar-crit { color: #cc2222; }
+#panel-target .target-bar .bar-empty { color: #223322; }
+
+#panel-target .target-aim-hint {
+  font-size: 0.75em;
+  color: #554400;
+  margin-top: 2px;
+}
+
+#panel-target .aim-active .target-aim-hint {
+  color: #ccaa00;
+}
+
 /* --- Map --- */
 #map-container {
   grid-area: map;
@@ -193,6 +252,20 @@ body {
   display: flex;
   justify-content: center;
   align-items: center;
+}
+
+#map-grid-wrap.aim-mode canvas {
+  cursor: crosshair;
+}
+
+#map-container .aim-banner {
+  text-align: center;
+  font-size: 0.8em;
+  color: #ccaa00;
+  background: #1a1400;
+  padding: 2px 0;
+  letter-spacing: 0.1em;
+  flex-shrink: 0;
 }
 
 

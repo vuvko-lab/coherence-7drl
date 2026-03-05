@@ -1,10 +1,11 @@
-import { createGame, processAction, handleMapClick, stepAutoPath, addMessage, exportSave, loadSave, adminRegenCluster, adminTeleportToCluster, grantExitAccess, activateTerminal, executeInteractableAction } from './game';
+import { createGame, processAction, handleMapClick, stepAutoPath, addMessage, exportSave, loadSave, adminRegenCluster, adminTeleportToCluster, grantExitAccess, activateTerminal, executeInteractableAction, getEntityAt, CORRUPT_M_RANGE } from './game';
 import { setDamageParams, getDamageParams, setGenSizeOverride, clearGenSizeOverride, getGenSizeOverride, clusterScaleForId } from './cluster';
 import { Renderer, renderSelfPanel, renderLogs, renderOverviewPanel } from './renderer';
 import { InputHandler } from './input';
 import { PlayerAction, Position, TileType } from './types';
 import { generateSeed } from './rng';
 import { GLITCH_EFFECTS, initGlitch } from './glitch';
+import { hasLOS } from './fov';
 
 // ── Bootstrap ──
 
@@ -35,12 +36,17 @@ function restartGame(newSeed: number) {
 initRenderer();
 
 const panelEl = document.getElementById('panel-self')!;
+const targetPanelEl = document.getElementById('panel-target')!;
+const mapGridWrap = document.getElementById('map-grid-wrap')!;
+const mapContainer = document.querySelector('#map-container') as HTMLElement;
 const logAreaEl = document.getElementById('log-area')!;
 const logGeneralEl = document.getElementById('log-general')!;
 const logAlertEl = document.getElementById('log-alert')!;
 const adminEl = document.getElementById('panel-admin')!;
 const overviewEl = document.getElementById('panel-overview')!;
 let hoveredPos: Position | null = null;
+let aimMode = false;
+let showRangePreview = false; // corrupt.m module hover
 
 // ── Auto-walk timer ──
 
@@ -467,6 +473,109 @@ function closeInteractableOverlay() {
   state.openInteractable = undefined;
 }
 
+// ── Target panel ──
+
+function renderTargetPanel(pos: Position | null) {
+  if (!pos) { targetPanelEl.innerHTML = ''; return; }
+  const cluster = state.clusters.get(state.currentClusterId)!;
+  const tile = cluster.tiles[pos.y]?.[pos.x];
+  if (!tile) { targetPanelEl.innerHTML = ''; return; }
+
+  // Only show panel for seen tiles
+  if (!tile.seen && !tile.visible) { targetPanelEl.innerHTML = ''; return; }
+
+  // Check for entity at position
+  const entity = getEntityAt(state, cluster, pos.x, pos.y);
+  const isPlayer = entity?.id === state.player.id;
+
+  let html = '';
+  html += `<div class="panel-edge"><span class="corner">┌</span><span class="label">[ TARGET ]</span><span class="fill"></span><span class="corner">┐</span></div>`;
+  html += `<div class="panel-body">`;
+
+  if (entity && !isPlayer && tile.visible) {
+    const ai = entity.ai;
+    const faction = ai?.faction ?? 'neutral';
+    const factionLabel = faction === 'aggressive' ? 'HOSTILE' : faction === 'friendly' ? 'ALLIED' : 'NEUTRAL';
+    const maxCoh = entity.maxCoherence ?? 1;
+    const coh = entity.coherence ?? maxCoh;
+    const barLen = 12;
+    const filled = Math.round((coh / maxCoh) * barLen);
+    const pct = coh / maxCoh;
+    const barClass = pct < 0.25 ? 'bar-crit' : pct < 0.5 ? 'bar-low' : 'bar-fill';
+    const bar = `<span class="${barClass}">${'█'.repeat(filled)}</span><span class="bar-empty">${'░'.repeat(barLen - filled)}</span>`;
+
+    const dx = pos.x - state.player.position.x;
+    const dy = pos.y - state.player.position.y;
+    const dist = Math.sqrt(dx * dx + dy * dy).toFixed(1);
+    const inRange = parseFloat(dist) <= CORRUPT_M_RANGE && tile.visible && hasLOS(cluster, state.player.position, pos);
+    const hasCorrM = state.player.modules?.some(m => m.id === 'corrupt.m' && m.status === 'loaded');
+
+    html += `<div class="target-name">${entity.glyph} ${entity.name}</div>`;
+    html += `<div class="target-stat-row"><span>faction:</span><span class="t-val target-faction-${faction}">${factionLabel}</span></div>`;
+    html += `<div class="target-stat-row"><span>dist:</span><span class="t-val">${dist}</span></div>`;
+    if (ai?.aiState) html += `<div class="target-stat-row"><span>state:</span><span class="t-val">${ai.aiState}</span></div>`;
+    html += `<div class="target-bar">${bar} ${coh}/${maxCoh}</div>`;
+    if (faction === 'aggressive') {
+      const hint = hasCorrM
+        ? (inRange ? (aimMode ? '[F] shoot · [RMB] shoot' : '[F] aim · [RMB] shoot') : `out of range (${CORRUPT_M_RANGE}t)`)
+        : 'no corrupt.m loaded';
+      html += `<div class="target-aim-hint${aimMode ? ' aim-active' : ''}">${hint}</div>`;
+    }
+  } else if (entity && isPlayer) {
+    html += `<div class="target-name">@ ${entity.name}</div>`;
+    html += `<div class="target-stat-row"><span>that's you</span></div>`;
+  } else {
+    // Tile info
+    const tileLabel = tile.type === TileType.Door ? (tile.doorOpen ? 'Door (open)' : 'Door')
+      : tile.type === TileType.Wall ? 'Wall'
+      : tile.type === TileType.Floor ? 'Floor'
+      : tile.type === TileType.InterfaceExit ? 'Interface Exit'
+      : tile.type === TileType.Terminal ? 'Terminal'
+      : 'Void';
+    html += `<div class="target-name">${tileLabel}</div>`;
+    if (tile.hazardOverlay) {
+      html += `<div class="target-stat-row"><span>hazard:</span><span class="t-val target-faction-aggressive">${tile.hazardOverlay.type}</span></div>`;
+    }
+    const room = cluster.rooms.find(r => pos.x >= r.x && pos.x < r.x + r.w && pos.y >= r.y && pos.y < r.y + r.h);
+    if (room?.tags.functional) {
+      html += `<div class="target-stat-row"><span>room:</span><span class="t-val">${room.tags.functional}</span></div>`;
+    }
+  }
+
+  html += `</div>`;
+  html += `<div class="panel-edge"><span class="corner">└</span><span class="fill"></span><span class="corner">┘</span></div>`;
+  targetPanelEl.innerHTML = html;
+}
+
+// ── Aim mode ──
+
+function toggleAim() {
+  aimMode = !aimMode;
+  mapGridWrap.classList.toggle('aim-mode', aimMode);
+
+  // Show/hide aim banner
+  let banner = mapContainer.querySelector('.aim-banner');
+  if (aimMode) {
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.className = 'aim-banner';
+      // Insert before the grid wrap
+      mapContainer.insertBefore(banner, mapGridWrap);
+    }
+    banner.textContent = `── AIM MODE ── F/RMB to shoot · Esc to cancel ──`;
+  } else {
+    banner?.remove();
+  }
+  renderAll();
+}
+
+function exitAim() {
+  if (!aimMode) return;
+  aimMode = false;
+  mapGridWrap.classList.remove('aim-mode');
+  mapContainer.querySelector('.aim-banner')?.remove();
+}
+
 function renderAll() {
   const currentCluster = state.clusters.get(state.currentClusterId)!;
 
@@ -479,13 +588,19 @@ function renderAll() {
     ? { fill: state.alertFill, threats: state.alertThreats, budget: 15 }
     : undefined;
   const collapseOverlay = state.showCollapseOverlay ? currentCluster.collapseMap : undefined;
+  const aimOverlay = (aimMode || showRangePreview)
+    ? { origin: state.player.position, radius: CORRUPT_M_RANGE, target: hoveredPos ?? undefined }
+    : undefined;
+
   renderer.render(currentCluster, state.entities, state.player.position, state.mapReveal, state.showRoomLabels, alertOverlay, collapseOverlay, state.showFunctionalOverlay, {
     tick: state.tick,
     revealEffects: state.revealEffects,
     hazardFogMarks: state.hazardFogMarks,
     markedEntities: state.markedEntities,
+    aimOverlay,
   });
   renderSelfPanel(panelEl, state.player, state.currentClusterId, state.tick, state.debugMode, state.mapReveal, state.godMode, state.invisibleMode, state.seed);
+  renderTargetPanel(hoveredPos);
   renderLogs(logGeneralEl, logAlertEl, state.messages);
 
   // Show/hide admin + overview panels based on debug mode
@@ -530,15 +645,41 @@ function onAction(action: PlayerAction) {
   renderAll();
 }
 
+function tryShootAt(pos: Position): boolean {
+  const cluster = state.clusters.get(state.currentClusterId)!;
+  const entity = getEntityAt(state, cluster, pos.x, pos.y);
+  if (!entity || entity.id === state.player.id) return false;
+  if (entity.ai?.faction !== 'aggressive') return false;
+  const dx = pos.x - state.player.position.x;
+  const dy = pos.y - state.player.position.y;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  if (dist > CORRUPT_M_RANGE) return false;
+  const tile = cluster.tiles[pos.y]?.[pos.x];
+  if (!tile?.visible) return false;
+  if (!hasLOS(cluster, state.player.position, pos)) return false;
+  onAction({ kind: 'shoot', target: pos });
+  return true;
+}
+
 function onMapClick(pos: Position) {
   stopAutoWalk();
+
+  // In aim mode: click fires a shot (if valid target), else exits aim
+  if (aimMode) {
+    const shot = tryShootAt(pos);
+    exitAim();
+    if (!shot) renderAll();
+    return;
+  }
+
+  // Left-click on visible hostile in range: shoot directly
+  if (tryShootAt(pos)) return;
 
   // Check if clicking adjacent tile — single step
   const dx = Math.abs(pos.x - state.player.position.x);
   const dy = Math.abs(pos.y - state.player.position.y);
 
   if (dx + dy === 1) {
-    // Single step move
     const dir = pos.x > state.player.position.x ? 'right'
       : pos.x < state.player.position.x ? 'left'
       : pos.y > state.player.position.y ? 'down'
@@ -560,12 +701,35 @@ function onMapClick(pos: Position) {
   }
 }
 
-const input = new InputHandler(onAction, onMapClick);
+const input = new InputHandler(onAction, onMapClick, toggleAim);
 input.bind();
 
 // Wire up renderer click events
 renderer.onCellClick = (pos) => {
   input.handleMapClick(pos);
+};
+
+renderer.onCellRightClick = (pos) => {
+  // Right-click: enter aim and attempt shot, or cancel aim
+  if (aimMode) {
+    const shot = tryShootAt(pos);
+    exitAim();
+    if (!shot) renderAll();
+  } else {
+    aimMode = true;
+    mapGridWrap.classList.add('aim-mode');
+    let banner = mapContainer.querySelector('.aim-banner');
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.className = 'aim-banner';
+      mapContainer.insertBefore(banner, mapGridWrap);
+    }
+    banner.textContent = `── AIM MODE ── click/RMB to shoot · Esc to cancel ──`;
+    // Attempt immediate shot at right-clicked position
+    const shot = tryShootAt(pos);
+    if (shot) exitAim();
+    else renderAll();
+  }
 };
 
 renderer.onCellHover = (pos) => {
@@ -837,8 +1001,30 @@ document.querySelectorAll('.overlay-close').forEach(btn => {
   });
 });
 
+// Wire corrupt.m module hover for range preview
+panelEl.addEventListener('mouseover', (e) => {
+  const row = (e.target as HTMLElement).closest('.module-row') as HTMLElement | null;
+  if (row?.dataset.module === 'corrupt.m') {
+    showRangePreview = true;
+    renderAll();
+  }
+});
+panelEl.addEventListener('mouseout', (e) => {
+  const row = (e.target as HTMLElement).closest('.module-row') as HTMLElement | null;
+  if (row?.dataset.module === 'corrupt.m') {
+    showRangePreview = false;
+    renderAll();
+  }
+});
+
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
+    if (aimMode) {
+      exitAim();
+      renderAll();
+      e.stopPropagation();
+      return;
+    }
     if (interactableOverlay.classList.contains('open')) {
       closeInteractableOverlay();
       renderAll();
