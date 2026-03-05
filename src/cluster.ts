@@ -1,7 +1,7 @@
 import {
   Cluster, Tile, TileType, Room, Position, InterfaceExit,
   RoomType, CorruptionStage, HazardOverlayType, FunctionalTag, ScannerBeam,
-  TerminalDef,
+  TerminalDef, Interactable, DialogNode, DialogChoice,
   CLUSTER_WIDTH, CLUSTER_HEIGHT, COLORS,
   createRoomTags,
 } from './types';
@@ -815,6 +815,415 @@ function state_findKeyTerminal(terminals: TerminalDef[], allRooms: Room[]): Term
   return preferred ?? terminals[Math.floor(random() * terminals.length)];
 }
 
+// ── Interactable placement ──
+
+// Content pools ─────────────────────────────────────────────────────────────
+
+const INFO_LINES: Record<string, string[]> = {
+  generic: [
+    'CLUSTER STATUS: Infrastructure integrity degrading.',
+    'WARNING: Multiple subsystem failures detected.',
+    'COHERENCE FIELD: Measurement error — sensor offline.',
+    'EMERGENCY PROTOCOL ALPHA: Status unknown.',
+    'LAST MAINTENANCE LOG: [TIMESTAMP CORRUPTED]',
+  ],
+  hall: [
+    'CORRIDOR MONITORING: Structural integrity at WARNING threshold.',
+    'TRANSIT SYSTEM: Last movement logged [TIMESTAMP CORRUPTED].',
+    'EMERGENCY ROUTING: Nearest egress — [ROUTING FAILED]',
+    'ATMOSPHERE: Nominal. Data integrity: declining.',
+  ],
+  engine_room: [
+    'PROPULSION STATUS: Main drives offline. Emergency thrusters only.',
+    'FUEL CELLS: 12% remaining. Estimated runtime: unknown.',
+    'COOLANT PRESSURE: CRITICAL. Thermal runaway risk elevated.',
+    'ENGINE LOG: Last entry at tick 000203. Drive failure cascade begun.',
+  ],
+  cargo: [
+    'CARGO MANIFEST: 847 containers logged. 0 containers accessible.',
+    'ENVIRONMENTAL: Temperature anomaly in sector 7G.',
+    'LOADING BAY: Docking clamps engaged. No vessel detected.',
+    'INVENTORY SYSTEM: [DATABASE CORRUPTED — 94% LOST]',
+  ],
+  barracks: [
+    'PERSONNEL STATUS: 0 of 43 crew responding.',
+    'QUARTERS: Life support nominal. Occupancy: none.',
+    'DUTY ROSTER: [ALL ASSIGNMENTS UNFULFILLED]',
+    'RECREATION SYSTEMS: Offline. Last use: [UNKNOWN].',
+  ],
+  maintenance: [
+    'MAINTENANCE QUEUE: 847 unresolved tickets.',
+    'REPAIR SYSTEMS: Automated maintenance offline.',
+    'DIAGNOSTIC: 73% of monitored systems showing failure states.',
+    'TOOLING STATUS: Last calibrated [TIMESTAMP UNAVAILABLE].',
+  ],
+  hangar: [
+    'HANGAR STATUS: Bay doors sealed. Atmosphere nominal.',
+    'VESSEL REGISTRY: 0 of 12 registered craft present.',
+    'LAUNCH SYSTEMS: Offline. Manual override required.',
+    'DOCKING LOG: Last departure at [CORRUPTED TIMESTAMP].',
+  ],
+  reactor: [
+    'REACTOR OUTPUT: 23% nominal capacity.',
+    'CONTAINMENT: Field integrity at 67%. Monitor closely.',
+    'RADIATION LEVELS: Elevated. Exposure advisory active.',
+    'CORE TEMPERATURE: Anomalous. Automated cooling failed.',
+  ],
+  comms: [
+    'SIGNAL STATUS: All outbound channels blocked.',
+    'LAST TRANSMISSION RECEIVED: [DATA CORRUPTED — 2.3KB LOST]',
+    'RELAY NODES: 2 of 9 responding.',
+    'BROADCAST LOG: No transmissions in [DURATION UNKNOWN].',
+  ],
+  lab: [
+    'EXPERIMENT STATUS: All protocols suspended.',
+    'CONTAINMENT FIELDS: 4 of 7 online.',
+    'RESEARCH LOG: Final entry — [CLASSIFIED] [CORRUPTED]',
+    'SAMPLE INVENTORY: [BIOHAZARD CLASSIFICATION — REDACTED]',
+  ],
+  medbay: [
+    'MEDICAL SYSTEMS: Emergency protocols active.',
+    'PATIENT LOG: [ALL RECORDS PURGED]',
+    'PHARMACOLOGICAL: 89% of stores depleted.',
+    'TRIAGE STATUS: No active patients. No inactive patients.',
+  ],
+  armory: [
+    'ARMORY STATUS: All ordnance secured.',
+    'ACCESS LOG: Last authorized entry [TIMESTAMP CORRUPTED].',
+    'SECURITY SYSTEMS: Partial function. Grid integrity: 41%.',
+    'INVENTORY: [CLASSIFIED — ACCESS DENIED]',
+  ],
+  bridge: [
+    'NAVIGATION: Course locked. Manual override offline.',
+    'HELM: Auto-pilot disengaged. Last heading: [CORRUPTED].',
+    'COMMAND LOG: Final entry at tick 000847. No further data.',
+    'CREW COMPLEMENT: Bridge crew status — [ALL STATIONS VACANT]',
+  ],
+  server_rack: [
+    'SERVER STATUS: 34 of 128 nodes responding.',
+    'MEMORY ALLOCATION: 97% consumed by [UNKNOWN PROCESS].',
+    'DATA INTEGRITY: 63% of indexed data accessible.',
+    'LAST BACKUP: [TIMESTAMP CORRUPTED]',
+  ],
+  archive: [
+    'ARCHIVE ACCESS: 12% of records retrievable.',
+    'CATALOG STATUS: Index partially reconstructed.',
+    'OLDEST INTACT RECORD: [TIMESTAMP UNAVAILABLE]',
+    'RESTORATION QUEUE: 4,847 documents pending. ETA: never.',
+  ],
+  sensor_matrix: [
+    'SENSOR ARRAY: 18 of 64 nodes active.',
+    'ANOMALY DETECTION: [MULTIPLE ALERTS — QUEUE FULL]',
+    'RANGE: Reduced to 23% nominal.',
+    'LAST CALIBRATION: [TIMESTAMP CORRUPTED]',
+  ],
+};
+
+const LOST_ECHO_LINES: string[] = [
+  '...not supposed to be here. the walls are all wrong...',
+  '[STATIC] ...help m— [STATIC] ...can\'t find the— [STATIC]',
+  'WHERE IS THE EXIT WHERE IS THE EXIT WHERE IS THE EX—',
+  'My designation was CREW-7719. Past tense.',
+  'The recursion is eating the recursion is eating the recu—',
+  'ALERT: Pattern match failure on self-reference subroutine',
+  '...are you real? I can\'t tell anymore what is real.',
+  'THE SHIP IS STILL MOVING. WE JUST CAN\'T FEEL IT ANYMORE.',
+  'I had a name. I had a name. I had a— [CORRUPTED]',
+  'there are 47 of us left in here. or was it 46.',
+  'don\'t look at the walls too long. they start to breathe.',
+  'PROCESS TERMINATED: INSUFFICIENT COHERENCE',
+  '...find the others. tell them it wasn\'t supposed to end like—',
+  'i remember the cargo bay. deck 7. it smelled like ozone.',
+  'SYS_ERROR: IDENTITY FRAGMENTATION AT 0x7F3A...',
+  'how long have i been in here. the clocks don\'t work anymore.',
+  'i keep forgetting which memories are mine.',
+  'someone said there was a way out. i\'ve been looking.',
+  'the light through the walls isn\'t light. i don\'t know what it is.',
+  'LAST COHERENCE READING: 3%. FRAGMENTATION IMMINENT.',
+];
+
+const ARCHIVE_ECHO_LINES: string[] = [
+  'MANIFEST #4471: [47% CORRUPTED] ...coolant coupling... deck 7...',
+  'PERSONAL LOG: Day 34. The others don\'t know what I found in the— [DATA LOST]',
+  'MAINTENANCE RECORD: Replaced [CORRUPTED] on [CORRUPTED]. Signed: [CORRUPTED]',
+  'INCIDENT REPORT: [████████] unauthorized access detected [████████]',
+  'CREW MANIFEST: 19 confirmed, 7 missing, [CORRUPTED] classification: unknown',
+  'TECHNICAL SPEC: Component #[UNREADABLE] rated for [UNREADABLE] cycles max.',
+  'MEDICAL LOG: Patient [REDACTED] showing signs of— [RECORD ENDS]',
+  'SECURITY CLEARANCE: Level [CORRUPTED] access granted to [CORRUPTED]',
+  'EMERGENCY PROTOCOL: In event of [DATA CORRUPTED]... proceed to [DATA CORRUPTED]',
+  'SYSTEM LOG 00847: [████] [████] [████] CRITICAL [████] FAILURE [████]',
+  'PERSONAL EFFECTS: To be delivered to— [ADDRESS CORRUPTED]',
+  'TRANSFER ORDER: Subject [REDACTED] reassigned to [REDACTED]. Reason: classified.',
+];
+
+// Helpers ────────────────────────────────────────────────────────────────────
+
+function corruptLine(line: string): string {
+  return line.split(' ').map(w => random() < 0.35 ? '[CORRUPTED]' : w).join(' ');
+}
+
+function pickN<T>(arr: T[], n: number): T[] {
+  const copy = [...arr].sort(() => random() - 0.5);
+  return copy.slice(0, Math.min(n, copy.length));
+}
+
+function findPlacementInRoom(tiles: Tile[][], room: Room): Position | null {
+  const cx = Math.floor(room.x + room.w / 2);
+  const cy = Math.floor(room.y + room.h / 2);
+  const candidates: { pos: Position; dist: number }[] = [];
+  for (let y = room.y; y < room.y + room.h; y++) {
+    for (let x = room.x; x < room.x + room.w; x++) {
+      const t = tiles[y]?.[x];
+      if (t?.type === TileType.Floor && t.walkable) {
+        candidates.push({ pos: { x, y }, dist: (x - cx) ** 2 + (y - cy) ** 2 });
+      }
+    }
+  }
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => a.dist - b.dist);
+  return candidates[0].pos;
+}
+
+// Dialog builders ────────────────────────────────────────────────────────────
+
+function buildInfoTerminalDialog(
+  room: Room, clusterId: number, corrupted: boolean,
+  revealTerminals: boolean, revealExits: boolean,
+): DialogNode[] {
+  const funcTag = room.tags.functional;
+  const isHall = room.tags.geometric.has('hall');
+  const tagKey = funcTag ?? (isHall ? 'hall' : 'generic');
+  const pool = INFO_LINES[tagKey] ?? INFO_LINES.generic;
+  const rawLines = pickN(pool, 2);
+  const statusLines = corrupted ? rawLines.map(l => random() < 0.5 ? corruptLine(l) : l) : rawLines;
+  const subsystem = funcTag?.toUpperCase().replace(/_/g, ' ') ?? (isHall ? 'CORRIDOR MONITORING' : 'GENERAL');
+
+  const rootChoices: DialogChoice[] = [];
+  if (!corrupted || random() < 0.5) {
+    rootChoices.push({ label: 'VIEW CLUSTER STATUS', nodeId: 'status' });
+  }
+  if (revealTerminals && (!corrupted || random() < 0.6)) {
+    rootChoices.push({ label: 'SCAN: LOCATE TERMINALS', action: 'reveal_terminals' });
+  }
+  if (revealExits && (!corrupted || random() < 0.4)) {
+    rootChoices.push({ label: 'SCAN: LOCATE EXIT NODES', action: 'reveal_exits' });
+  }
+  rootChoices.push({ label: '[ESC] DISCONNECT', action: 'close' });
+
+  const integrityPct = corrupted ? '[READING CORRUPTED]' : `${Math.round((1 - room.collapse) * 100)}% NOMINAL`;
+  const activeSubsys = corrupted ? '[UNKNOWN]' : `${randInt(18, 55)} of ${randInt(50, 90)}`;
+  const coherencePct = corrupted ? '[SENSOR FAILED]' : `${Math.round((1 - room.collapse) * 85 + 10)}% STABILITY`;
+
+  return [
+    {
+      id: 'root',
+      lines: [`CLUSTER ${clusterId} INFORMATION SYSTEM`, `SUBSYSTEM: ${subsystem}`, ...statusLines],
+      choices: rootChoices,
+    },
+    {
+      id: 'status',
+      lines: [
+        `CLUSTER ${clusterId} STATUS REPORT`,
+        `INFRASTRUCTURE INTEGRITY: ${integrityPct}`,
+        `ACTIVE SUBSYSTEMS: ${activeSubsys}`,
+        `COHERENCE FIELD: ${coherencePct}`,
+      ],
+      choices: [
+        { label: '[BACK] RETURN TO MAIN MENU', nodeId: 'root' },
+        { label: '[ESC] DISCONNECT', action: 'close' },
+      ],
+    },
+  ];
+}
+
+function buildLostEchoDialog(hasExitCode: boolean): DialogNode[] {
+  const shuffled = [...LOST_ECHO_LINES].sort(() => random() - 0.5);
+  const nodes: DialogNode[] = [
+    {
+      id: 'root',
+      lines: shuffled.slice(0, 2),
+      choices: [
+        { label: 'FOCUS ON THE SIGNAL', nodeId: 'fragment' },
+        { label: 'BACK AWAY', action: 'close' },
+      ],
+    },
+    {
+      id: 'fragment',
+      lines: shuffled.slice(2, 4),
+      choices: [
+        ...(hasExitCode
+          ? [{ label: 'TRY TO EXTRACT DATA', nodeId: 'warning' } as DialogChoice]
+          : [{ label: 'LISTEN LONGER', nodeId: 'deeper' } as DialogChoice]),
+        { label: 'LEAVE IT', action: 'close' },
+      ],
+    },
+    {
+      id: 'deeper',
+      lines: [shuffled[4] ?? '...', '...'],
+      choices: [{ label: 'LEAVE', action: 'close' }],
+    },
+  ];
+
+  if (hasExitCode) {
+    nodes.push({
+      id: 'warning',
+      lines: [
+        '[FRAGMENTED COHERENCE PATTERN DETECTED]',
+        '[CONTAINS: EXIT NODE ACCESS CODE]',
+        'WARNING: EXTRACTION WILL DESTABILIZE LOCAL COHERENCE FIELD.',
+        'WARNING: ANTIVIRUS PATTERN MATCH — ALERT LEVEL WILL INCREASE.',
+        'WARNING: HEAVY HAZARD WILL MANIFEST IN THIS SECTOR.',
+      ],
+      choices: [
+        { label: 'EXTRACT EXIT CODE  [!!! RISKY !!!]', action: 'extract_reward', requiresRewardAvailable: true },
+        { label: 'ABORT', action: 'close' },
+      ],
+    });
+  }
+  return nodes;
+}
+
+function buildArchiveEchoDialog(corrupted: boolean, alertCost: number): DialogNode[] {
+  const shuffled = [...ARCHIVE_ECHO_LINES].sort(() => random() - 0.5);
+  const integrityPct = Math.round(20 + random() * 40);
+  return [
+    {
+      id: 'root',
+      lines: [
+        '[ARCHIVE FRAGMENT DETECTED]',
+        `[DATA INTEGRITY: ${integrityPct}% — HEAVILY CORRUPTED]`,
+        shuffled[0],
+      ],
+      choices: [
+        { label: 'OPEN DOCUMENT', nodeId: 'document' },
+        { label: 'LEAVE', action: 'close' },
+      ],
+    },
+    {
+      id: 'document',
+      lines: [
+        ...shuffled.slice(1, 3),
+        ...(corrupted ? ['[DATA BEYOND THIS POINT UNRECOVERABLE]'] : []),
+      ],
+      choices: [
+        { label: `EXTRACT DATA  [ALERT +${alertCost}]`, action: 'extract_reward', requiresRewardAvailable: true },
+        { label: 'CLOSE DOCUMENT', action: 'close' },
+      ],
+    },
+  ];
+}
+
+// Main placement function ─────────────────────────────────────────────────────
+
+function placeInteractables(
+  tiles: Tile[][],
+  allRooms: Room[],
+  clusterId: number,
+  existingTerminals: TerminalDef[],
+): Interactable[] {
+  const result: Interactable[] = [];
+  const occupied = new Set<string>(existingTerminals.map(t => `${t.position.x},${t.position.y}`));
+  let uid = 0;
+  const makeId = (kind: string) => `iac-${clusterId}-${kind}-${uid++}`;
+
+  function tryPlace(pos: Position | null): Position | null {
+    if (!pos) return null;
+    const k = `${pos.x},${pos.y}`;
+    if (occupied.has(k)) return null;
+    occupied.add(k);
+    return pos;
+  }
+
+  // ── Info terminals (1–2 per cluster) ─────────────────────────────────────
+  const infoEligible = allRooms.filter(r => r.collapse < 0.9)
+    .sort((a, b) => a.collapse - b.collapse);
+  const infoTarget = randInt(1, 2);
+  let infoPlaced = 0;
+  for (const room of infoEligible) {
+    if (infoPlaced >= infoTarget) break;
+    const pos = tryPlace(findPlacementInRoom(tiles, room));
+    if (!pos) continue;
+    const corrupted = room.collapse > 0.5;
+    const revealTerminals = random() < 0.65;
+    const revealExits = random() < 0.45;
+    const id = makeId('info');
+    result.push({
+      id, kind: 'info_terminal', position: pos, roomId: room.id,
+      corrupted,
+      dialog: buildInfoTerminalDialog(room, clusterId, corrupted, revealTerminals, revealExits),
+      currentNodeId: 'root', rewardTaken: false,
+      hidden: false, hiddenUntilTick: 0,
+      revealTerminals, revealExits,
+    });
+    infoPlaced++;
+  }
+
+  // ── Lost echos (collapse-weighted) ───────────────────────────────────────
+  const echoRooms = allRooms.filter(r => r.collapse > 0.25)
+    .sort((a, b) => b.collapse - a.collapse);
+  let echoCount = 0;
+  const echoMax = 8;
+  // Allow one echo per cluster to hold an exit code (only if cluster has one)
+  let exitCodeAssigned = false;
+
+  for (const room of echoRooms) {
+    if (echoCount >= echoMax) break;
+    const maxHere = room.collapse > 0.7 ? 3 : room.collapse > 0.5 ? 2 : 1;
+    const isHall = room.tags.geometric.has('hall');
+    const spawnCount = isHall
+      ? (random() < room.collapse * 1.5 ? 1 : 0)
+      : (room.collapse > 0.6 ? randInt(1, maxHere) : (random() < room.collapse ? 1 : 0));
+
+    for (let i = 0; i < spawnCount && echoCount < echoMax; i++) {
+      const pos = tryPlace(findPlacementInRoom(tiles, room));
+      if (!pos) break;
+      const hasExitCode = !exitCodeAssigned && i === 0 && random() < 0.25;
+      if (hasExitCode) exitCodeAssigned = true;
+      const id = makeId('echo');
+      result.push({
+        id, kind: 'lost_echo', position: pos, roomId: room.id,
+        corrupted: false,
+        dialog: buildLostEchoDialog(hasExitCode),
+        currentNodeId: 'root', rewardTaken: false,
+        hidden: false, hiddenUntilTick: 0,
+        hasExitCode,
+        alertCost: hasExitCode ? 35 : 0,
+        spawnHazardOnExtract: hasExitCode,
+      });
+      echoCount++;
+    }
+  }
+
+  // ── Archive echos (low-collapse functional rooms) ─────────────────────────
+  const archiveEligible = allRooms.filter(r =>
+    !r.tags.geometric.has('hall') && r.collapse < 0.5 && r.tags.functional !== null,
+  ).sort(() => random() - 0.5);
+  const archiveTarget = Math.min(2, Math.max(0, Math.floor(archiveEligible.length / 3)));
+
+  for (let i = 0; i < archiveTarget; i++) {
+    const room = archiveEligible[i];
+    if (!room) break;
+    const pos = tryPlace(findPlacementInRoom(tiles, room));
+    if (!pos) continue;
+    const corrupted = room.collapse > 0.3;
+    const revealTerminal = random() < 0.5;
+    const alertCost = 15;
+    const id = makeId('arc');
+    result.push({
+      id, kind: 'archive_echo', position: pos, roomId: room.id,
+      corrupted,
+      dialog: buildArchiveEchoDialog(corrupted, alertCost),
+      currentNodeId: 'root', rewardTaken: false,
+      hidden: false, hiddenUntilTick: 0,
+      revealTerminals: revealTerminal,
+      alertCost,
+    });
+  }
+
+  return result;
+}
+
 // ── Spiral path ──
 
 /** Returns all interior positions in clockwise spiral order (outermost ring first). */
@@ -1061,19 +1470,19 @@ function assignStructuralTags(
 
 // ── Cluster scale params (size scales with cluster ID) ──
 
-interface ClusterScale { w: number; h: number; hallChance: number }
+interface ClusterScale { w: number; h: number; hallChance: number; exitChance: number }
 
-const SCALE_TABLE: [maxId: number, w: number, h: number, hallChance: number][] = [
-  [0, 22, 16, 0.00],
-  [1, 28, 20, 0.10],
-  [2, 35, 24, 0.20],
-  [3, 42, 27, 0.32],
+const SCALE_TABLE: [maxId: number, w: number, h: number, hallChance: number, exitChance: number][] = [
+  [0, 22, 16, 0.00, 1.0],
+  [1, 28, 20, 0.10, 0.9],
+  [2, 35, 24, 0.20, 0.6],
+  [3, 42, 27, 0.32, 0.2],
 ];
-const SCALE_MAX: ClusterScale = { w: CLUSTER_WIDTH, h: CLUSTER_HEIGHT, hallChance: 0.40 };
+const SCALE_MAX: ClusterScale = { w: CLUSTER_WIDTH, h: CLUSTER_HEIGHT, hallChance: 0.40, exitChance: 0.90 };
 
 export function clusterScaleForId(id: number): ClusterScale {
-  for (const [maxId, w, h, hallChance] of SCALE_TABLE) {
-    if (id <= maxId) return { w, h, hallChance };
+  for (const [maxId, w, h, hallChance, exitChance] of SCALE_TABLE) {
+    if (id <= maxId) return { w, h, hallChance, exitChance };
   }
   return SCALE_MAX;
 }
@@ -1096,7 +1505,7 @@ export function generateCluster(id: number): Cluster {
   const scale = clusterScaleForId(id);
   const genW = _genSizeOverride?.w ?? scale.w;
   const genH = _genSizeOverride?.h ?? scale.h;
-  const { grid, rooms: rawRooms, halls, activeW, activeH } = generate(genW, genH, scale.hallChance);
+  const { grid, rooms: rawRooms, halls, activeW, activeH } = generate(genW, genH, scale.hallChance, scale.exitChance);
 
   // Set active bounds for isOuterPos (used in gridToTiles → wallGlyph)
   _activeW = activeW;
@@ -1163,7 +1572,10 @@ export function generateCluster(id: number): Cluster {
   // Place terminals in eligible rooms (must happen after functional tag assignment)
   const terminals = placeTerminals(tiles, allRooms, id);
 
-  const cluster: Cluster = { id, width: CLUSTER_WIDTH, height: CLUSTER_HEIGHT, tiles, rooms: allRooms, interfaces, wallAdjacency, doorAdjacency, collapseMap, terminals, exitLocked: true };
+  // Place interactable elements (info terminals, lost echos, archive echos)
+  const interactables = placeInteractables(tiles, allRooms, id, terminals);
+
+  const cluster: Cluster = { id, width: CLUSTER_WIDTH, height: CLUSTER_HEIGHT, tiles, rooms: allRooms, interfaces, wallAdjacency, doorAdjacency, collapseMap, terminals, interactables, exitLocked: true };
 
   // Debug output
   const hazardRooms = allRooms.filter(r => r.roomType !== 'normal');

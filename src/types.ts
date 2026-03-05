@@ -170,6 +170,48 @@ export interface TerminalDef {
   hasKey: boolean;       // true for the one terminal per cluster that holds the exit key
 }
 
+// ── Interactables ──
+
+export type InteractableKind = 'info_terminal' | 'lost_echo' | 'archive_echo';
+
+export interface DialogChoice {
+  label: string;
+  nodeId?: string;                   // navigate to node; undefined = close
+  action?: 'close' | 'extract_reward' | 'reveal_terminals' | 'reveal_exits';
+  requiresRewardAvailable?: boolean; // hide choice if rewardTaken
+  requiresExitLocked?: boolean;      // show choice only if cluster.exitLocked
+}
+
+export interface DialogNode {
+  id: string;
+  lines: string[];
+  choices: DialogChoice[];
+}
+
+export interface Interactable {
+  id: string;
+  kind: InteractableKind;
+  position: Position;
+  roomId: number;
+  corrupted: boolean;
+  dialog: DialogNode[];
+  currentNodeId: string;
+  rewardTaken: boolean;
+  hidden: boolean;           // lost_echo: currently invisible
+  hiddenUntilTick: number;   // lost_echo: tick when it reappears
+  // Reward flags
+  revealTerminals?: boolean;
+  revealExits?: boolean;
+  hasExitCode?: boolean;
+  alertCost?: number;
+  spawnHazardOnExtract?: boolean;
+}
+
+export interface RevealEffect {
+  positions: string[];  // "x,y" keys
+  expireTick: number;
+}
+
 export interface Cluster {
   id: number;
   width: number;
@@ -181,6 +223,7 @@ export interface Cluster {
   doorAdjacency: Map<number, number[]>;  // rooms connected through doors
   collapseMap: number[][];               // per-tile collapse intensity [0, 1]
   terminals: TerminalDef[];
+  interactables: Interactable[];
   exitLocked: boolean;                   // true until player grants access
 }
 
@@ -236,6 +279,10 @@ export interface GameState {
   alertFill?: Map<string, number>;
   alertThreats?: { x: number; y: number; desc: string }[];
   openTerminal?: { terminalId: string; clusterId: number };
+  openInteractable?: { id: string; clusterId: number };
+  revealEffects: RevealEffect[];
+  hazardFogMarks: Map<string, HazardOverlayType>;
+  alertLevel: number;  // 0–100 antivirus threat level
 }
 
 export interface GameMessage {

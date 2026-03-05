@@ -145,16 +145,16 @@ type PendingBlock = {
   assignTo: (node: BSPNode) => void;
 };
 
-function buildHallTree(mapRect: Rect): { root: BSPNode; halls: Hall[]; pendingBlocks: PendingBlock[] } {
+function buildHallTree(mapRect: Rect): { root: BSPNode; halls: Hall[]; pendingBlocks: PendingBlock[]; firstHall: Hall | null } {
   const maxBlockSize = 2 * PARAMS.maxRoomSize;
   const halls: Hall[] = [];
   const pendingBlocks: PendingBlock[] = [];
 
-  const initialSplit = splitWithHall(mapRect, 'vertical');
+  const initialSplit = splitWithHall(mapRect, 'horizontal');
   if (!initialSplit) {
     const placeholder: BSPNode = { kind: 'rooms', rooms: [], parentHallId: -1 };
     pendingBlocks.push({ rect: mapRect, parentHallId: -1, assignTo: () => {} });
-    return { root: placeholder, halls, pendingBlocks };
+    return { root: placeholder, halls, pendingBlocks, firstHall: null };
   }
 
   halls.push(initialSplit.hall);
@@ -217,7 +217,7 @@ function buildHallTree(mapRect: Rect): { root: BSPNode; halls: Hall[]; pendingBl
     item.assignTo({ kind: 'rooms', rooms: [], parentHallId: item.parentHallId });
   }
 
-  return { root, halls, pendingBlocks };
+  return { root, halls, pendingBlocks, firstHall: initialSplit.hall };
 }
 
 // ── Phase 2: Subdivide blocks into rooms ──
@@ -668,33 +668,53 @@ function fallbackEdgeY(grid: Grid, innerX: number): number | null {
   return candidates[Math.floor(random() * candidates.length)];
 }
 
-function placeInterfaces(grid: Grid, halls: Hall[], rooms: RoomDef[], mapRect: Rect) {
-  const leftRegions = collectEdgeRegions(halls, rooms, mapRect, 'left');
-
-  if (leftRegions.length > 0) {
-    const region = leftRegions[Math.floor(random() * leftRegions.length)];
-    const y = randInt(region.yMin, region.yMax);
+function placeInterfaces(
+  grid: Grid, halls: Hall[], rooms: RoomDef[], mapRect: Rect,
+  firstHall: Hall | null, exitOnFirstCorridorChance: number,
+) {
+  // Entry: always on the first (horizontal) corridor if available
+  if (firstHall) {
+    const y = randInt(firstHall.rect.y, firstHall.rect.y + firstHall.rect.h - 1);
     if (y >= 0 && y < grid.h) grid.cells[y][0] = 'interface';
   } else {
-    const y = fallbackEdgeY(grid, mapRect.x);
-    if (y !== null) grid.cells[y][0] = 'interface';
+    const leftRegions = collectEdgeRegions(halls, rooms, mapRect, 'left');
+    if (leftRegions.length > 0) {
+      const region = leftRegions[Math.floor(random() * leftRegions.length)];
+      const y = randInt(region.yMin, region.yMax);
+      if (y >= 0 && y < grid.h) grid.cells[y][0] = 'interface';
+    } else {
+      const y = fallbackEdgeY(grid, mapRect.x);
+      if (y !== null) grid.cells[y][0] = 'interface';
+    }
   }
 
-  const rightRegions = collectEdgeRegions(halls, rooms, mapRect, 'right');
   const numExits = randInt(1, PARAMS.numExitInterface);
-  const usedRegionIds = new Set<string>();
-  const shuffled = [...rightRegions].sort(() => random() - 0.5);
-
   let placed = 0;
-  for (const region of shuffled) {
-    if (placed >= numExits) break;
-    const key = `${region.kind}:${region.id}`;
-    if (usedRegionIds.has(key)) continue;
-    const y = randInt(region.yMin, region.yMax);
+
+  // With exitOnFirstCorridorChance, place one exit on the first corridor's right end
+  if (firstHall && random() < exitOnFirstCorridorChance) {
+    const y = randInt(firstHall.rect.y, firstHall.rect.y + firstHall.rect.h - 1);
     if (y >= 0 && y < grid.h) {
       grid.cells[y][grid.w - 1] = 'interface';
-      usedRegionIds.add(key);
       placed++;
+    }
+  }
+
+  // Place remaining exits on other right-edge regions
+  if (placed < numExits) {
+    const rightRegions = collectEdgeRegions(halls, rooms, mapRect, 'right');
+    const usedRegionIds = new Set<string>();
+    const shuffled = [...rightRegions].sort(() => random() - 0.5);
+    for (const region of shuffled) {
+      if (placed >= numExits) break;
+      const key = `${region.kind}:${region.id}`;
+      if (usedRegionIds.has(key)) continue;
+      const y = randInt(region.yMin, region.yMax);
+      if (y >= 0 && y < grid.h && grid.cells[y][grid.w - 1] !== 'interface') {
+        grid.cells[y][grid.w - 1] = 'interface';
+        usedRegionIds.add(key);
+        placed++;
+      }
     }
   }
 
@@ -803,6 +823,7 @@ export function generate(
   gridW = CLUSTER_WIDTH,
   gridH = CLUSTER_HEIGHT,
   hallChance = PARAMS.smallBlockHallChance,
+  exitOnFirstCorridorChance = 0.8,
 ): { grid: Grid; rooms: RoomDef[]; halls: Hall[]; activeW: number; activeH: number } {
   nextHallId = 0;
   nextRoomId = 0;
@@ -819,7 +840,7 @@ export function generate(
   try {
     const mapRect: Rect = { x: PAD, y: PAD, w: PARAMS.gridW - 2 * PAD, h: PARAMS.gridH - 2 * PAD };
 
-    const { halls, pendingBlocks } = buildHallTree(mapRect);
+    const { halls, pendingBlocks, firstHall } = buildHallTree(mapRect);
     const rooms = processBlocks(pendingBlocks, mapRect);
     mergeSmallRooms(rooms);
 
@@ -831,7 +852,7 @@ export function generate(
     cutHalls(grid, halls);
     placeHallEndDoors(grid, halls);
     placeDoors(grid, rooms, halls);
-    placeInterfaces(grid, halls, rooms, mapRect);
+    placeInterfaces(grid, halls, rooms, mapRect, firstHall, exitOnFirstCorridorChance);
     ensureConnectivity(grid, rooms);
 
     // Pad grid to full CLUSTER_WIDTH×CLUSTER_HEIGHT so cluster.ts can iterate uniformly

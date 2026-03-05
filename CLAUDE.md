@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Coherence — a cyberpunk roguelike where you play as an uploaded mind navigating crumbling virtual ship systems. Built for 7DRL 2026. Vite + TypeScript, DOM-based monospace grid, no external game libraries.
+Coherence — a cyberpunk roguelike where you play as an uploaded mind navigating crumbling virtual ship systems. Built for 7DRL 2026. Vite + TypeScript, DOM-based monospace grid. Uses `rot-js` for the canvas renderer only; all game logic is custom.
 
 ## Commands
 
@@ -39,6 +39,10 @@ No test framework is configured. No linter is configured.
 - **Speed-based turns** — entities accumulate energy each tick, act when energy ≥ speed
 - **Three visibility states** — visible (full color), seen/remembered (dimmed), unexplored (black)
 - **Wall glyphs** — double-line box-drawing (`═║╔╗`) for outer walls, single-line (`─│┌┐`) for inner walls
+- **Room tags** — four categories per room: `geometric` (hall/hub/dead_end/etc.), `functional` (engine_room/lab/medbay/etc.), `modifiers` (encrypted/degraded/etc.), `cosmetic`. Tags drive display and future gameplay logic.
+- **Terminals & exit lock** — each cluster has one terminal with `hasKey=true`; `cluster.exitLocked` starts true and unlocks when that terminal is activated, gating the `⇋` exit transfer
+- **Modules** — player carries loadout slots (`alert.m`, `overclock.m`, `corrupt.m`, `cloak.m`, `spoof.m`) with status `loaded | damaged | offline`; `alert.m` actively scans for threats each tick
+- **Seed reproduction** — append `#seed=N` to the URL to load a specific map; seed is logged to console on startup
 
 ## Design Docs
 
