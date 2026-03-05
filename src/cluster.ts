@@ -141,7 +141,7 @@ function buildRoomAdjacency(cells: CellType[][], rawRooms: RoomDef[]): Map<numbe
   for (let y = 0; y < CLUSTER_HEIGHT; y++) {
     for (let x = 0; x < CLUSTER_WIDTH; x++) {
       const c = cells[y][x];
-      if (c !== 'hall' && c !== 'door') continue;
+      if (c !== 'door') continue;
       const key = `${x},${y}`;
       if (visited.has(key)) continue;
 

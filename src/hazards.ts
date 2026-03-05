@@ -582,79 +582,188 @@ export function applyTileHazardToPlayer(state: GameState) {
   }
 }
 
-/** Update alert.m module detection state */
+// ── Alert flood-fill ──
+
+const ALERT_FILL_BUDGET = 15;
+const ALERT_THROTTLE_TICKS = 10;
+
+/** Get traversal cost for a tile. Returns Infinity for impassable. */
+function tileWeight(tile: { type: TileType; doorOpen?: boolean }): number {
+  switch (tile.type) {
+    case TileType.Void: return Infinity;
+    case TileType.Wall: return 10;
+    case TileType.Door: return tile.doorOpen ? 2 : 5;
+    case TileType.Floor:
+    case TileType.InterfaceExit:
+      return 1;
+    default: return 1;
+  }
+}
+
+/** Describe a threat tile for alert messages */
+function describeTileThreat(tile: { hazardOverlay?: { type: string } }, room: Room | undefined): string {
+  const parts: string[] = [];
+  if (tile.hazardOverlay) parts.push(tile.hazardOverlay.type);
+  if (room && room.roomType !== 'normal' && room.roomType !== 'echo_chamber') {
+    if (!parts.includes(room.roomType)) parts.push(room.roomType);
+  }
+  return parts.join(', ') || 'unknown';
+}
+
+/** Check if a room has an active native hazard */
+function isRoomDangerous(room: Room): boolean {
+  if (room.containedHazards.size > 0) return true;
+  if (room.roomType === 'normal' || room.roomType === 'echo_chamber') return false;
+  const hz = room.hazardState;
+  if (!hz) return false;
+  switch (room.roomType) {
+    case 'trigger_trap': return !hz.detonated;
+    case 'corrupted': return !!(hz.corruptionTiles && hz.corruptionTiles.size > 0);
+    case 'memory_leak': return (hz.floodLevel ?? 0) > 0;
+    case 'firewall': return !!hz.beams;
+    case 'unstable': return !hz.coreDestroyed;
+    case 'gravity_well': return true;
+    case 'quarantine': return !!hz.locked;
+    default: return false;
+  }
+}
+
+/** Dijkstra flood-fill from player position with weighted tile costs */
+function alertFloodFill(
+  cluster: Cluster,
+  origin: Position,
+  budget: number,
+): { filled: Map<string, number>; threats: { x: number; y: number; desc: string }[] } {
+  const filled = new Map<string, number>();
+  const threats: { x: number; y: number; desc: string }[] = [];
+  const key = (x: number, y: number) => `${x},${y}`;
+
+  // Simple priority queue via sorted array (map is small: 50x30)
+  const open: { x: number; y: number; cost: number }[] = [];
+  const push = (x: number, y: number, cost: number) => {
+    // Binary insert by cost
+    let lo = 0, hi = open.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (open[mid].cost < cost) lo = mid + 1; else hi = mid;
+    }
+    open.splice(lo, 0, { x, y, cost });
+  };
+
+  // Start at player position with cost 0
+  const k0 = key(origin.x, origin.y);
+  filled.set(k0, 0);
+  push(origin.x, origin.y, 0);
+
+  const DIRS = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+
+  while (open.length > 0) {
+    const { x, y, cost } = open.shift()!;
+    const k = key(x, y);
+
+    // Skip if we already found a cheaper path
+    if ((filled.get(k) ?? Infinity) < cost) continue;
+
+    for (const [dx, dy] of DIRS) {
+      const nx = x + dx, ny = y + dy;
+      if (nx < 0 || nx >= cluster.width || ny < 0 || ny >= cluster.height) continue;
+
+      const tile = cluster.tiles[ny][nx];
+      const w = tileWeight(tile);
+      if (w === Infinity) continue;
+
+      const newCost = cost + w;
+      if (newCost > budget) continue;
+
+      const nk = key(nx, ny);
+      const existing = filled.get(nk);
+      if (existing !== undefined && existing <= newCost) continue;
+
+      filled.set(nk, newCost);
+      push(nx, ny, newCost);
+    }
+  }
+
+  // Scan filled tiles for threats
+  const seenThreats = new Set<string>(); // dedupe by description
+  for (const [k, _cost] of filled) {
+    const [xs, ys] = k.split(',');
+    const x = Number(xs), y = Number(ys);
+    if (x === origin.x && y === origin.y) continue; // skip player tile
+
+    const tile = cluster.tiles[y][x];
+    const rid = tile.roomId;
+    const room = rid >= 0 ? cluster.rooms.find(r => r.id === rid) : undefined;
+
+    let isThreat = false;
+
+    // Check tile hazard overlay
+    if (tile.hazardOverlay) {
+      isThreat = true;
+    }
+
+    // Check if tile is in a dangerous room (only flag once per room)
+    if (!isThreat && room && isRoomDangerous(room)) {
+      const roomKey = `room:${rid}`;
+      if (!seenThreats.has(roomKey)) {
+        isThreat = true;
+        seenThreats.add(roomKey);
+      }
+    }
+
+    if (isThreat) {
+      threats.push({ x, y, desc: describeTileThreat(tile, room) });
+    }
+  }
+
+  return { filled, threats };
+}
+
+/** Update alert.m module detection state via weighted flood-fill */
 export function updateAlertModule(state: GameState) {
   const alertMod = state.player.modules?.find(m => m.id === 'alert.m' && m.status === 'loaded');
-  if (!alertMod) return;
+  if (!alertMod) {
+    state.alertFill = undefined;
+    state.alertThreats = undefined;
+    return;
+  }
 
   const cluster = state.clusters.get(state.currentClusterId);
   if (!cluster) return;
 
+  if (!alertMod.lastAlertTicks) alertMod.lastAlertTicks = new Map();
+
   const wasActive = alertMod.alertActive ?? false;
+  const { filled, threats } = alertFloodFill(cluster, state.player.position, ALERT_FILL_BUDGET);
 
-  const pRoom = playerRoom(state, cluster);
-  if (!pRoom) {
-    if (wasActive) {
-      addMessage(state, 'alert.m ▽ area clear', 'alert');
-    }
-    alertMod.alertActive = false;
-    return;
-  }
+  // Store for debug overlay
+  state.alertFill = filled;
+  state.alertThreats = threats;
 
-  let detected = false;
-
-  // Check current room
-  if (pRoom.roomType !== 'normal' && pRoom.roomType !== 'echo_chamber' && pRoom.hazardState) {
-    const hz = pRoom.hazardState;
-    if (pRoom.roomType === 'trigger_trap' && hz.activated && !hz.detonated) detected = true;
-    if (pRoom.roomType === 'corrupted' && hz.corruptionTiles && hz.corruptionTiles.size > 0) detected = true;
-    if (pRoom.roomType === 'memory_leak' && (hz.floodLevel ?? 0) > 0) detected = true;
-    if (pRoom.roomType === 'firewall' && hz.beams) detected = true;
-    if (pRoom.roomType === 'unstable' && !hz.coreDestroyed) detected = true;
-    if (pRoom.roomType === 'gravity_well') detected = true;
-  }
-
-  // Check current room for spread hazards (from other rooms)
-  if (!detected && pRoom.containedHazards.size > 0) {
-    detected = true;
-  }
-
-  // Check adjacent rooms (native hazards)
-  if (!detected) {
-    const adjacentIds = cluster.roomAdjacency.get(pRoom.id) ?? [];
-    for (const adjId of adjacentIds) {
-      const adjRoom = cluster.rooms.find(r => r.id === adjId);
-      if (!adjRoom) continue;
-
-      // Check spread hazards in adjacent room
-      if (adjRoom.containedHazards.size > 0) { detected = true; break; }
-
-      if (adjRoom.roomType === 'normal' || adjRoom.roomType === 'echo_chamber') continue;
-      const hz = adjRoom.hazardState;
-      if (!hz) continue;
-
-      if (adjRoom.roomType === 'trigger_trap' && !hz.detonated) { detected = true; break; }
-      if (adjRoom.roomType === 'corrupted' && hz.corruptionTiles && hz.corruptionTiles.size > 3) { detected = true; break; }
-      if (adjRoom.roomType === 'memory_leak' && (hz.floodLevel ?? 0) > 1) { detected = true; break; }
-      if (adjRoom.roomType === 'firewall') { detected = true; break; }
-      if (adjRoom.roomType === 'unstable' && !hz.coreDestroyed) { detected = true; break; }
-      if (adjRoom.roomType === 'gravity_well') { detected = true; break; }
-      if (adjRoom.roomType === 'quarantine' && hz.locked) { detected = true; break; }
-    }
-  }
-
+  const detected = threats.length > 0;
   alertMod.alertActive = detected;
 
-  // Post alert messages on state transitions
-  if (detected && !wasActive) {
-    const source = pRoom.roomType !== 'normal' ? pRoom.roomType : 'spread hazard';
-    addMessage(state, `alert.m ▲ threat detected — ${source}`, 'alert');
-  } else if (!detected && wasActive) {
+  // Post throttled alert messages — group by description
+  const threatsByDesc = new Map<string, { x: number; y: number; desc: string }>();
+  for (const t of threats) {
+    if (!threatsByDesc.has(t.desc)) threatsByDesc.set(t.desc, t);
+  }
+  for (const [desc, _t] of threatsByDesc) {
+    const lastTick = alertMod.lastAlertTicks.get(desc) ?? -Infinity;
+    if (state.tick - lastTick >= ALERT_THROTTLE_TICKS) {
+      addMessage(state, `alert.m ▲ ${desc}`, 'alert');
+      alertMod.lastAlertTicks.set(desc, state.tick);
+    }
+  }
+
+  // Clear message when transitioning to safe
+  if (!detected && wasActive) {
     addMessage(state, 'alert.m ▽ area clear', 'alert');
+    alertMod.lastAlertTicks.clear();
   }
 
   if (state.debugMode && detected) {
-    const hazards = pRoom.containedHazards.size > 0 ? ` spread:[${[...pRoom.containedHazards].join(',')}]` : '';
-    addMessage(state, `[DBG] Alert: room ${pRoom.id} (${pRoom.roomType})${hazards}`, 'debug');
+    const descs = [...threatsByDesc.keys()].join(', ');
+    addMessage(state, `[DBG] Alert: ${threats.length} threat tiles — ${descs}`, 'debug');
   }
 }

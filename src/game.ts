@@ -74,6 +74,7 @@ export function createGame(initialSeed?: number): GameState {
     mapReveal: false,
     godMode: false,
     invisibleMode: false,
+    showAlertOverlay: false,
   };
 
   addMessage(state, 'System boot... ego-fragment loaded from backup.', 'system');

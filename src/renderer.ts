@@ -6,6 +6,11 @@ const ROOM_TYPE_SHORT: Record<string, string> = {
   gravity_well: 'G',
 };
 
+const HAZARD_OVERLAY_SHORT: Record<string, string> = {
+  corruption: 'c', flood: 'f', spark: 's', scorch: 't',
+  beam: 'b', gravity: 'g',
+};
+
 const ROOM_TYPE_COLOR: Record<string, string> = {
   normal: '#446644', corrupted: '#ff4444', trigger_trap: '#ff8844',
   memory_leak: '#4488ff', firewall: '#ffcc00', unstable: '#ffff44',
@@ -14,10 +19,16 @@ const ROOM_TYPE_COLOR: Record<string, string> = {
 
 function debugRoomLabel(room: Room): string {
   const typeChar = ROOM_TYPE_SHORT[room.roomType] ?? '?';
-  return `${room.id}${typeChar}`;
+  let label = `${room.id}${typeChar}`;
+  if (room.containedHazards.size > 0) {
+    const spread = [...room.containedHazards].map(h => HAZARD_OVERLAY_SHORT[h] ?? '?').join('');
+    label += `+${spread}`;
+  }
+  return label;
 }
 
 function debugRoomColor(room: Room): string {
+  if (room.containedHazards.size > 0 && room.roomType === 'normal') return '#ff8844';
   return ROOM_TYPE_COLOR[room.roomType] ?? '#666666';
 }
 
@@ -82,8 +93,17 @@ export class Renderer {
     this.pathHighlight = path;
   }
 
-  render(cluster: Cluster, entities: Entity[], playerPos: Position, mapReveal = false) {
+  render(
+    cluster: Cluster,
+    entities: Entity[],
+    playerPos: Position,
+    mapReveal = false,
+    alertOverlay?: { fill?: Map<string, number>; threats?: { x: number; y: number }[]; budget: number },
+  ) {
     const pathSet = new Set(this.pathHighlight.map(p => `${p.x},${p.y}`));
+    const threatSet = alertOverlay?.threats
+      ? new Set(alertOverlay.threats.map(t => `${t.x},${t.y}`))
+      : undefined;
 
     for (let y = 0; y < this.height; y++) {
       for (let x = 0; x < this.width; x++) {
@@ -148,6 +168,24 @@ export class Renderer {
         // Path highlight
         if (pathSet.has(`${x},${y}`) && isVisible) {
           bg = '#2a3a1a';
+        }
+
+        // Alert flood-fill overlay
+        if (alertOverlay?.fill) {
+          const tileKey = `${x},${y}`;
+          const cost = alertOverlay.fill.get(tileKey);
+          if (cost !== undefined) {
+            if (threatSet?.has(tileKey)) {
+              // Threat tile — red highlight
+              bg = '#3a1010';
+              fg = '#ff4444';
+            } else {
+              // Filled tile — green tint fading with cost
+              const intensity = Math.max(0, 1 - cost / alertOverlay.budget);
+              const g = Math.round(20 + intensity * 30);
+              bg = `rgb(10,${g},15)`;
+            }
+          }
         }
 
         cell.textContent = glyph;

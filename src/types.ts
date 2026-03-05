@@ -137,6 +137,7 @@ export interface PlayerModule {
   id: ModuleId;
   status: ModuleStatus;
   alertActive?: boolean; // alert.m only: currently detecting a threat?
+  lastAlertTicks?: Map<string, number>; // alert.m: throttle per threat source
 }
 
 // ── Entity ──
@@ -172,6 +173,9 @@ export interface GameState {
   mapReveal: boolean;
   godMode: boolean;
   invisibleMode: boolean;
+  showAlertOverlay: boolean;
+  alertFill?: Map<string, number>;
+  alertThreats?: { x: number; y: number; desc: string }[];
 }
 
 export interface GameMessage {

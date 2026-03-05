@@ -2,6 +2,7 @@ import { createGame, processAction, handleMapClick, stepAutoPath, addMessage, ex
 import { Renderer, renderSelfPanel, renderLogs } from './renderer';
 import { InputHandler } from './input';
 import { PlayerAction, Position, TileType } from './types';
+import { generateSeed } from './rng';
 import { GLITCH_EFFECTS } from './glitch';
 
 // ── Bootstrap ──
@@ -77,6 +78,13 @@ function stopAutoWalk() {
 
 // ── Render ──
 
+const TOGGLE_LABELS: Record<string, string> = {
+  mapReveal: 'map reveal',
+  godMode: 'god mode',
+  invisibleMode: 'invisible',
+  showAlertOverlay: 'alert overlay',
+};
+
 let adminInitialized = false;
 
 function initAdminPanel() {
@@ -93,9 +101,11 @@ function initAdminPanel() {
 <button class="admin-btn admin-toggle" data-toggle="mapReveal">&gt; map reveal: OFF</button>
 <button class="admin-btn admin-toggle" data-toggle="godMode">&gt; god mode: OFF</button>
 <button class="admin-btn admin-toggle" data-toggle="invisibleMode">&gt; invisible: OFF</button>
+<button class="admin-btn admin-toggle" data-toggle="showAlertOverlay">&gt; alert overlay: OFF</button>
 <div class="panel-sep"><span class="fill"></span></div>
 <div class="stat-row"><span class="stat-label">seed:</span><input class="admin-seed-input" type="text" value="${state.seed}"></div>
 <button class="admin-btn admin-restart">&gt; restart with seed</button>
+<button class="admin-btn admin-random-restart">&gt; random restart</button>
 <div class="panel-sep"><span class="fill"></span></div>
 <button class="admin-btn admin-export">&gt; export save</button>
 <button class="admin-btn admin-import">&gt; import save</button>
@@ -108,9 +118,9 @@ ${buttons}
   // Wire up toggle buttons
   adminEl.querySelectorAll('.admin-toggle').forEach(btn => {
     btn.addEventListener('click', () => {
-      const key = (btn as HTMLElement).dataset.toggle as 'mapReveal' | 'godMode' | 'invisibleMode';
+      const key = (btn as HTMLElement).dataset.toggle as 'mapReveal' | 'godMode' | 'invisibleMode' | 'showAlertOverlay';
       (state as any)[key] = !(state as any)[key];
-      const label = key === 'godMode' ? 'god mode' : key === 'mapReveal' ? 'map reveal' : 'invisible';
+      const label = TOGGLE_LABELS[key] ?? key;
       const val = (state as any)[key];
       (btn as HTMLElement).textContent = `> ${label}: ${val ? 'ON' : 'OFF'}`;
       if (val) {
@@ -128,6 +138,16 @@ ${buttons}
   restartBtn?.addEventListener('click', () => {
     const seedInput = adminEl.querySelector('.admin-seed-input') as HTMLInputElement;
     const newSeed = Number(seedInput.value) || 0;
+    window.location.hash = `seed=${newSeed}`;
+    restartGame(newSeed);
+  });
+
+  // Wire up random restart button
+  const randomRestartBtn = adminEl.querySelector('.admin-random-restart');
+  randomRestartBtn?.addEventListener('click', () => {
+    const newSeed = generateSeed();
+    const seedInput = adminEl.querySelector('.admin-seed-input') as HTMLInputElement;
+    if (seedInput) seedInput.value = String(newSeed);
     window.location.hash = `seed=${newSeed}`;
     restartGame(newSeed);
   });
@@ -181,8 +201,8 @@ ${buttons}
 
 function updateAdminPanel() {
   adminEl.querySelectorAll('.admin-toggle').forEach(btn => {
-    const key = (btn as HTMLElement).dataset.toggle as 'mapReveal' | 'godMode' | 'invisibleMode';
-    const label = key === 'godMode' ? 'god mode' : key === 'mapReveal' ? 'map reveal' : 'invisible';
+    const key = (btn as HTMLElement).dataset.toggle as 'mapReveal' | 'godMode' | 'invisibleMode' | 'showAlertOverlay';
+    const label = TOGGLE_LABELS[key] ?? key;
     const val = (state as any)[key];
     (btn as HTMLElement).textContent = `> ${label}: ${val ? 'ON' : 'OFF'}`;
     if (val) {
@@ -201,7 +221,10 @@ function renderAll() {
     renderer.initGrid(currentCluster.width, currentCluster.height);
   }
 
-  renderer.render(currentCluster, state.entities, state.player.position, state.mapReveal);
+  const alertOverlay = state.showAlertOverlay && state.alertFill
+    ? { fill: state.alertFill, threats: state.alertThreats, budget: 15 }
+    : undefined;
+  renderer.render(currentCluster, state.entities, state.player.position, state.mapReveal, alertOverlay);
   renderSelfPanel(panelEl, state.player, state.currentClusterId, state.tick, state.debugMode, state.mapReveal, state.godMode, state.invisibleMode, state.seed);
   renderLogs(logGeneralEl, logAlertEl, state.messages);
 
