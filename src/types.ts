@@ -212,6 +212,37 @@ export interface RevealEffect {
   expireTick: number;
 }
 
+// ── Entity AI ──
+
+export type EntityKind = 'chronicler' | 'bit_mite' | 'logic_leech' | 'white_hat';
+export type Faction = 'neutral' | 'aggressive' | 'friendly';
+export type AIState =
+  | 'wander'     // random movement
+  | 'patrol'     // follow waypoints (white_hat)
+  | 'catalog'    // chronicler: observing a target
+  | 'broadcast'  // chronicler: emitting reveal
+  | 'chase'      // bit_mite: BFS toward target
+  | 'attack'     // bit_mite/white_hat: adjacent strike
+  | 'wall_walk'  // logic_leech: hug walls
+  | 'stalk'      // logic_leech: invisible, locked on
+  | 'charge'     // logic_leech: straight-line dash
+  | 'rest';      // logic_leech: cooldown after charge
+
+export interface EntityAI {
+  kind: EntityKind;
+  faction: Faction;
+  aiState: AIState;
+  sightRadius: number;
+  targetId?: number;          // id of entity being targeted
+  lastTargetPos?: Position;   // last known position
+  actionCooldown?: number;    // ticks until next action
+  catalogTicks?: number;      // chronicler: ticks spent cataloging
+  chargeDir?: Position;       // logic_leech: charge direction
+  chargeSteps?: number;       // logic_leech: steps remaining in charge
+  patrolWaypoint?: Position;  // white_hat: current patrol target
+  invisible?: boolean;        // logic_leech during stalk
+}
+
 export interface Cluster {
   id: number;
   width: number;
@@ -253,6 +284,7 @@ export interface Entity {
   coherence?: number;
   maxCoherence?: number;
   modules?: PlayerModule[];
+  ai?: EntityAI;
 }
 
 // ── Game State ──
@@ -283,6 +315,7 @@ export interface GameState {
   revealEffects: RevealEffect[];
   hazardFogMarks: Map<string, HazardOverlayType>;
   alertLevel: number;  // 0–100 antivirus threat level
+  markedEntities: Set<number>;  // entity ids marked by Chronicler/White-Hat
 }
 
 export interface GameMessage {

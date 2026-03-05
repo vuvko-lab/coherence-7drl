@@ -483,6 +483,7 @@ function renderAll() {
     tick: state.tick,
     revealEffects: state.revealEffects,
     hazardFogMarks: state.hazardFogMarks,
+    markedEntities: state.markedEntities,
   });
   renderSelfPanel(panelEl, state.player, state.currentClusterId, state.tick, state.debugMode, state.mapReveal, state.godMode, state.invisibleMode, state.seed);
   renderLogs(logGeneralEl, logAlertEl, state.messages);

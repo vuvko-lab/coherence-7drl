@@ -8,6 +8,9 @@ import { computeFOV, floodFillReveal } from './fov';
 import { findPath } from './pathfinding';
 import { updateHazards, onPlayerEnterRoom, getPlayerRoom, applyTileHazardToPlayer, updateAlertModule } from './hazards';
 import { seed as seedRng, generateSeed, randInt } from './rng';
+import {
+  updateEntityAI, makeChronicler, makeBitMite, makeLogicLeech, makeWhiteHat,
+} from './ai';
 
 const DOOR_CLOSE_DELAY = 5; // ticks before an unoccupied open door auto-closes
 
@@ -82,6 +85,7 @@ export function createGame(initialSeed?: number): GameState {
     revealEffects: [],
     hazardFogMarks: new Map(),
     alertLevel: 0,
+    markedEntities: new Set(),
   };
 
   addMessage(state, 'System boot... ego-fragment loaded from backup.', 'system');
@@ -90,11 +94,94 @@ export function createGame(initialSeed?: number): GameState {
 
   computeFOV(cluster, player.position);
 
+  // Spawn entities in the starting cluster
+  spawnClusterEntities(state, cluster);
+
   return state;
 }
 
 export function addMessage(state: GameState, text: string, type: GameMessage['type'] = 'normal') {
   state.messages.push({ text, type, tick: state.tick });
+}
+
+// ── Entity spawning ──
+
+/**
+ * Spawn AI entities in a cluster. Scale count by cluster depth.
+ * Called once when a cluster is first visited.
+ */
+function spawnClusterEntities(state: GameState, cluster: Cluster) {
+  const id = cluster.id;
+  const rooms = cluster.rooms.filter(r => !r.tags.geometric.has('hall'));
+  if (rooms.length === 0) return;
+
+  // Scale counts: cluster 0 is sparse, grows by depth
+  const depth = id + 1;
+  const numBitMites   = Math.min(3, Math.floor(depth * 0.8));
+  const numLogicLeech = Math.min(2, Math.floor(depth * 0.5));
+  const numChronicler = Math.min(2, Math.floor(depth * 0.4));
+  const numWhiteHat   = Math.min(2, Math.floor(depth * 0.3));
+
+  const spawned: Entity[] = [];
+
+  function pickWalkableTile(room: typeof rooms[number]): Position | null {
+    for (let attempt = 0; attempt < 30; attempt++) {
+      const x = room.x + 1 + Math.floor(Math.random() * (room.w - 2));
+      const y = room.y + 1 + Math.floor(Math.random() * (room.h - 2));
+      if (cluster.tiles[y]?.[x]?.walkable) return { x, y };
+    }
+    return null;
+  }
+
+  function pickRoom(exclude?: Set<number>): typeof rooms[number] | undefined {
+    const pool = exclude ? rooms.filter(r => !exclude.has(r.id)) : rooms;
+    return pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : undefined;
+  }
+
+  // Bit-Mite: spawn near exit nodes (right side of cluster)
+  const exitRooms = rooms.filter(r => r.tags.geometric.has('exit') || r.x + r.w >= cluster.width - 4);
+  for (let i = 0; i < numBitMites; i++) {
+    const room = exitRooms.length > 0
+      ? exitRooms[Math.floor(Math.random() * exitRooms.length)]
+      : pickRoom();
+    if (!room) continue;
+    const pos = pickWalkableTile(room);
+    if (pos) spawned.push(makeBitMite(pos, id));
+  }
+
+  // Logic Leech: prefer peripheral/dead-end rooms
+  const peripheralRooms = rooms.filter(r => r.tags.geometric.has('peripheral') || r.tags.geometric.has('dead_end'));
+  for (let i = 0; i < numLogicLeech; i++) {
+    const pool = peripheralRooms.length > 0 ? peripheralRooms : rooms;
+    const room = pool[Math.floor(Math.random() * pool.length)];
+    const pos = pickWalkableTile(room);
+    if (pos) spawned.push(makeLogicLeech(pos, id));
+  }
+
+  // Chronicler: any room
+  for (let i = 0; i < numChronicler; i++) {
+    const room = pickRoom();
+    if (!room) continue;
+    const pos = pickWalkableTile(room);
+    if (pos) spawned.push(makeChronicler(pos, id));
+  }
+
+  // White-Hat: prefer non-hazard rooms
+  const safeRooms = rooms.filter(r => r.roomType === 'normal');
+  for (let i = 0; i < numWhiteHat; i++) {
+    const pool = safeRooms.length > 0 ? safeRooms : rooms;
+    const room = pool[Math.floor(Math.random() * pool.length)];
+    const pos = pickWalkableTile(room);
+    if (pos) spawned.push(makeWhiteHat(pos, id));
+  }
+
+  // Don't spawn on player position
+  const ppKey = `${state.player.position.x},${state.player.position.y}`;
+  for (const e of spawned) {
+    if (`${e.position.x},${e.position.y}` !== ppKey) {
+      state.entities.push(e);
+    }
+  }
 }
 
 function getCurrentCluster(state: GameState): Cluster {
@@ -212,6 +299,7 @@ function tryTransfer(state: GameState): boolean {
     }
 
     state.clusters.set(newId, newCluster);
+    spawnClusterEntities(state, newCluster);
     addMessage(state, `Cluster ${newId} generated.`, 'system');
   }
 
@@ -345,15 +433,17 @@ export function processAction(state: GameState, action: PlayerAction): boolean {
       }
     }
 
-    // Process other entities (placeholder for speed-based turns)
+    // Process other entities (speed-based turns)
     for (const entity of state.entities) {
       if (entity.clusterId !== state.currentClusterId) continue;
       entity.energy += 10;
       if (entity.energy >= entity.speed) {
         entity.energy -= entity.speed;
-        // Entity AI would go here
+        updateEntityAI(state, entity);
       }
     }
+    // Remove dead entities (coherence <= 0)
+    state.entities = state.entities.filter(e => (e.coherence ?? 1) > 0);
   }
 
   return acted;

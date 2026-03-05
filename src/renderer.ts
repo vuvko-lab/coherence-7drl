@@ -167,6 +167,7 @@ export class Renderer {
       tick?: number;
       revealEffects?: RevealEffect[];
       hazardFogMarks?: Map<string, HazardOverlayType>;
+      markedEntities?: Set<number>;
     },
   ) {
     if (!this.display) return;
@@ -298,14 +299,23 @@ export class Renderer {
     }
 
     // Entity pass — reuse cached bg so only the glyph changes
+    const markedEntities = extras?.markedEntities;
     for (const entity of entities) {
       if (entity.clusterId !== cluster.id) continue;
       const { x, y } = entity.position;
-      if (x >= 0 && x < this.width && y >= 0 && y < this.height) {
-        const tile = cluster.tiles[y][x];
-        if (tile.visible || mapReveal) {
-          this.display.draw(x, y, entity.glyph, entity.fg, this.bgCache[y][x]);
-        }
+      if (x < 0 || x >= this.width || y < 0 || y >= this.height) continue;
+      const tile = cluster.tiles[y][x];
+      if (!tile.visible && !mapReveal) continue;
+      // Logic Leech invisible during stalk — only show if debug/mapReveal
+      if (entity.ai?.invisible && !mapReveal) continue;
+      const isMarked = markedEntities?.has(entity.id) ?? false;
+      let fg = entity.fg;
+      // Marked entities get a yellow-tinted glyph (faction color kept, just desaturate/tint)
+      if (isMarked) fg = '#ffee44';
+      this.display.draw(x, y, entity.glyph, fg, this.bgCache[y][x]);
+      // Overlay a small ◈ marker one cell above if marked and room permits
+      if (isMarked && y > 0 && (cluster.tiles[y - 1]?.[x]?.visible || mapReveal)) {
+        this.display.draw(x, y - 1, '▲', '#ffee44', this.bgCache[y - 1]?.[x] ?? '#0a0a0a');
       }
     }
 
