@@ -222,6 +222,10 @@ function tryTransfer(state: GameState): boolean {
   state.player.position = { ...iface.targetPosition! };
   state.autoPath = [];
 
+  // Clear per-cluster transient state on transfer
+  state.hazardFogMarks.clear();
+  state.revealEffects = [];
+
   addMessage(state, `Transferred to cluster ${iface.targetClusterId}.`, 'important');
 
   computeFOV(targetCluster, state.player.position);

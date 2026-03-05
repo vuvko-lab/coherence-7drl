@@ -322,12 +322,12 @@ export class Renderer {
       let fg: string;
 
       if (!itemVisible) {
-        // Seen but not in current FOV: faint ghost
+        // Seen but not in current FOV: remembered ghost (dim but readable)
         switch (item.kind) {
-          case 'info_terminal': glyph = 'ⓘ'; fg = '#334455'; break;
-          case 'lost_echo':     glyph = '◌'; fg = '#223322'; break;
-          case 'archive_echo':  glyph = '≡'; fg = '#332211'; break;
-          default: glyph = '?'; fg = '#333333';
+          case 'info_terminal': glyph = 'ⓘ'; fg = '#2a5580'; break;
+          case 'lost_echo':     glyph = '◌'; fg = '#2a6650'; break;
+          case 'archive_echo':  glyph = '≡'; fg = '#7a5530'; break;
+          default: glyph = '?'; fg = '#445555';
         }
       } else {
         switch (item.kind) {
