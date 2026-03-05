@@ -1,4 +1,4 @@
-import { createGame, processAction, handleMapClick, stepAutoPath, addMessage, exportSave, loadSave, adminRegenCluster, adminTeleportToCluster, grantExitAccess, activateTerminal } from './game';
+import { createGame, processAction, handleMapClick, stepAutoPath, addMessage, exportSave, loadSave, adminRegenCluster, adminTeleportToCluster, grantExitAccess, activateTerminal, executeInteractableAction } from './game';
 import { setDamageParams, getDamageParams, setGenSizeOverride, clearGenSizeOverride, getGenSizeOverride, clusterScaleForId } from './cluster';
 import { Renderer, renderSelfPanel, renderLogs, renderOverviewPanel } from './renderer';
 import { InputHandler } from './input';
@@ -402,6 +402,71 @@ function closeTerminalOverlay() {
   state.openTerminal = undefined;
 }
 
+// ── Interactable overlay ──
+
+const interactableOverlay = document.getElementById('interactable-overlay')!;
+const iaKindBadge        = document.getElementById('ia-kind-badge')!;
+const iaContent          = document.getElementById('ia-content')!;
+const iaChoices          = document.getElementById('ia-choices')!;
+
+const IA_KIND_LABELS: Record<string, string> = {
+  info_terminal: '[ INFO TERMINAL ]',
+  lost_echo:     '[ LOST ECHO ]',
+  archive_echo:  '[ ARCHIVE FRAGMENT ]',
+};
+
+function openInteractableOverlay() {
+  const { openInteractable } = state;
+  if (!openInteractable) return;
+  const cluster = state.clusters.get(openInteractable.clusterId);
+  if (!cluster) return;
+  const item = cluster.interactables.find(i => i.id === openInteractable.id);
+  if (!item) return;
+
+  const node = item.dialog.find(n => n.id === item.currentNodeId);
+  if (!node) return;
+
+  iaKindBadge.textContent = IA_KIND_LABELS[item.kind] ?? '[ UNKNOWN ]';
+
+  iaContent.innerHTML = node.lines
+    .map(l => `<div class="ia-line${item.corrupted ? ' ia-corrupted' : ''}">${l}</div>`)
+    .join('');
+
+  iaChoices.innerHTML = '';
+  for (const choice of node.choices) {
+    if (choice.requiresRewardAvailable && item.rewardTaken) continue;
+    if (choice.requiresExitLocked && !cluster.exitLocked) continue;
+
+    const btn = document.createElement('button');
+    btn.className = 'ia-choice-btn';
+    btn.textContent = `> ${choice.label}`;
+    btn.addEventListener('click', () => {
+      if (choice.nodeId) {
+        item.currentNodeId = choice.nodeId;
+        openInteractableOverlay();
+      } else if (choice.action) {
+        const shouldClose = executeInteractableAction(
+          state, item.id, openInteractable.clusterId, choice.action,
+        );
+        if (shouldClose) {
+          closeInteractableOverlay();
+        } else {
+          openInteractableOverlay(); // re-render updated node
+        }
+        renderAll();
+      }
+    });
+    iaChoices.appendChild(btn);
+  }
+
+  interactableOverlay.classList.add('open');
+}
+
+function closeInteractableOverlay() {
+  interactableOverlay.classList.remove('open');
+  state.openInteractable = undefined;
+}
+
 function renderAll() {
   const currentCluster = state.clusters.get(state.currentClusterId)!;
 
@@ -414,7 +479,11 @@ function renderAll() {
     ? { fill: state.alertFill, threats: state.alertThreats, budget: 15 }
     : undefined;
   const collapseOverlay = state.showCollapseOverlay ? currentCluster.collapseMap : undefined;
-  renderer.render(currentCluster, state.entities, state.player.position, state.mapReveal, state.showRoomLabels, alertOverlay, collapseOverlay, state.showFunctionalOverlay);
+  renderer.render(currentCluster, state.entities, state.player.position, state.mapReveal, state.showRoomLabels, alertOverlay, collapseOverlay, state.showFunctionalOverlay, {
+    tick: state.tick,
+    revealEffects: state.revealEffects,
+    hazardFogMarks: state.hazardFogMarks,
+  });
   renderSelfPanel(panelEl, state.player, state.currentClusterId, state.tick, state.debugMode, state.mapReveal, state.godMode, state.invisibleMode, state.seed);
   renderLogs(logGeneralEl, logAlertEl, state.messages);
 
@@ -433,6 +502,10 @@ function renderAll() {
   // Open terminal overlay if requested
   if (state.openTerminal) {
     openTerminalOverlay();
+  }
+  // Open interactable overlay if requested
+  if (state.openInteractable) {
+    openInteractableOverlay();
   }
 }
 
@@ -743,6 +816,10 @@ terminalOverlay.addEventListener('click', (e) => {
   if (e.target === terminalOverlay) closeTerminalOverlay();
 });
 
+interactableOverlay.addEventListener('click', (e) => {
+  if (e.target === interactableOverlay) { closeInteractableOverlay(); renderAll(); }
+});
+
 // Close buttons [X]
 document.querySelectorAll('.overlay-close').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -750,6 +827,9 @@ document.querySelectorAll('.overlay-close').forEach(btn => {
     if (!targetId) return;
     if (targetId === 'terminal-overlay') {
       closeTerminalOverlay();
+    } else if (targetId === 'interactable-overlay') {
+      closeInteractableOverlay();
+      renderAll();
     } else {
       document.getElementById(targetId)?.classList.remove('open');
     }
@@ -758,6 +838,12 @@ document.querySelectorAll('.overlay-close').forEach(btn => {
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
+    if (interactableOverlay.classList.contains('open')) {
+      closeInteractableOverlay();
+      renderAll();
+      e.stopPropagation();
+      return;
+    }
     if (terminalOverlay.classList.contains('open')) {
       closeTerminalOverlay();
       e.stopPropagation();

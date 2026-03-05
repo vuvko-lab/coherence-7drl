@@ -94,6 +94,38 @@ function scanRow(
   }
 }
 
+/**
+ * BFS flood fill from center, radius-limited, blocked by walls and closed doors.
+ * Returns "x,y" key strings of all reachable cells (used for reveal effects).
+ */
+export function floodFillReveal(cluster: Cluster, center: Position, radius: number): string[] {
+  const keys: string[] = [];
+  const visited = new Set<string>();
+  const queue: { x: number; y: number; dist: number }[] = [{ x: center.x, y: center.y, dist: 0 }];
+  visited.add(`${center.x},${center.y}`);
+
+  while (queue.length > 0) {
+    const { x, y, dist } = queue.shift()!;
+    if (x >= 0 && x < cluster.width && y >= 0 && y < cluster.height) {
+      keys.push(`${x},${y}`);
+    }
+    if (dist >= radius) continue;
+    for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
+      const nx = x + dx;
+      const ny = y + dy;
+      const nk = `${nx},${ny}`;
+      if (visited.has(nk)) continue;
+      if (nx < 0 || nx >= cluster.width || ny < 0 || ny >= cluster.height) continue;
+      const tile = cluster.tiles[ny][nx];
+      if (tile.type === TileType.Door && !tile.doorOpen) continue;
+      if (!tile.transparent && tile.type !== TileType.Door) continue;
+      visited.add(nk);
+      queue.push({ x: nx, y: ny, dist: dist + 1 });
+    }
+  }
+  return keys;
+}
+
 export function computeFOV(cluster: Cluster, origin: Position, radius: number = 20) {
   // Clear visibility (keep seen state)
   for (let y = 0; y < cluster.height; y++) {

@@ -1,12 +1,13 @@
 import {
   GameState, Entity, Cluster, Position, PlayerAction, Tile,
   TileType, DIR_DELTA, GameMessage, Direction,
+  Interactable, DialogChoice,
 } from './types';
 import { generateCluster, placeEntryPoint } from './cluster';
-import { computeFOV } from './fov';
+import { computeFOV, floodFillReveal } from './fov';
 import { findPath } from './pathfinding';
 import { updateHazards, onPlayerEnterRoom, getPlayerRoom, applyTileHazardToPlayer, updateAlertModule } from './hazards';
-import { seed as seedRng, generateSeed } from './rng';
+import { seed as seedRng, generateSeed, randInt } from './rng';
 
 const DOOR_CLOSE_DELAY = 5; // ticks before an unoccupied open door auto-closes
 
@@ -78,6 +79,9 @@ export function createGame(initialSeed?: number): GameState {
     showCollapseOverlay: false,
     showFunctionalOverlay: false,
     showAlertOverlay: false,
+    revealEffects: [],
+    hazardFogMarks: new Map(),
+    alertLevel: 0,
   };
 
   addMessage(state, 'System boot... ego-fragment loaded from backup.', 'system');
@@ -132,6 +136,16 @@ function tryMove(state: GameState, dx: number, dy: number): boolean {
   // Bump-into-terminal → open it, no turn cost
   if (targetTile.type === TileType.Terminal && targetTile.terminalId) {
     state.openTerminal = { terminalId: targetTile.terminalId, clusterId: state.currentClusterId };
+    return false;
+  }
+
+  // Bump-into-interactable → open dialog, no turn cost
+  const bumped = cluster.interactables.find(
+    i => i.position.x === nx && i.position.y === ny && !i.hidden,
+  );
+  if (bumped) {
+    bumped.currentNodeId = 'root';
+    state.openInteractable = { id: bumped.id, clusterId: state.currentClusterId };
     return false;
   }
 
@@ -308,6 +322,25 @@ export function processAction(state: GameState, action: PlayerAction): boolean {
     applyTileHazardToPlayer(state);
     updateAlertModule(state);
 
+    // Update alert fog marks from newly visible hazard tiles
+    updateHazardFogMarks(state, cluster);
+
+    // Expire reveal effects
+    state.revealEffects = state.revealEffects.filter(e => e.expireTick > state.tick);
+
+    // Update lost echo visibility (random hide/reappear)
+    for (const item of cluster.interactables) {
+      if (item.kind !== 'lost_echo') continue;
+      if (item.hidden && state.tick >= item.hiddenUntilTick) {
+        item.hidden = false;
+      } else if (!item.hidden && state.openInteractable?.id !== item.id) {
+        if (Math.random() < 0.004) {
+          item.hidden = true;
+          item.hiddenUntilTick = state.tick + randInt(6, 22);
+        }
+      }
+    }
+
     // Process other entities (placeholder for speed-based turns)
     for (const entity of state.entities) {
       if (entity.clusterId !== state.currentClusterId) continue;
@@ -347,6 +380,113 @@ export function activateTerminal(state: GameState, terminalId: string, clusterId
   if (!cluster) return;
   const terminal = cluster.terminals.find(t => t.id === terminalId);
   if (terminal) terminal.activated = true;
+}
+
+// ── Interactable actions ──
+
+function applyReveal(state: GameState, cluster: Cluster, positions: string[], ticks: number) {
+  if (positions.length === 0) return;
+  state.revealEffects.push({ positions, expireTick: state.tick + ticks });
+  for (const key of positions) {
+    const [x, y] = key.split(',').map(Number);
+    const tile = cluster.tiles[y]?.[x];
+    if (tile) tile.seen = true;
+  }
+}
+
+function spawnCorruptionAtRoom(state: GameState, cluster: Cluster, roomId: number) {
+  const room = cluster.rooms.find(r => r.id === roomId);
+  if (!room) return;
+  const cx = Math.floor(room.x + room.w / 2);
+  const cy = Math.floor(room.y + room.h / 2);
+  const r = Math.max(1, Math.floor(Math.min(room.w, room.h) / 3));
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
+      const tile = cluster.tiles[cy + dy]?.[cx + dx];
+      if (tile?.type === TileType.Floor) {
+        tile.hazardOverlay = { type: 'corruption', stage: 0 };
+      }
+    }
+  }
+  room.containedHazards.add('corruption');
+  addMessage(state, 'Coherence field destabilised — corruption hazard spawned!', 'hazard');
+}
+
+/** Execute a dialog choice action for an interactable. Returns true if the overlay should close. */
+export function executeInteractableAction(
+  state: GameState,
+  itemId: string,
+  clusterId: number,
+  action: NonNullable<DialogChoice['action']>,
+): boolean {
+  if (action === 'close') return true;
+
+  const cluster = state.clusters.get(clusterId);
+  if (!cluster) return true;
+  const item = cluster.interactables.find(i => i.id === itemId) as Interactable | undefined;
+  if (!item) return true;
+
+  switch (action) {
+    case 'reveal_terminals': {
+      let count = 0;
+      for (const t of cluster.terminals) {
+        applyReveal(state, cluster, floodFillReveal(cluster, t.position, 2), 10);
+        count++;
+      }
+      addMessage(state, `Network scan: ${count} terminal${count !== 1 ? 's' : ''} located.`, 'system');
+      break;
+    }
+    case 'reveal_exits': {
+      let count = 0;
+      for (const iface of cluster.interfaces) {
+        applyReveal(state, cluster, floodFillReveal(cluster, iface.position, 2), 10);
+        count++;
+      }
+      addMessage(state, `Network scan: ${count} exit node${count !== 1 ? 's' : ''} located.`, 'system');
+      break;
+    }
+    case 'extract_reward': {
+      if (item.rewardTaken) break;
+      item.rewardTaken = true;
+
+      if ((item.alertCost ?? 0) > 0) {
+        state.alertLevel = Math.min(100, state.alertLevel + item.alertCost!);
+        addMessage(state, `Antivirus alert level: ${state.alertLevel}%.`, 'alert');
+      }
+      if (item.hasExitCode) {
+        cluster.exitLocked = false;
+        addMessage(state, 'Exit code extracted. Cluster egress unlocked.', 'important');
+      }
+      if (item.spawnHazardOnExtract) {
+        spawnCorruptionAtRoom(state, cluster, item.roomId);
+      }
+      if (item.revealTerminals) {
+        const unvisited = cluster.terminals.filter(t => !t.activated);
+        if (unvisited.length > 0) {
+          const t = unvisited[Math.floor(Math.random() * unvisited.length)];
+          applyReveal(state, cluster, floodFillReveal(cluster, t.position, 2), 10);
+          addMessage(state, 'Data fragment points to an unvisited terminal.', 'normal');
+        }
+      }
+      break;
+    }
+  }
+  return false; // keep overlay open so player sees updated state
+}
+
+function updateHazardFogMarks(state: GameState, cluster: Cluster) {
+  if (!state.player.modules?.some(m => m.id === 'alert.m' && m.status === 'loaded')) return;
+  for (let y = 0; y < cluster.height; y++) {
+    for (let x = 0; x < cluster.width; x++) {
+      const tile = cluster.tiles[y][x];
+      if (!tile.visible) continue;
+      if (tile.hazardOverlay) {
+        state.hazardFogMarks.set(`${x},${y}`, tile.hazardOverlay.type);
+      } else {
+        state.hazardFogMarks.delete(`${x},${y}`);
+      }
+    }
+  }
 }
 
 // ── Click-to-move ──

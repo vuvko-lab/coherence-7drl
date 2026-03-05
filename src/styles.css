@@ -843,6 +843,103 @@ body {
   border-color: #557766;
 }
 
+/* --- Interactable overlay --- */
+#interactable-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.75);
+  justify-content: center;
+  align-items: center;
+}
+
+#interactable-overlay.open {
+  display: flex;
+}
+
+#interactable-panel {
+  background: var(--theme-bg);
+  border: 1px solid #448866;
+  padding: 0;
+  min-width: 360px;
+  max-width: 540px;
+  width: 90%;
+  color: #44cc88;
+  line-height: 1.6;
+}
+
+#interactable-panel .panel-edge {
+  color: #448866;
+}
+
+#interactable-panel .panel-edge .fill::after {
+  color: #224433;
+}
+
+.ia-badge {
+  color: #44cc88;
+  padding: 0 1ch;
+  font-weight: bold;
+}
+
+#ia-body {
+  padding: 8px 2ch 4px;
+}
+
+#ia-content {
+  color: #88ddaa;
+  line-height: 1.5;
+  padding-bottom: 4px;
+}
+
+.ia-line {
+  margin-bottom: 2px;
+}
+
+.ia-line.ia-corrupted {
+  color: #aa8844;
+  letter-spacing: 0.02em;
+}
+
+.ia-choice-btn {
+  display: block;
+  width: 100%;
+  background: transparent;
+  border: 1px solid #224433;
+  color: #44cc88;
+  font-family: inherit;
+  font-size: inherit;
+  text-align: left;
+  padding: 3px 1ch;
+  margin: 2px 0;
+  cursor: pointer;
+  line-height: 1.5;
+}
+
+.ia-choice-btn:hover {
+  color: #88ffcc;
+  border-color: #448866;
+  background: #091a12;
+}
+
+.ia-choice-btn:active {
+  color: #aaffdd;
+  background: #0f2a1a;
+}
+
+/* lost echo — ghostly teal tint */
+#interactable-panel.kind-lost-echo {
+  border-color: #226644;
+  color: #33aa77;
+}
+
+/* archive echo — amber tint */
+#interactable-panel.kind-archive-echo {
+  border-color: #664422;
+  color: #cc8844;
+}
+
 /* === GLITCH EFFECTS === */
 
 /* Shake — rapid translational jitter */

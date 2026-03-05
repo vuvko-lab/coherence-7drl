@@ -1,6 +1,15 @@
 import * as ROT from 'rot-js';
-import { Cluster, Entity, Position, COLORS, Room, TileType } from './types';
+import { Cluster, Entity, Position, COLORS, Room, TileType, HazardOverlayType, RevealEffect } from './types';
 import type { FunctionalTag } from './types';
+
+const HAZARD_FOG_COLORS: Partial<Record<HazardOverlayType, string>> = {
+  corruption: '#441111',
+  flood: '#112233',
+  spark:  '#333300',
+  scorch: '#332211',
+  beam:   '#332200',
+  gravity: '#221133',
+};
 
 const FUNC_TAG_ABBREV: Record<FunctionalTag, string> = {
   engine_room: 'ENG',
@@ -154,8 +163,22 @@ export class Renderer {
     alertOverlay?: { fill?: Map<string, number>; threats?: { x: number; y: number }[]; budget: number },
     collapseOverlay?: number[][],
     showFunctionalOverlay = false,
+    extras?: {
+      tick?: number;
+      revealEffects?: RevealEffect[];
+      hazardFogMarks?: Map<string, HazardOverlayType>;
+    },
   ) {
     if (!this.display) return;
+
+    const tick = extras?.tick ?? 0;
+    const hazardFogMarks = extras?.hazardFogMarks;
+
+    // Pre-compute revealed tile keys from active reveal effects
+    const revealedKeys = new Set<string>();
+    for (const effect of (extras?.revealEffects ?? [])) {
+      for (const k of effect.positions) revealedKeys.add(k);
+    }
 
     const pathSet = new Set(this.pathHighlight.map(p => `${p.x},${p.y}`));
     const threatSet = alertOverlay?.threats
@@ -166,7 +189,9 @@ export class Renderer {
     for (let y = 0; y < this.height; y++) {
       for (let x = 0; x < this.width; x++) {
         const tile = cluster.tiles[y][x];
-        const isVisible = tile.visible || mapReveal;
+        const tileKey = `${x},${y}`;
+        const isRevealed = revealedKeys.has(tileKey);
+        const isVisible = tile.visible || mapReveal || isRevealed;
 
         let glyph = tile.glyph;
         let fg = tile.fg;
@@ -205,12 +230,25 @@ export class Renderer {
         }
 
         if (!tile.seen && !isVisible) {
-          glyph = ' ';
-          fg = COLORS.unexplored;
-          bg = COLORS.unexplored;
+          // Check alert-module hazard fog mark
+          const fogMark = hazardFogMarks?.get(tileKey);
+          if (fogMark) {
+            glyph = '?';
+            fg = HAZARD_FOG_COLORS[fogMark] ?? '#333333';
+            bg = COLORS.bg;
+          } else {
+            glyph = ' ';
+            fg = COLORS.unexplored;
+            bg = COLORS.unexplored;
+          }
         } else if (tile.seen && !isVisible) {
           fg = COLORS.rememberedFg;
           bg = COLORS.bg;
+          // Tint remembered hazard tiles when alert module has marked them
+          const fogMark = hazardFogMarks?.get(tileKey);
+          if (fogMark) {
+            fg = HAZARD_FOG_COLORS[fogMark] ?? COLORS.rememberedFg;
+          }
         }
 
         // Hover highlight
@@ -269,6 +307,49 @@ export class Renderer {
           this.display.draw(x, y, entity.glyph, entity.fg, this.bgCache[y][x]);
         }
       }
+    }
+
+    // Interactable pass — drawn on top of tiles/entities
+    for (const item of cluster.interactables) {
+      if (item.hidden) continue;
+      const { x, y } = item.position;
+      if (x < 0 || x >= this.width || y < 0 || y >= this.height) continue;
+      const tile = cluster.tiles[y][x];
+      const itemVisible = tile.visible || mapReveal || revealedKeys.has(`${x},${y}`);
+      if (!itemVisible && !tile.seen) continue;
+
+      let glyph: string;
+      let fg: string;
+
+      if (!itemVisible) {
+        // Seen but not in current FOV: faint ghost
+        switch (item.kind) {
+          case 'info_terminal': glyph = 'ⓘ'; fg = '#334455'; break;
+          case 'lost_echo':     glyph = '◌'; fg = '#223322'; break;
+          case 'archive_echo':  glyph = '≡'; fg = '#332211'; break;
+          default: glyph = '?'; fg = '#333333';
+        }
+      } else {
+        switch (item.kind) {
+          case 'info_terminal':
+            glyph = item.corrupted && (tick % 5 === 0) ? '⌧' : 'ⓘ';
+            fg = item.corrupted ? '#aaaa44' : '#44aaff';
+            break;
+          case 'lost_echo': {
+            const phase = tick % 5;
+            glyph = phase === 0 ? '◍' : phase === 3 ? '●' : '◌';
+            const brightness = 35 + (tick % 4) * 8;
+            fg = `hsl(165,55%,${brightness}%)`;
+            break;
+          }
+          case 'archive_echo':
+            glyph = item.corrupted && (tick % 7 === 0) ? '≢' : '≡';
+            fg = item.corrupted ? '#cc8844' : '#cccc44';
+            break;
+          default: glyph = '?'; fg = '#888888';
+        }
+      }
+      this.drawOver(x, y, glyph, fg);
     }
 
     // Player on top

@@ -1476,9 +1476,10 @@ const SCALE_TABLE: [maxId: number, w: number, h: number, hallChance: number, exi
   [0, 22, 16, 0.00, 1.0],
   [1, 28, 20, 0.10, 0.9],
   [2, 35, 24, 0.20, 0.6],
-  [3, 42, 27, 0.32, 0.2],
+  [3, 42, 27, 0.20, 0.2],
+  [4, 42, 27, 0.20, 0.2],
 ];
-const SCALE_MAX: ClusterScale = { w: CLUSTER_WIDTH, h: CLUSTER_HEIGHT, hallChance: 0.40, exitChance: 0.90 };
+const SCALE_MAX: ClusterScale = { w: CLUSTER_WIDTH, h: CLUSTER_HEIGHT, hallChance: 0.30, exitChance: 0.10 };
 
 export function clusterScaleForId(id: number): ClusterScale {
   for (const [maxId, w, h, hallChance, exitChance] of SCALE_TABLE) {
