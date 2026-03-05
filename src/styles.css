@@ -195,26 +195,6 @@ body {
   align-items: center;
 }
 
-#map-grid {
-  line-height: 1;
-  letter-spacing: 0;
-  white-space: pre;
-}
-
-#map-grid .cell {
-  display: inline-block;
-  width: 1ch;
-  height: 1.2em;
-  text-align: center;
-}
-
-#map-grid .cell.highlight {
-  background: #1a3a1a;
-}
-
-#map-grid .cell.path {
-  background: #2a3a1a;
-}
 
 /* --- Message log --- */
 #log-placeholder {

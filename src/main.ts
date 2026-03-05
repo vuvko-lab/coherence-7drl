@@ -3,7 +3,7 @@ import { Renderer, renderSelfPanel, renderLogs, renderOverviewPanel } from './re
 import { InputHandler } from './input';
 import { PlayerAction, Position, TileType } from './types';
 import { generateSeed } from './rng';
-import { GLITCH_EFFECTS } from './glitch';
+import { GLITCH_EFFECTS, initGlitch } from './glitch';
 
 // ── Bootstrap ──
 
@@ -16,6 +16,7 @@ function parseSeedFromURL(): number | undefined {
 
 let state = createGame(parseSeedFromURL());
 const renderer = new Renderer('map-grid-wrap');
+initGlitch(renderer);
 
 function initRenderer() {
   const cluster = state.clusters.get(state.currentClusterId)!;
@@ -225,7 +226,7 @@ function renderAll() {
   const currentCluster = state.clusters.get(state.currentClusterId)!;
 
   // Re-init grid if cluster size changed (e.g. after transfer)
-  if (renderer['width'] !== currentCluster.width || renderer['height'] !== currentCluster.height) {
+  if (renderer.displayWidth !== currentCluster.width || renderer.displayHeight !== currentCluster.height) {
     renderer.initGrid(currentCluster.width, currentCluster.height);
   }
 
@@ -500,10 +501,13 @@ document.getElementById('cfg-advanced-toggle')!.addEventListener('click', () => 
 });
 
 function applySettings() {
-  document.body.style.fontFamily = cfgFont.value;
-  document.body.style.fontSize = getSliderValue(fontSizeSlider) + 'px';
-  localStorage.setItem('cfg-font', cfgFont.value);
-  localStorage.setItem('cfg-font-size', String(getSliderValue(fontSizeSlider)));
+  const family = cfgFont.value;
+  const size = getSliderValue(fontSizeSlider);
+  document.body.style.fontFamily = family;
+  document.body.style.fontSize = size + 'px';
+  renderer.setFont(family, size);
+  localStorage.setItem('cfg-font', family);
+  localStorage.setItem('cfg-font-size', String(size));
 }
 
 function loadSettings() {

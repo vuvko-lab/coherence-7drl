@@ -7,11 +7,15 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "graph-stats": "tsx scripts/graph-stats.ts"
+    "graph-stats": "tsx scripts/graph-stats.ts",
+    "test-glitch": "tsx scripts/test-glitch.ts"
   },
   "devDependencies": {
     "tsx": "^4.21.0",
     "typescript": "^5.7.0",
     "vite": "^6.0.0"
+  },
+  "dependencies": {
+    "rot-js": "^2.2.1"
   }
 }

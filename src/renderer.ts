@@ -1,3 +1,4 @@
+import * as ROT from 'rot-js';
 import { Cluster, Entity, Position, COLORS, Room, TileType } from './types';
 import type { FunctionalTag } from './types';
 
@@ -55,59 +56,88 @@ function debugRoomColor(room: Room): string {
 
 export class Renderer {
   private container: HTMLElement;
-  private grid: HTMLElement;
-  private cells: HTMLSpanElement[][] = [];
+  private display: ROT.Display | null = null;
   private width = 0;
   private height = 0;
   private hoveredCell: Position | null = null;
   private pathHighlight: Position[] = [];
+  // Cache computed bg per cell so entity/player draws preserve it
+  private bgCache: string[][] = [];
+  private fontFamily = '"Courier New", Courier, monospace';
+  private fontSize = 16;
 
   onCellClick: ((pos: Position) => void) | null = null;
   onCellHover: ((pos: Position | null) => void) | null = null;
 
+  get displayWidth() { return this.width; }
+  get displayHeight() { return this.height; }
+
   constructor(wrapId: string) {
     this.container = document.getElementById(wrapId)!;
-    this.grid = document.createElement('div');
-    this.grid.id = 'map-grid';
-    this.container.appendChild(this.grid);
+  }
 
-    this.container.addEventListener('mouseleave', () => {
-      this.hoveredCell = null;
-      this.onCellHover?.(null);
-    });
+  setFont(family: string, size: number) {
+    this.fontFamily = family;
+    this.fontSize = size;
+    if (this.display) {
+      this.display.setOptions({ fontFamily: family, fontSize: size });
+    }
   }
 
   initGrid(width: number, height: number) {
     this.width = width;
     this.height = height;
-    this.grid.innerHTML = '';
-    this.cells = [];
+    this.container.innerHTML = '';
+    this.bgCache = Array.from({ length: height }, () => Array(width).fill(COLORS.bg));
 
-    for (let y = 0; y < height; y++) {
-      const row: HTMLSpanElement[] = [];
-      for (let x = 0; x < width; x++) {
-        const span = document.createElement('span');
-        span.className = 'cell';
-        span.dataset.x = String(x);
-        span.dataset.y = String(y);
-        span.textContent = ' ';
+    this.display = new ROT.Display({
+      width,
+      height,
+      fontSize: this.fontSize,
+      fontFamily: this.fontFamily,
+      bg: COLORS.bg,
+      fg: '#33aa66',
+      layout: 'rect',
+      forceSquareRatio: true,
+    });
 
-        span.addEventListener('click', () => {
-          this.onCellClick?.({ x, y });
-        });
+    const canvas = this.display.getContainer() as HTMLCanvasElement;
+    canvas.style.display = 'block';
+    this.container.appendChild(canvas);
 
-        span.addEventListener('mouseenter', () => {
-          this.hoveredCell = { x, y };
-          this.onCellHover?.({ x, y });
-        });
-
-        row.push(span);
-        this.grid.appendChild(span);
+    canvas.addEventListener('click', (e) => {
+      if (!this.display) return;
+      const [cx, cy] = this.display.eventToPosition(e);
+      if (cx >= 0 && cx < this.width && cy >= 0 && cy < this.height) {
+        this.onCellClick?.({ x: cx, y: cy });
       }
-      // Line break after each row
-      this.grid.appendChild(document.createTextNode('\n'));
-      this.cells.push(row);
-    }
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+      if (!this.display) return;
+      const [cx, cy] = this.display.eventToPosition(e);
+      if (cx >= 0 && cx < this.width && cy >= 0 && cy < this.height) {
+        if (!this.hoveredCell || this.hoveredCell.x !== cx || this.hoveredCell.y !== cy) {
+          this.hoveredCell = { x: cx, y: cy };
+          this.onCellHover?.({ x: cx, y: cy });
+        }
+      } else if (this.hoveredCell) {
+        this.hoveredCell = null;
+        this.onCellHover?.(null);
+      }
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+      this.hoveredCell = null;
+      this.onCellHover?.(null);
+    });
+  }
+
+  /** Draw a character on top of the canvas, preserving the tile's background. */
+  drawOver(x: number, y: number, ch: string, fg: string) {
+    if (!this.display) return;
+    const bg = this.bgCache[y]?.[x] ?? COLORS.bg;
+    this.display.draw(x, y, ch, fg, bg);
   }
 
   setPathHighlight(path: Position[]) {
@@ -124,15 +154,17 @@ export class Renderer {
     collapseOverlay?: number[][],
     showFunctionalOverlay = false,
   ) {
+    if (!this.display) return;
+
     const pathSet = new Set(this.pathHighlight.map(p => `${p.x},${p.y}`));
     const threatSet = alertOverlay?.threats
       ? new Set(alertOverlay.threats.map(t => `${t.x},${t.y}`))
       : undefined;
 
+    // Tile pass — compute colors and draw, cache bg for overlay passes
     for (let y = 0; y < this.height; y++) {
       for (let x = 0; x < this.width; x++) {
         const tile = cluster.tiles[y][x];
-        const cell = this.cells[y][x];
         const isVisible = tile.visible || mapReveal;
 
         let glyph = tile.glyph;
@@ -159,9 +191,9 @@ export class Renderer {
               fg = '#ffcc00'; bg = '#1a1a00';
               break;
             case 'scorch':
-              if (ho.stage === 1) { fg = '#ff8800'; } // trigger trap pulse (mild)
-              else if (ho.stage === 2) { fg = '#ff4400'; } // trigger trap pulse (urgent)
-              else { glyph = '▓'; fg = '#664422'; } // detonated
+              if (ho.stage === 1) { fg = '#ff8800'; }
+              else if (ho.stage === 2) { fg = '#ff4400'; }
+              else { glyph = '▓'; fg = '#664422'; }
               break;
             case 'gravity':
               if (ho.stage === 2) { glyph = '●'; fg = '#aa44ff'; bg = '#1a0a2a'; }
@@ -172,20 +204,16 @@ export class Renderer {
         }
 
         if (!tile.seen && !isVisible) {
-          // Unexplored
           glyph = ' ';
           fg = COLORS.unexplored;
           bg = COLORS.unexplored;
         } else if (tile.seen && !isVisible) {
-          // Remembered but not visible
           fg = COLORS.rememberedFg;
           bg = COLORS.bg;
         }
-        // else: visible — use tile colors as-is
 
         // Hover highlight
-        const isHovered = this.hoveredCell?.x === x && this.hoveredCell?.y === y;
-        if (isHovered && isVisible) {
+        if (this.hoveredCell?.x === x && this.hoveredCell?.y === y && isVisible) {
           bg = '#1a3a1a';
         }
 
@@ -200,11 +228,9 @@ export class Renderer {
           const cost = alertOverlay.fill.get(tileKey);
           if (cost !== undefined) {
             if (threatSet?.has(tileKey)) {
-              // Threat tile — red highlight
               bg = '#3a1010';
               fg = '#ff4444';
             } else {
-              // Filled tile — green tint fading with cost
               const intensity = Math.max(0, 1 - cost / alertOverlay.budget);
               const g = Math.round(20 + intensity * 30);
               bg = `rgb(10,${g},15)`;
@@ -227,23 +253,19 @@ export class Renderer {
           }
         }
 
-        cell.textContent = glyph;
-        cell.style.color = fg;
-        cell.style.backgroundColor = bg;
-        cell.classList.toggle('highlight', isHovered && isVisible);
-        cell.classList.toggle('path', pathSet.has(`${x},${y}`) && isVisible);
+        this.bgCache[y][x] = bg;
+        this.display.draw(x, y, glyph, fg, bg);
       }
     }
 
-    // Overlay entities
+    // Entity pass — reuse cached bg so only the glyph changes
     for (const entity of entities) {
       if (entity.clusterId !== cluster.id) continue;
       const { x, y } = entity.position;
       if (x >= 0 && x < this.width && y >= 0 && y < this.height) {
         const tile = cluster.tiles[y][x];
         if (tile.visible || mapReveal) {
-          this.cells[y][x].textContent = entity.glyph;
-          this.cells[y][x].style.color = entity.fg;
+          this.display.draw(x, y, entity.glyph, entity.fg, this.bgCache[y][x]);
         }
       }
     }
@@ -251,32 +273,27 @@ export class Renderer {
     // Player on top
     const { x: px, y: py } = playerPos;
     if (px >= 0 && px < this.width && py >= 0 && py < this.height) {
-      this.cells[py][px].textContent = '@';
-      this.cells[py][px].style.color = COLORS.player;
+      this.display.draw(px, py, '@', COLORS.player, this.bgCache[py][px]);
     }
 
-    // Debug overlay: room IDs and types
+    // Room label overlay
     if (showRoomLabels) {
       for (const room of cluster.rooms) {
         const cx = Math.floor(room.x + room.w / 2);
         const cy = Math.floor(room.y + room.h / 2);
         const label = debugRoomLabel(room);
-        // Place label chars centered in the room
         const startX = cx - Math.floor(label.length / 2);
         for (let i = 0; i < label.length; i++) {
           const lx = startX + i;
           if (lx >= 0 && lx < this.width && cy >= 0 && cy < this.height) {
-            // Don't overwrite player
             if (lx === px && cy === py) continue;
-            this.cells[cy][lx].textContent = label[i];
-            this.cells[cy][lx].style.color = debugRoomColor(room);
-            this.cells[cy][lx].style.backgroundColor = '#0a0a0a';
+            this.display.draw(lx, cy, label[i], debugRoomColor(room), '#0a0a0a');
           }
         }
       }
     }
 
-    // Debug overlay: functional tags at room centers
+    // Functional tag overlay
     if (showFunctionalOverlay) {
       for (const room of cluster.rooms) {
         const tag = room.tags.functional;
@@ -290,9 +307,7 @@ export class Renderer {
           const lx = startX + i;
           if (lx >= 0 && lx < this.width && cy >= 0 && cy < this.height) {
             if (lx === px && cy === py) continue;
-            this.cells[cy][lx].textContent = abbrev[i];
-            this.cells[cy][lx].style.color = color;
-            this.cells[cy][lx].style.backgroundColor = '#0a0a0a';
+            this.display.draw(lx, cy, abbrev[i], color, '#0a0a0a');
           }
         }
       }
