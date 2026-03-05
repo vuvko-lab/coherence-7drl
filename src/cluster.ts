@@ -1,34 +1,14 @@
 import {
   Cluster, Tile, TileType, Room, Position, InterfaceExit,
-  RoomType, CorruptionStage,
+  RoomType, CorruptionStage, HazardOverlayType,
   CLUSTER_WIDTH, CLUSTER_HEIGHT, COLORS,
 } from './types';
-
-// ── Constants ──
-
-const PAD = 1; // void padding around the map
-const IX = PAD;
-const IY = PAD;
-const IW = CLUSTER_WIDTH - 2 * PAD;
-const IH = CLUSTER_HEIGHT - 2 * PAD;
-const MIN_ROOM_DIM = 3; // minimum interior dimension (excluding walls)
-const CORRIDOR_CHANCE = 0.20;
-const CORRIDOR_WIDTH = 4; // includes walls → 2-tile interior (no 1-tile corridors)
-
-/** Fraction of non-spanning-tree room pairs that get extra doors (creates loops).
- *  Tuned via graph-stats sweep: 0.5 hits MVC≥2 in 62% of clusters, avg degree ~3. */
-let EXTRA_DOOR_CHANCE = 0.5;
-export function setExtraDoorChance(v: number) { EXTRA_DOOR_CHANCE = v; }
-export function getExtraDoorChance() { return EXTRA_DOOR_CHANCE; }
+import { generate, CellType, RoomDef } from './gen-halls';
 
 // ── RNG helpers ──
 
 function randInt(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
-}
-
-function pick<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)];
 }
 
 // ── Tile factories ──
@@ -62,270 +42,16 @@ function interfaceTile(): Tile {
   return makeTile(TileType.InterfaceExit, '⇋', COLORS.interfaceExit);
 }
 
-// ── Intermediate cell grid for generation ──
-
-type Cell = 'floor' | 'wall' | 'door' | 'void';
-type CellGrid = Cell[][];
-
-function createCellGrid(): CellGrid {
-  const grid: CellGrid = [];
-  for (let y = 0; y < CLUSTER_HEIGHT; y++) {
-    grid[y] = [];
-    for (let x = 0; x < CLUSTER_WIDTH; x++) {
-      grid[y][x] = 'void';
-    }
-  }
-  return grid;
-}
-
-// ── Recursive division ──
-
-function carveRoom(grid: CellGrid, x: number, y: number, w: number, h: number) {
-  for (let ry = y; ry < y + h; ry++) {
-    for (let rx = x; rx < x + w; rx++) {
-      if (ry < 0 || ry >= CLUSTER_HEIGHT || rx < 0 || rx >= CLUSTER_WIDTH) continue;
-      if (ry === y || ry === y + h - 1 || rx === x || rx === x + w - 1) {
-        if (grid[ry][rx] !== 'floor' && grid[ry][rx] !== 'door') {
-          grid[ry][rx] = 'wall';
-        }
-      } else {
-        grid[ry][rx] = 'floor';
-      }
-    }
-  }
-}
-
-// ── Post-process door placement ──
-// Scans for wall cells that have floor on both sides (valid door positions),
-// groups them by the room pair they connect, and places 1-2 doors per pair.
-
-function placeDoors(grid: CellGrid, rooms: Room[]): Map<number, number[]> {
-  const adjacency = new Map<number, number[]>();
-  for (const room of rooms) adjacency.set(room.id, []);
-  // Build room ID lookup from room rects
-  const roomIdAt: number[][] = [];
-  for (let y = 0; y < CLUSTER_HEIGHT; y++) {
-    roomIdAt[y] = new Array(CLUSTER_WIDTH).fill(-1);
-  }
-  for (const room of rooms) {
-    for (let ry = room.y + 1; ry < room.y + room.h - 1; ry++) {
-      for (let rx = room.x + 1; rx < room.x + room.w - 1; rx++) {
-        if (ry >= 0 && ry < CLUSTER_HEIGHT && rx >= 0 && rx < CLUSTER_WIDTH) {
-          roomIdAt[ry][rx] = room.id;
-        }
-      }
-    }
-  }
-
-  // Find all valid door candidates, grouped by the room pair they connect
-  const pairCandidates = new Map<string, { x: number; y: number }[]>();
-
-  for (let y = IY + 1; y < IY + IH - 1; y++) {
-    for (let x = IX + 1; x < IX + IW - 1; x++) {
-      if (grid[y][x] !== 'wall') continue;
-
-      // Horizontal door: floor left & right, wall up & down
-      if (grid[y][x - 1] === 'floor' && grid[y][x + 1] === 'floor' &&
-          (grid[y - 1][x] === 'wall') && (grid[y + 1][x] === 'wall')) {
-        const idL = roomIdAt[y][x - 1];
-        const idR = roomIdAt[y][x + 1];
-        if (idL >= 0 && idR >= 0 && idL !== idR) {
-          const key = `${Math.min(idL, idR)}-${Math.max(idL, idR)}`;
-          if (!pairCandidates.has(key)) pairCandidates.set(key, []);
-          pairCandidates.get(key)!.push({ x, y });
-        }
-      }
-
-      // Vertical door: floor up & down, wall left & right
-      if (grid[y - 1][x] === 'floor' && grid[y + 1][x] === 'floor' &&
-          (grid[y][x - 1] === 'wall') && (grid[y][x + 1] === 'wall')) {
-        const idU = roomIdAt[y - 1][x];
-        const idD = roomIdAt[y + 1][x];
-        if (idU >= 0 && idD >= 0 && idU !== idD) {
-          const key = `${Math.min(idU, idD)}-${Math.max(idU, idD)}`;
-          if (!pairCandidates.has(key)) pairCandidates.set(key, []);
-          pairCandidates.get(key)!.push({ x, y });
-        }
-      }
-    }
-  }
-
-  // ── Spanning-tree door selection (maze-like connectivity) ──
-  // Union-find
-  const parent = new Map<number, number>();
-  function find(x: number): number {
-    if (!parent.has(x)) parent.set(x, x);
-    if (parent.get(x) !== x) parent.set(x, find(parent.get(x)!));
-    return parent.get(x)!;
-  }
-  function union(a: number, b: number): boolean {
-    const ra = find(a), rb = find(b);
-    if (ra === rb) return false;
-    parent.set(ra, rb);
-    return true;
-  }
-
-  // Initialize all room ids in union-find
-  for (const room of rooms) find(room.id);
-
-  // Collect and shuffle all pair keys
-  const allPairs = [...pairCandidates.keys()];
-  for (let i = allPairs.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [allPairs[i], allPairs[j]] = [allPairs[j], allPairs[i]];
-  }
-
-  // Build spanning tree — guarantees all rooms are reachable
-  const selectedPairs = new Set<string>();
-  for (const key of allPairs) {
-    const [idA, idB] = key.split('-').map(Number);
-    if (union(idA, idB)) {
-      selectedPairs.add(key);
-    }
-  }
-
-  // Add extra connections from remaining pairs (loops / alternate paths)
-  for (const key of allPairs) {
-    if (selectedPairs.has(key)) continue;
-    if (Math.random() < EXTRA_DOOR_CHANCE) {
-      selectedPairs.add(key);
-    }
-  }
-
-  // Only place doors for selected pairs
-  for (const key of selectedPairs) {
-    const candidates = pairCandidates.get(key)!;
-    if (!candidates || candidates.length === 0) continue;
-
-    const [idA, idB] = key.split('-').map(Number);
-
-    // Place first door
-    const idx1 = randInt(0, candidates.length - 1);
-    const d1 = candidates[idx1];
-    grid[d1.y][d1.x] = 'door';
-
-    // Place second door for long shared walls
-    if (candidates.length >= 6 && Math.random() < 0.4) {
-      const idx2 = randInt(0, candidates.length - 1);
-      const d2 = candidates[idx2];
-      if (Math.abs(d2.x - d1.x) + Math.abs(d2.y - d1.y) > 3) {
-        grid[d2.y][d2.x] = 'door';
-      }
-    }
-
-    // Record adjacency
-    if (!adjacency.get(idA)!.includes(idB)) adjacency.get(idA)!.push(idB);
-    if (!adjacency.get(idB)!.includes(idA)) adjacency.get(idB)!.push(idA);
-  }
-
-  return adjacency;
-}
-
-function divide(
-  grid: CellGrid, rooms: Room[],
-  x: number, y: number, w: number, h: number,
-  depth: number, nextId: { value: number },
-) {
-  const innerW = w - 2;
-  const innerH = h - 2;
-  const area = innerW * innerH;
-
-  // Stop conditions
-  if (innerW < MIN_ROOM_DIM || innerH < MIN_ROOM_DIM || area < 15) {
-    carveRoom(grid, x, y, w, h);
-    rooms.push({ id: nextId.value++, x, y, w, h, roomType: 'normal', containedHazards: new Set() });
-    return;
-  }
-
-  // Medium rooms: chance to stop
-  if (area < 40 && Math.random() > 0.6) {
-    carveRoom(grid, x, y, w, h);
-    rooms.push({ id: nextId.value++, x, y, w, h, roomType: 'normal', containedHazards: new Set() });
-    return;
-  }
-
-  // Choose split direction: prefer longer axis
-  const ratio = w / h;
-  let splitH: boolean;
-  if (ratio > 1.5) splitH = false;
-  else if (ratio < 0.67) splitH = true;
-  else splitH = Math.random() < 0.5;
-
-  if (splitH) {
-    const minSplit = y + MIN_ROOM_DIM + 1;
-    const maxSplit = y + h - MIN_ROOM_DIM - 2;
-    if (minSplit > maxSplit) {
-      carveRoom(grid, x, y, w, h);
-      rooms.push({ id: nextId.value++, x, y, w, h, roomType: 'normal', containedHazards: new Set() });
-      return;
-    }
-
-    const splitAt = randInt(minSplit, maxSplit);
-
-    // Corridor injection
-    if (Math.random() < CORRIDOR_CHANCE && h > CORRIDOR_WIDTH + MIN_ROOM_DIM + 3) {
-      const corrH = CORRIDOR_WIDTH;
-      const corrY = splitAt;
-      divide(grid, rooms, x, y, w, corrY - y + 1, depth + 1, nextId);
-      carveRoom(grid, x, corrY, w, corrH);
-      rooms.push({ id: nextId.value++, x, y: corrY, w, h: corrH, roomType: 'normal', containedHazards: new Set() });
-      divide(grid, rooms, x, corrY + corrH - 1, w, y + h - (corrY + corrH - 1), depth + 1, nextId);
-      return;
-    }
-
-    const topH = splitAt - y + 1;
-    const botH = h - topH + 1;
-
-    for (let rx = x; rx < x + w; rx++) {
-      grid[splitAt][rx] = 'wall';
-    }
-
-    divide(grid, rooms, x, y, w, topH, depth + 1, nextId);
-    divide(grid, rooms, x, splitAt, w, botH, depth + 1, nextId);
-  } else {
-    const minSplit = x + MIN_ROOM_DIM + 1;
-    const maxSplit = x + w - MIN_ROOM_DIM - 2;
-    if (minSplit > maxSplit) {
-      carveRoom(grid, x, y, w, h);
-      rooms.push({ id: nextId.value++, x, y, w, h, roomType: 'normal', containedHazards: new Set() });
-      return;
-    }
-
-    const splitAt = randInt(minSplit, maxSplit);
-
-    // Corridor injection
-    if (Math.random() < CORRIDOR_CHANCE && w > CORRIDOR_WIDTH + MIN_ROOM_DIM + 3) {
-      const corrW = CORRIDOR_WIDTH;
-      const corrX = splitAt;
-      divide(grid, rooms, x, y, corrX - x + 1, h, depth + 1, nextId);
-      carveRoom(grid, corrX, y, corrW, h);
-      rooms.push({ id: nextId.value++, x: corrX, y, w: corrW, h, roomType: 'normal', containedHazards: new Set() });
-      divide(grid, rooms, corrX + corrW - 1, y, x + w - (corrX + corrW - 1), h, depth + 1, nextId);
-      return;
-    }
-
-    const leftW = splitAt - x + 1;
-    const rightW = w - leftW + 1;
-
-    for (let ry = y; ry < y + h; ry++) {
-      grid[ry][splitAt] = 'wall';
-    }
-
-    divide(grid, rooms, x, y, leftW, h, depth + 1, nextId);
-    divide(grid, rooms, splitAt, y, rightW, h, depth + 1, nextId);
-  }
-}
-
 // ── Wall glyph selection ──
 
 function isOuterPos(y: number, x: number): boolean {
-  return y === IY || y === IY + IH - 1 || x === IX || x === IX + IW - 1;
+  return y === 0 || y === CLUSTER_HEIGHT - 1 || x === 0 || x === CLUSTER_WIDTH - 1;
 }
 
-function wallGlyph(grid: CellGrid, x: number, y: number, outer: boolean): string {
+function wallGlyph(cells: CellType[][], x: number, y: number, outer: boolean): string {
   const isWall = (ty: number, tx: number) => {
     if (ty < 0 || ty >= CLUSTER_HEIGHT || tx < 0 || tx >= CLUSTER_WIDTH) return true;
-    return grid[ty][tx] === 'wall' || grid[ty][tx] === 'door';
+    return cells[ty][tx] === 'wall' || cells[ty][tx] === 'door';
   };
 
   const n = isWall(y - 1, x);
@@ -377,43 +103,131 @@ function wallGlyph(grid: CellGrid, x: number, y: number, outer: boolean): string
   return '─';
 }
 
-// ── Convert cell grid to tile grid ──
+// ── Room ID map ──
 
-function cellGridToTiles(grid: CellGrid, rooms: Room[]): Tile[][] {
-  const tiles: Tile[][] = [];
-
-  // Build room lookup: for each floor cell, find which room it belongs to
-  const roomMap: number[][] = [];
+function buildRoomIdMap(rawRooms: RoomDef[]): number[][] {
+  const map: number[][] = [];
   for (let y = 0; y < CLUSTER_HEIGHT; y++) {
-    roomMap[y] = new Array(CLUSTER_WIDTH).fill(-1);
+    map[y] = new Array(CLUSTER_WIDTH).fill(-1);
   }
-  for (const room of rooms) {
-    for (let ry = room.y + 1; ry < room.y + room.h - 1; ry++) {
-      for (let rx = room.x + 1; rx < room.x + room.w - 1; rx++) {
+  for (const rd of rawRooms) {
+    const r = rd.rect;
+    for (let ry = r.y; ry < r.y + r.h; ry++) {
+      for (let rx = r.x; rx < r.x + r.w; rx++) {
         if (ry >= 0 && ry < CLUSTER_HEIGHT && rx >= 0 && rx < CLUSTER_WIDTH) {
-          roomMap[ry][rx] = room.id;
+          map[ry][rx] = rd.id;
+        }
+      }
+    }
+  }
+  return map;
+}
+
+// ── Room adjacency ──
+
+function buildRoomAdjacency(cells: CellType[][], rawRooms: RoomDef[]): Map<number, number[]> {
+  const roomIdAt = buildRoomIdMap(rawRooms);
+  const adj = new Map<number, number[]>();
+  for (const r of rawRooms) adj.set(r.id, []);
+
+  const addEdge = (a: number, b: number) => {
+    if (a === b) return;
+    if (!adj.get(a)!.includes(b)) adj.get(a)!.push(b);
+    if (!adj.get(b)!.includes(a)) adj.get(b)!.push(a);
+  };
+
+  // Flood-fill through contiguous hall+door regions.
+  // All rooms touching such a region are mutually adjacent.
+  const visited = new Set<string>();
+
+  for (let y = 0; y < CLUSTER_HEIGHT; y++) {
+    for (let x = 0; x < CLUSTER_WIDTH; x++) {
+      const c = cells[y][x];
+      if (c !== 'hall' && c !== 'door') continue;
+      const key = `${x},${y}`;
+      if (visited.has(key)) continue;
+
+      // BFS through this contiguous non-room walkable region
+      const regionVisited = new Set<string>();
+      const connectedRooms = new Set<number>();
+      const q: [number, number][] = [[x, y]];
+      regionVisited.add(key);
+
+      while (q.length > 0) {
+        const [cx, cy] = q.shift()!;
+        for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+          const nx = cx + dx, ny = cy + dy;
+          if (nx < 0 || nx >= CLUSTER_WIDTH || ny < 0 || ny >= CLUSTER_HEIGHT) continue;
+          const nc = cells[ny][nx];
+          const nk = `${nx},${ny}`;
+
+          if (nc === 'floor') {
+            const rid = roomIdAt[ny][nx];
+            if (rid >= 0) connectedRooms.add(rid);
+            // Don't continue BFS through room floor
+            continue;
+          }
+
+          if (regionVisited.has(nk)) continue;
+          if (nc === 'hall' || nc === 'door') {
+            regionVisited.add(nk);
+            q.push([nx, ny]);
+          }
+        }
+      }
+
+      for (const k of regionVisited) visited.add(k);
+
+      // All rooms connected to this region are mutually adjacent
+      const rids = [...connectedRooms];
+      for (let i = 0; i < rids.length; i++) {
+        for (let j = i + 1; j < rids.length; j++) {
+          addEdge(rids[i], rids[j]);
         }
       }
     }
   }
 
+  return adj;
+}
+
+// ── Convert gen-halls grid to tile grid ──
+
+function gridToTiles(cells: CellType[][], roomIdAt: number[][]): Tile[][] {
+  const tiles: Tile[][] = [];
+
   for (let y = 0; y < CLUSTER_HEIGHT; y++) {
     tiles[y] = [];
     for (let x = 0; x < CLUSTER_WIDTH; x++) {
-      const cell = grid[y][x];
+      const cell = cells[y][x];
       switch (cell) {
         case 'floor':
-          tiles[y][x] = floorTile(roomMap[y][x]);
+          tiles[y][x] = floorTile(roomIdAt[y][x]);
           break;
-        case 'door':
-          tiles[y][x] = doorTile(roomMap[y][x]);
+        case 'hall':
+          tiles[y][x] = floorTile(-1);
           break;
+        case 'door': {
+          // Find room ID from nearest floor neighbor
+          let rid = -1;
+          for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+            const nx = x + dx, ny = y + dy;
+            if (nx >= 0 && nx < CLUSTER_WIDTH && ny >= 0 && ny < CLUSTER_HEIGHT) {
+              if (roomIdAt[ny][nx] >= 0) { rid = roomIdAt[ny][nx]; break; }
+            }
+          }
+          tiles[y][x] = doorTile(rid);
+          break;
+        }
         case 'wall': {
           const outer = isOuterPos(y, x);
-          const glyph = wallGlyph(grid, x, y, outer);
+          const glyph = wallGlyph(cells, x, y, outer);
           tiles[y][x] = makeTile(TileType.Wall, glyph, outer ? COLORS.wallOuter : COLORS.wall);
           break;
         }
+        case 'interface':
+          tiles[y][x] = interfaceTile();
+          break;
         default:
           tiles[y][x] = voidTile();
           break;
@@ -424,49 +238,44 @@ function cellGridToTiles(grid: CellGrid, rooms: Room[]): Tile[][] {
   return tiles;
 }
 
-// ── Interface exits ──
+// ── Extract interface exits from grid ──
 
-function placeInterfaceExits(tiles: Tile[][], rooms: Room[]): InterfaceExit[] {
+function extractInterfaces(cells: CellType[][]): InterfaceExit[] {
   const exits: InterfaceExit[] = [];
 
-  // Place exit on the right edge
-  const rightEdgeRooms = rooms.filter(r => r.x + r.w >= IX + IW - 2);
-  const exitRoom = rightEdgeRooms.length > 0 ? pick(rightEdgeRooms) : pick(rooms);
-  const ey = Math.floor(exitRoom.y + exitRoom.h / 2);
-  const ex = IX + IW - 1;
-
-  tiles[ey][ex] = interfaceTile();
-  // Dotted approach line
-  if (ex - 1 >= 0 && tiles[ey][ex - 1].type === TileType.Wall) {
-    tiles[ey][ex - 1] = makeTile(TileType.Floor, '┅', COLORS.interfaceExit);
-    tiles[ey][ex - 1].walkable = true;
+  // Right-edge interfaces are forward exits
+  for (let y = 0; y < CLUSTER_HEIGHT; y++) {
+    if (cells[y][CLUSTER_WIDTH - 1] === 'interface') {
+      exits.push({
+        position: { x: CLUSTER_WIDTH - 1, y },
+        targetClusterId: -1,
+        targetPosition: null,
+      });
+    }
   }
-
-  exits.push({
-    position: { x: ex, y: ey },
-    targetClusterId: -1,
-    targetPosition: null,
-  });
 
   return exits;
 }
 
 // ── Entry point ──
 
-export function placeEntryPoint(tiles: Tile[][], rooms: Room[]): Position {
-  const leftEdgeRooms = rooms.filter(r => r.x <= IX + 2);
-  const entryRoom = leftEdgeRooms.length > 0 ? pick(leftEdgeRooms) : rooms[0];
-  const ey = Math.floor(entryRoom.y + entryRoom.h / 2);
-
-  // Carve approach from left outer wall to the room
-  for (let x = IX; x <= entryRoom.x; x++) {
-    if (tiles[ey][x].type === TileType.Wall || tiles[ey][x].type === TileType.Void) {
-      tiles[ey][x] = makeTile(TileType.Floor, '┅', COLORS.interfaceExit);
-      tiles[ey][x].walkable = true;
+export function placeEntryPoint(tiles: Tile[][], _rooms: Room[]): Position {
+  // Gen-halls places a left interface at (0, y).
+  // The first walkable cell inside is the entry point.
+  for (let y = 0; y < CLUSTER_HEIGHT; y++) {
+    if (tiles[y][0].type === TileType.InterfaceExit) {
+      for (let x = 1; x < CLUSTER_WIDTH; x++) {
+        if (tiles[y][x].walkable) return { x, y };
+      }
+      // Fallback: carve entry
+      tiles[y][1] = floorTile(-1);
+      return { x: 1, y };
     }
   }
 
-  return { x: entryRoom.x + 1, y: ey };
+  // Fallback if no left interface (shouldn't happen)
+  const room = _rooms[0];
+  return { x: room.x + 1, y: Math.floor(room.y + room.h / 2) };
 }
 
 // ── Room type assignment ──
@@ -537,7 +346,6 @@ function initRoomHazards(tiles: Tile[][], rooms: Room[]) {
 
     switch (room.roomType) {
       case 'corrupted': {
-        // Place 1-3 corruption seeds on random floor tiles
         const seedCount = randInt(1, 3);
         const corruptionTiles = new Map<string, CorruptionStage>();
         for (let s = 0; s < seedCount; s++) {
@@ -559,21 +367,18 @@ function initRoomHazards(tiles: Tile[][], rooms: Room[]) {
           activated: false,
           detonated: false,
         };
-        // Dormant — no visual change until activated
         break;
       }
 
       case 'memory_leak': {
-        // Place leak source on a random wall position
         room.hazardState = { floodLevel: 0 };
-        // Mark a wall tile as the leak source (visual only)
         const wallSide = randInt(0, 3);
         let lx: number, ly: number;
         switch (wallSide) {
-          case 0: lx = randInt(innerX1, innerX2); ly = room.y; break;       // top
-          case 1: lx = randInt(innerX1, innerX2); ly = room.y + room.h - 1; break; // bottom
-          case 2: lx = room.x; ly = randInt(innerY1, innerY2); break;       // left
-          default: lx = room.x + room.w - 1; ly = randInt(innerY1, innerY2); break; // right
+          case 0: lx = randInt(innerX1, innerX2); ly = room.y; break;
+          case 1: lx = randInt(innerX1, innerX2); ly = room.y + room.h - 1; break;
+          case 2: lx = room.x; ly = randInt(innerY1, innerY2); break;
+          default: lx = room.x + room.w - 1; ly = randInt(innerY1, innerY2); break;
         }
         if (tiles[ly]?.[lx]) {
           tiles[ly][lx].glyph = '◎';
@@ -583,7 +388,6 @@ function initRoomHazards(tiles: Tile[][], rooms: Room[]) {
       }
 
       case 'firewall': {
-        // 1-2 scanner beams
         const beamCount = randInt(1, 2);
         const beams = [];
         for (let b = 0; b < beamCount; b++) {
@@ -597,7 +401,6 @@ function initRoomHazards(tiles: Tile[][], rooms: Room[]) {
           }
         }
         room.hazardState = { beams, alarmTriggered: false };
-        // Place checkpoint terminal on a wall
         const tx = room.x + room.w - 1;
         const ty = Math.floor(room.y + room.h / 2);
         if (tiles[ty]?.[tx]) {
@@ -608,7 +411,6 @@ function initRoomHazards(tiles: Tile[][], rooms: Room[]) {
       }
 
       case 'unstable': {
-        // Place process core at center of room
         const cx = Math.floor(room.x + room.w / 2);
         const cy = Math.floor(room.y + room.h / 2);
         room.hazardState = { corePos: { x: cx, y: cy }, coreDestroyed: false, sparkedTiles: [] };
@@ -618,7 +420,6 @@ function initRoomHazards(tiles: Tile[][], rooms: Room[]) {
       }
 
       case 'quarantine': {
-        // Lock all doors to this room
         room.hazardState = { locked: true };
         for (let y = room.y; y < room.y + room.h; y++) {
           for (let x = room.x; x < room.x + room.w; x++) {
@@ -627,7 +428,6 @@ function initRoomHazards(tiles: Tile[][], rooms: Room[]) {
               tiles[y][x].glyph = '▪';
               tiles[y][x].fg = '#ff2222';
               tiles[y][x].walkable = false;
-              // Keep transparent so player can see inside
             }
           }
         }
@@ -635,7 +435,6 @@ function initRoomHazards(tiles: Tile[][], rooms: Room[]) {
       }
 
       case 'echo_chamber': {
-        // Tint floor bg
         for (let y = innerY1; y <= innerY2; y++) {
           for (let x = innerX1; x <= innerX2; x++) {
             if (tiles[y]?.[x]?.type === TileType.Floor) {
@@ -648,7 +447,6 @@ function initRoomHazards(tiles: Tile[][], rooms: Room[]) {
       }
 
       case 'gravity_well': {
-        // Place singularity at room center
         const cx = Math.floor(room.x + room.w / 2);
         const cy = Math.floor(room.y + room.h / 2);
         room.hazardState = {
@@ -656,11 +454,9 @@ function initRoomHazards(tiles: Tile[][], rooms: Room[]) {
           pullInterval: 3,
           lastPullTick: 0,
         };
-        // Singularity glyph
         tiles[cy][cx].glyph = '●';
         tiles[cy][cx].fg = '#aa44ff';
         tiles[cy][cx].hazardOverlay = { type: 'gravity', stage: 2 };
-        // Directional arrows on interior tiles
         for (let y = innerY1; y <= innerY2; y++) {
           for (let x = innerX1; x <= innerX2; x++) {
             if (x === cx && y === cy) continue;
@@ -682,37 +478,34 @@ function initRoomHazards(tiles: Tile[][], rooms: Room[]) {
 // ── Main generation ──
 
 export function generateCluster(id: number): Cluster {
-  const grid = createCellGrid();
-  const rooms: Room[] = [];
-  const nextId = { value: 0 };
+  const { grid, rooms: rawRooms } = generate();
 
-  // Outer boundary (inset by PAD)
-  for (let x = IX; x < IX + IW; x++) {
-    grid[IY][x] = 'wall';
-    grid[IY + IH - 1][x] = 'wall';
-  }
-  for (let y = IY; y < IY + IH; y++) {
-    grid[y][IX] = 'wall';
-    grid[y][IX + IW - 1] = 'wall';
-  }
+  // Convert RoomDef → Room (expand rect to include walls)
+  const rooms: Room[] = rawRooms.map(r => ({
+    id: r.id,
+    x: r.rect.x - 1,
+    y: r.rect.y - 1,
+    w: r.rect.w + 2,
+    h: r.rect.h + 2,
+    roomType: 'normal' as RoomType,
+    containedHazards: new Set<HazardOverlayType>(),
+  }));
 
-  // Recursive division
-  divide(grid, rooms, IX, IY, IW, IH, 0, nextId);
-
-  // Post-process: place doors on valid wall positions between rooms
-  const roomAdjacency = placeDoors(grid, rooms);
+  // Build room adjacency from hall/door connectivity
+  const roomAdjacency = buildRoomAdjacency(grid.cells, rawRooms);
 
   // Assign special room types
   assignRoomTypes(rooms, id, roomAdjacency);
 
-  // Convert to tile grid
-  const tiles = cellGridToTiles(grid, rooms);
+  // Convert grid cells to tiles
+  const roomIdAt = buildRoomIdMap(rawRooms);
+  const tiles = gridToTiles(grid.cells, roomIdAt);
 
   // Initialize hazard visuals on tiles
   initRoomHazards(tiles, rooms);
 
-  // Place interface exits
-  const interfaces = placeInterfaceExits(tiles, rooms);
+  // Extract interface exits (right edge only; left interface is for entry)
+  const interfaces = extractInterfaces(grid.cells);
 
   return { id, width: CLUSTER_WIDTH, height: CLUSTER_HEIGHT, tiles, rooms, interfaces, roomAdjacency };
 }
