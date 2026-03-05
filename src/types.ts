@@ -112,7 +112,7 @@ export interface RoomHazardState {
 export type GeometricTag =
   | 'hall' | 'room' | 'dead_end' | 'hub' | 'large' | 'small'
   | 'entry' | 'exit' | 'entry_interface' | 'exit_interface'
-  | 'chokepoint' | 'peripheral';
+  | 'chokepoint' | 'secondary_choke' | 'peripheral';
 
 export type FunctionalTag =
   | 'engine_room' | 'server_rack' | 'reactor' | 'medbay' | 'bridge' | 'cargo'

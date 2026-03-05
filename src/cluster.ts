@@ -193,6 +193,9 @@ function buildDoorAdjacency(allRooms: Room[], cells: CellType[][], roomIdAt: num
       for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
         const nx = x + dx, ny = y + dy;
         if (nx < 0 || nx >= CLUSTER_WIDTH || ny < 0 || ny >= CLUSTER_HEIGHT) continue;
+        // Only consider walkable/interior neighbors — walls carry expanded room IDs
+        const nCell = cells[ny][nx];
+        if (nCell !== 'floor' && nCell !== 'hall' && nCell !== 'door') continue;
         const nrid = roomIdAt[ny][nx];
         if (nrid >= 0) neighborIds.add(nrid);
       }
@@ -1403,6 +1406,80 @@ function initRoomHazards(tiles: Tile[][], rooms: Room[]) {
   }
 }
 
+// ── Progressive Greedy Hitting Set for chokepoint detection ──
+
+/** Enumerate all simple paths from start to end via DFS on room adjacency graph.
+ *  Returns paths split into "all" and "safe" (those avoiding `blocked` rooms). */
+function enumerateSimplePaths(
+  adj: Map<number, number[]>,
+  start: number,
+  end: number,
+  blocked: Set<number>,
+): { all: number[][]; safe: number[][] } {
+  const all: number[][] = [];
+  const safe: number[][] = [];
+  const visited = new Set<number>();
+
+  function dfs(current: number, path: number[], hitBlocked: boolean) {
+    if (current === end) {
+      all.push([...path]);
+      if (!hitBlocked) safe.push([...path]);
+      return;
+    }
+    visited.add(current);
+    for (const neighbor of (adj.get(current) ?? [])) {
+      if (visited.has(neighbor)) continue;
+      path.push(neighbor);
+      dfs(neighbor, path, hitBlocked || blocked.has(neighbor));
+      path.pop();
+    }
+    visited.delete(current);
+  }
+
+  dfs(start, [start], false);
+  return { all, safe };
+}
+
+/** Find chokepoint rooms using progressive greedy hitting set.
+ *  Returns room IDs that, when blocked, eliminate all safe paths from entry to exit. */
+function findChokepoints(
+  adj: Map<number, number[]>,
+  entryRoomId: number,
+  exitRoomId: number,
+  excludeIds: Set<number>,
+  maxIterations: number = 10,
+): number[] {
+  const chokepoints: number[] = [];
+  const blocked = new Set<number>();
+
+  for (let i = 0; i < maxIterations; i++) {
+    const { safe } = enumerateSimplePaths(adj, entryRoomId, exitRoomId, blocked);
+    if (safe.length === 0) break; // all routes already pass through a chokepoint
+
+    // Count room frequency across safe paths (exclude entry, exit, and already-excluded rooms)
+    const freq = new Map<number, number>();
+    for (const path of safe) {
+      for (const roomId of path) {
+        if (roomId === entryRoomId || roomId === exitRoomId) continue;
+        if (excludeIds.has(roomId)) continue;
+        freq.set(roomId, (freq.get(roomId) ?? 0) + 1);
+      }
+    }
+
+    // Pick highest-frequency room
+    let bestRoom = -1, bestCount = 0;
+    for (const [roomId, count] of freq) {
+      if (count > bestCount) { bestCount = count; bestRoom = roomId; }
+    }
+    if (bestRoom === -1) break;
+
+    chokepoints.push(bestRoom);
+    blocked.add(bestRoom);
+  }
+
+  return chokepoints;
+}
+
 // ── Structural tags ──
 
 function assignStructuralTags(
@@ -1433,6 +1510,16 @@ function assignStructuralTags(
   }
   if (entryRoom) entryRoom.tags.geometric.add('entry');
   if (exitRoom && exitRoom !== entryRoom) exitRoom.tags.geometric.add('exit');
+
+  // Chokepoint detection via progressive greedy hitting set
+  if (entryRoom && exitRoom && entryRoom !== exitRoom) {
+    const excludeIds = new Set<number>([entryRoom.id, exitRoom.id]);
+    const chokeIds = findChokepoints(doorAdjacency, entryRoom.id, exitRoom.id, excludeIds);
+    for (let i = 0; i < chokeIds.length; i++) {
+      const room = allRooms.find(r => r.id === chokeIds[i]);
+      if (room) room.tags.geometric.add(i === 0 ? 'chokepoint' : 'secondary_choke');
+    }
+  }
 
   // Degree-based tags: dead_end uses wall adjacency, hub uses door adjacency
   for (const r of allRooms) {

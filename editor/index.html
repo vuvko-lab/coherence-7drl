@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>COHERENCE — Map Editor</title>
+  <link rel="stylesheet" href="./editor.css" />
+</head>
+<body>
+  <div id="toolbar">
+    <span class="toolbar-title">COHERENCE // MAP EDITOR</span>
+    <div class="toolbar-group">
+      <label>Seed <input type="number" id="tb-seed" value="1" min="1" max="99999"></label>
+      <label>Cluster <input type="number" id="tb-cluster" value="3" min="0" max="20"></label>
+      <button id="tb-generate">Generate</button>
+    </div>
+    <div class="toolbar-group">
+      <button id="tb-import">Import</button>
+      <button id="tb-export">Export</button>
+      <input type="file" id="tb-file-input" accept=".json" style="display:none">
+    </div>
+  </div>
+
+  <div id="editor-layout">
+    <div id="panel-left">
+      <div class="panel-section">
+        <div class="panel-header">ROOM INSPECTOR</div>
+        <div id="room-inspector">
+          <div class="inspector-empty">Click a room to inspect</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="canvas-wrap">
+      <canvas id="map-canvas"></canvas>
+      <div id="status-bar">
+        <span id="status-coords">-</span>
+        <span id="status-tile">-</span>
+        <span id="status-room">-</span>
+      </div>
+    </div>
+
+    <div id="panel-right">
+      <div class="panel-section">
+        <div class="panel-header">ENTITIES</div>
+        <div id="entity-list"></div>
+        <div class="panel-header" style="margin-top:8px">PLACE ENTITY</div>
+        <div id="entity-palette">
+          <button class="pal-btn" data-kind="chronicler"><span style="color:#aaaa66">&#937;</span> Chronicler</button>
+          <button class="pal-btn" data-kind="bit_mite"><span style="color:#cc4444">&#8277;</span> Bit-Mite</button>
+          <button class="pal-btn" data-kind="logic_leech"><span style="color:#9933cc">&#8960;</span> Logic Leech</button>
+          <button class="pal-btn" data-kind="white_hat"><span style="color:#44ccaa">&#8866;</span> White-Hat</button>
+        </div>
+      </div>
+
+      <div class="panel-section" style="margin-top:8px">
+        <div class="panel-header">SIMULATION</div>
+        <div id="sim-controls">
+          <div class="sim-row">
+            <button id="sim-play">&#9654; Play</button>
+            <button id="sim-step">Step</button>
+            <button id="sim-reset">Reset</button>
+          </div>
+          <div class="sim-row">
+            <label>Speed <input type="range" id="sim-speed" min="1" max="9" value="5" style="width:80px"></label>
+            <span id="sim-tick">Tick: 0</span>
+          </div>
+        </div>
+        <div id="sim-log"></div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="../src/editor/editor-main.ts"></script>
+</body>
+</html>
