@@ -495,19 +495,18 @@ export function renderMapStatusBar(
   meanCollapse: number,
 ) {
   const tierClass = alertLevel >= 200 ? 'alert-enemy' : alertLevel >= 100 ? 'alert-suspicious' : 'alert-friendly';
-  const tierLabel = alertLevel >= 200 ? 'ENEMY' : alertLevel >= 100 ? 'SUSPICIOUS' : 'FRIENDLY';
-  const tierSymbol = alertLevel >= 200 ? '◈' : alertLevel >= 100 ? '▲' : '◇';
+  const tierSymbol = alertLevel >= 200 ? '⬘' : alertLevel >= 100 ? '⬗' : '⬙';
   const tickStr = String(tick).padStart(4, '0');
   const collapseStr = Math.round(meanCollapse * 100) + '%';
 
   el.innerHTML =
-    `<span class="msb-item">CL:<span class="msb-val">${clusterId}</span></span>` +
+    `<span class="msb-item">Cluster:<span class="msb-val">${clusterId}</span></span>` +
     `<span class="msb-sep">│</span>` +
-    `<span class="msb-item">T:<span class="msb-val">${tickStr}</span></span>` +
+    `<span class="msb-item">Turn:<span class="msb-val">${tickStr}</span></span>` +
     `<span class="msb-sep">│</span>` +
     `<span class="msb-item">σ:<span class="msb-val">${collapseStr}</span></span>` +
-    `<span class="msb-fill"></span>` +
-    `<span class="msb-alert ${tierClass}">${tierSymbol} ${alertLevel} [${tierLabel}]</span>`;
+    `<span class="msb-sep">│</span>` +
+    `<span class="msb-alert ${tierClass}">${tierSymbol} ${alertLevel}</span>`;
 }
 
 // ── Message log renderer ──
