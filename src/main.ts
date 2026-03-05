@@ -1,4 +1,5 @@
-import { createGame, processAction, handleMapClick, stepAutoPath, addMessage, exportSave, loadSave } from './game';
+import { createGame, processAction, handleMapClick, stepAutoPath, addMessage, exportSave, loadSave, adminRegenCluster, adminTeleportToCluster } from './game';
+import { setDamageParams, getDamageParams } from './cluster';
 import { Renderer, renderSelfPanel, renderLogs, renderOverviewPanel } from './renderer';
 import { InputHandler } from './input';
 import { PlayerAction, Position, TileType } from './types';
@@ -101,9 +102,12 @@ function initAdminPanel() {
     return `<button class="admin-btn" data-effect="${effect.name}">&gt; ${effect.name}</button>`;
   }).join('\n');
 
+  const p = getDamageParams();
   adminEl.innerHTML = `\
 <div class="panel-edge"><span class="corner">┌</span><span class="label">[ ADMIN ]</span><span class="fill"></span><span class="corner">┐</span></div>
 <div class="panel-body">
+<button class="admin-section-hdr" data-section="overlays">[-] OVERLAYS</button>
+<div class="admin-section" id="admin-sec-overlays">
 <button class="admin-btn admin-toggle" data-toggle="mapReveal">&gt; map reveal: OFF</button>
 <button class="admin-btn admin-toggle" data-toggle="godMode">&gt; god mode: OFF</button>
 <button class="admin-btn admin-toggle" data-toggle="invisibleMode">&gt; invisible: OFF</button>
@@ -111,18 +115,41 @@ function initAdminPanel() {
 <button class="admin-btn admin-toggle" data-toggle="showCollapseOverlay">&gt; collapse heatmap: OFF</button>
 <button class="admin-btn admin-toggle" data-toggle="showFunctionalOverlay">&gt; functional tags: OFF</button>
 <button class="admin-btn admin-toggle" data-toggle="showAlertOverlay">&gt; alert overlay: OFF</button>
-<div class="panel-sep"><span class="fill"></span></div>
+</div>
+<button class="admin-section-hdr" data-section="restart">[-] SEED / RESTART</button>
+<div class="admin-section" id="admin-sec-restart">
 <div class="stat-row"><span class="stat-label">seed:</span><input class="admin-seed-input" type="text" value="${state.seed}"></div>
 <button class="admin-btn admin-restart">&gt; restart with seed</button>
 <button class="admin-btn admin-random-restart">&gt; random restart</button>
-<div class="panel-sep"><span class="fill"></span></div>
 <button class="admin-btn admin-export">&gt; export save</button>
 <button class="admin-btn admin-import">&gt; import save</button>
 <input type="file" class="admin-import-input" accept=".json" style="display:none">
-<div class="panel-sep"><span class="fill"></span></div>
+</div>
+<button class="admin-section-hdr" data-section="cluster">[+] CLUSTER</button>
+<div class="admin-section collapsed" id="admin-sec-cluster">
+<div class="stat-row"><span class="stat-label">dmg base:</span><button class="admin-btn admin-dm-base-m">[-]</button><span class="admin-val admin-dm-base"> ${p.base.toFixed(2)} </span><button class="admin-btn admin-dm-base-p">[+]</button></div>
+<div class="stat-row"><span class="stat-label">dmg step:</span><button class="admin-btn admin-dm-inc-m">[-]</button><span class="admin-val admin-dm-inc"> ${p.inc.toFixed(2)} </span><button class="admin-btn admin-dm-inc-p">[+]</button></div>
+<button class="admin-btn admin-regen-cluster">&gt; regen cluster ${state.currentClusterId}</button>
+<div class="stat-row"><span class="stat-label">cluster #:</span><input class="admin-cluster-input" type="number" min="0" max="20" value="${state.currentClusterId}"></div>
+<button class="admin-btn admin-goto-cluster">&gt; goto cluster</button>
+</div>
+<button class="admin-section-hdr" data-section="glitch">[+] GLITCH</button>
+<div class="admin-section collapsed" id="admin-sec-glitch">
 ${buttons}
 </div>
+</div>
 <div class="panel-edge"><span class="corner">└</span><span class="fill"></span><span class="corner">┘</span></div>`;
+
+  // Wire up section collapse/expand
+  adminEl.querySelectorAll('.admin-section-hdr').forEach(hdr => {
+    hdr.addEventListener('click', () => {
+      const id = `admin-sec-${(hdr as HTMLElement).dataset.section}`;
+      const section = adminEl.querySelector(`#${id}`);
+      if (!section) return;
+      const nowCollapsed = section.classList.toggle('collapsed');
+      hdr.textContent = hdr.textContent!.replace(/^\[[-+]\]/, nowCollapsed ? '[+]' : '[-]');
+    });
+  });
 
   // Wire up toggle buttons
   adminEl.querySelectorAll('.admin-toggle').forEach(btn => {
@@ -194,6 +221,47 @@ ${buttons}
       renderAll();
     });
     importInput.value = '';
+  });
+
+  // Wire up damage param +/- buttons
+  function updateDamageDisplay() {
+    const { base, inc } = getDamageParams();
+    const baseEl = adminEl.querySelector('.admin-dm-base');
+    const incEl = adminEl.querySelector('.admin-dm-inc');
+    if (baseEl) baseEl.textContent = ` ${base.toFixed(2)} `;
+    if (incEl) incEl.textContent = ` ${inc.toFixed(2)} `;
+  }
+  adminEl.querySelector('.admin-dm-base-m')?.addEventListener('click', () => {
+    const { base, inc } = getDamageParams(); setDamageParams(base - 0.05, inc); updateDamageDisplay();
+  });
+  adminEl.querySelector('.admin-dm-base-p')?.addEventListener('click', () => {
+    const { base, inc } = getDamageParams(); setDamageParams(base + 0.05, inc); updateDamageDisplay();
+  });
+  adminEl.querySelector('.admin-dm-inc-m')?.addEventListener('click', () => {
+    const { base, inc } = getDamageParams(); setDamageParams(base, inc - 0.05); updateDamageDisplay();
+  });
+  adminEl.querySelector('.admin-dm-inc-p')?.addEventListener('click', () => {
+    const { base, inc } = getDamageParams(); setDamageParams(base, inc + 0.05); updateDamageDisplay();
+  });
+
+  // Wire up regen cluster button
+  adminEl.querySelector('.admin-regen-cluster')?.addEventListener('click', () => {
+    adminRegenCluster(state);
+    const btn = adminEl.querySelector('.admin-regen-cluster') as HTMLElement | null;
+    if (btn) btn.textContent = `> regen cluster ${state.currentClusterId}`;
+    addMessage(state, `[DEBUG] Cluster ${state.currentClusterId} regenerated`, 'debug');
+    renderAll();
+  });
+
+  // Wire up goto cluster button
+  adminEl.querySelector('.admin-goto-cluster')?.addEventListener('click', () => {
+    const input = adminEl.querySelector('.admin-cluster-input') as HTMLInputElement;
+    const targetId = Math.max(0, Math.min(20, Number(input.value) || 0));
+    adminTeleportToCluster(state, targetId);
+    const regenBtn = adminEl.querySelector('.admin-regen-cluster') as HTMLElement | null;
+    if (regenBtn) regenBtn.textContent = `> regen cluster ${targetId}`;
+    addMessage(state, `[DEBUG] Teleported to cluster ${targetId}`, 'debug');
+    renderAll();
   });
 
   // Wire up glitch effect buttons

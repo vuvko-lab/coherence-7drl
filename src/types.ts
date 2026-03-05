@@ -85,6 +85,10 @@ export interface RoomHazardState {
   // Firewall checkpoint
   beams?: ScannerBeam[];
   alarmTriggered?: boolean;
+  firewallPattern?: 'pingpong' | 'wipe' | 'inward' | 'cross' | 'spiral';
+  firewallAxis?: 'horizontal' | 'vertical';  // wipe sweep direction
+  firewallStep?: number;                      // generic tick counter
+  firewallPath?: Position[];                  // pre-computed spiral path
 
   // Unstable process
   corePos?: Position;

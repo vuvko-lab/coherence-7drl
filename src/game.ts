@@ -380,6 +380,34 @@ export function stepAutoPath(state: GameState): boolean {
   return false;
 }
 
+// ── Admin / Debug helpers ──
+
+export function adminRegenCluster(state: GameState): void {
+  const id = state.currentClusterId;
+  const newCluster = generateCluster(id);
+  const entryPos = placeEntryPoint(newCluster.tiles, newCluster.rooms);
+  state.clusters.set(id, newCluster);
+  state.player.position = { ...entryPos };
+  state.player.clusterId = id;
+  state.autoPath = [];
+  computeFOV(newCluster, state.player.position);
+}
+
+export function adminTeleportToCluster(state: GameState, targetId: number): void {
+  if (!state.clusters.has(targetId)) {
+    const newCluster = generateCluster(targetId);
+    state.clusters.set(targetId, newCluster);
+    if (targetId >= state.nextClusterId) state.nextClusterId = targetId + 1;
+  }
+  const cluster = state.clusters.get(targetId)!;
+  const entryPos = placeEntryPoint(cluster.tiles, cluster.rooms);
+  state.currentClusterId = targetId;
+  state.player.clusterId = targetId;
+  state.player.position = { ...entryPos };
+  state.autoPath = [];
+  computeFOV(cluster, state.player.position);
+}
+
 // ── Save / Load ──
 
 export function exportSave(state: GameState): string {

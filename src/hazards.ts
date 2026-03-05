@@ -321,15 +321,15 @@ function updateMemoryLeak(state: GameState, cluster: Cluster, room: Room) {
 
 // ── Firewall Checkpoint ──
 
-function updateFirewall(state: GameState, cluster: Cluster, room: Room) {
-  const hz = room.hazardState!;
-  if (!hz.beams) return;
+const FW_ENTER_MSG: Record<string, string> = {
+  pingpong: 'Scan beams sweep back and forth.',
+  wipe:     'A full-room sweep — wait for the gap!',
+  inward:   'Scan rings close in from the walls.',
+  cross:    'Perpendicular scan beams cross the room.',
+  spiral:   'A spiral scan traces through the room.',
+};
 
-  if (state.tick % 2 !== 0) return;
-
-  const { x1, y1, x2, y2 } = roomInterior(room);
-
-  // Clear old beam overlays
+function clearBeamOverlays(cluster: Cluster, x1: number, y1: number, x2: number, y2: number) {
   for (let y = y1; y <= y2; y++) {
     for (let x = x1; x <= x2; x++) {
       if (cluster.tiles[y][x].hazardOverlay?.type === 'beam') {
@@ -337,37 +337,107 @@ function updateFirewall(state: GameState, cluster: Cluster, room: Room) {
       }
     }
   }
+}
 
-  for (const beam of hz.beams) {
-    beam.position += beam.direction;
-    if (beam.position >= beam.max) { beam.position = beam.max; beam.direction = -1 as const; }
-    if (beam.position <= beam.min) { beam.position = beam.min; beam.direction = 1 as const; }
-
-    if (beam.axis === 'horizontal') {
-      for (let x = x1; x <= x2; x++) {
-        if (cluster.tiles[beam.position]?.[x]?.type === TileType.Floor) {
-          cluster.tiles[beam.position][x].hazardOverlay = { type: 'beam' };
-        }
-      }
-      if (!state.invisibleMode && state.player.position.y === beam.position && posInRoom(state.player.position, room)) {
-        if (!hz.alarmTriggered) {
-          hz.alarmTriggered = true;
-          addMessage(state, 'SCAN DETECTED! Firewall alarm triggered!', 'hazard');
-        }
-      }
-    } else {
-      for (let y = y1; y <= y2; y++) {
-        if (cluster.tiles[y]?.[beam.position]?.type === TileType.Floor) {
-          cluster.tiles[y][beam.position].hazardOverlay = { type: 'beam' };
-        }
-      }
-      if (!state.invisibleMode && state.player.position.x === beam.position && posInRoom(state.player.position, room)) {
-        if (!hz.alarmTriggered) {
-          hz.alarmTriggered = true;
-          addMessage(state, 'SCAN DETECTED! Firewall alarm triggered!', 'hazard');
-        }
-      }
+function markBeam(cluster: Cluster, cells: { x: number; y: number }[]) {
+  for (const { x, y } of cells) {
+    if (cluster.tiles[y]?.[x]?.type === TileType.Floor) {
+      cluster.tiles[y][x].hazardOverlay = { type: 'beam' };
     }
+  }
+}
+
+function updateFirewall(state: GameState, cluster: Cluster, room: Room) {
+  const hz = room.hazardState!;
+  const { x1, y1, x2, y2 } = roomInterior(room);
+  const pattern = hz.firewallPattern ?? 'pingpong';
+
+  // Each pattern controls its own tick gating
+  const active: { x: number; y: number }[] = [];
+
+  switch (pattern) {
+    // ── Pingpong: 1-2 beams bouncing on their axis ──
+    case 'pingpong':
+    case 'cross': {
+      if (state.tick % 2 !== 0) break;
+      for (const beam of (hz.beams ?? [])) {
+        beam.position += beam.direction;
+        if (beam.position >= beam.max) { beam.position = beam.max; beam.direction = -1; }
+        if (beam.position <= beam.min) { beam.position = beam.min; beam.direction =  1; }
+        if (beam.axis === 'horizontal') {
+          for (let x = x1; x <= x2; x++) active.push({ x, y: beam.position });
+        } else {
+          for (let y = y1; y <= y2; y++) active.push({ x: beam.position, y });
+        }
+      }
+      break;
+    }
+
+    // ── Wipe: a single scan line sweeps the room, then a brief gap ──
+    case 'wipe': {
+      if (state.tick % 2 !== 0) break;
+      const axis = hz.firewallAxis ?? 'horizontal';
+      const size  = axis === 'horizontal' ? (y2 - y1 + 1) : (x2 - x1 + 1);
+      const cycle = size + 4; // 4-tick gap at end
+      const step  = hz.firewallStep ?? 0;
+      hz.firewallStep = (step + 1) % cycle;
+
+      if (step < size) {
+        if (axis === 'horizontal') {
+          for (let x = x1; x <= x2; x++) active.push({ x, y: y1 + step });
+        } else {
+          for (let y = y1; y <= y2; y++) active.push({ x: x1 + step, y });
+        }
+      }
+      // step >= size → gap, nothing active
+      break;
+    }
+
+    // ── Inward: concentric rectangular frames shrink to center and back ──
+    case 'inward': {
+      if (state.tick % 3 !== 0) break;
+      const maxInset = Math.floor(Math.min(x2 - x1, y2 - y1) / 2);
+      const cycle  = Math.max(1, maxInset * 2);
+      const pos    = (hz.firewallStep ?? 0) % cycle;
+      const inset  = pos <= maxInset ? pos : cycle - pos;
+      hz.firewallStep = ((hz.firewallStep ?? 0) + 1) % cycle;
+
+      const rx1 = x1 + inset, ry1 = y1 + inset;
+      const rx2 = x2 - inset, ry2 = y2 - inset;
+      if (rx1 <= rx2 && ry1 <= ry2) {
+        for (let x = rx1; x <= rx2; x++) { active.push({ x, y: ry1 }); if (ry2 > ry1) active.push({ x, y: ry2 }); }
+        for (let y = ry1 + 1; y < ry2; y++) { active.push({ x: rx1, y }); if (rx2 > rx1) active.push({ x: rx2, y }); }
+      }
+      break;
+    }
+
+    // ── Spiral: a band of cells sweeps a clockwise spiral through the room ──
+    case 'spiral': {
+      if (state.tick % 2 !== 0) break;
+      const path = hz.firewallPath;
+      if (!path || path.length === 0) break;
+      const step = hz.firewallStep ?? 0;
+      const band = Math.max(3, Math.floor(path.length / 6));
+      for (let i = 0; i < band; i++) active.push(path[(step + i) % path.length]);
+      hz.firewallStep = (step + 1) % path.length;
+      break;
+    }
+  }
+
+  clearBeamOverlays(cluster, x1, y1, x2, y2);
+  markBeam(cluster, active);
+
+  // Player detection
+  if (!hz.alarmTriggered && !state.invisibleMode && posInRoom(state.player.position, room)) {
+    const pp = state.player.position;
+    if (active.some(c => c.x === pp.x && c.y === pp.y)) {
+      hz.alarmTriggered = true;
+      addMessage(state, 'SCAN DETECTED! Firewall alarm triggered!', 'hazard');
+    }
+  }
+
+  if (state.debugMode) {
+    addMessage(state, `[DBG] Firewall (${pattern}) room ${room.id}: step=${hz.firewallStep} active=${active.length}`, 'debug');
   }
 }
 
@@ -532,6 +602,11 @@ export function onPlayerEnterRoom(state: GameState, room: Room) {
     case 'trigger_trap':
       onPlayerEnterTriggerTrap(state, room);
       break;
+    case 'firewall': {
+      const pattern = room.hazardState?.firewallPattern ?? 'pingpong';
+      addMessage(state, FW_ENTER_MSG[pattern] ?? 'Firewall scan active.', 'hazard');
+      break;
+    }
     case 'echo_chamber':
       addMessage(state, 'Residual process echoes shimmer around you...', 'system');
       break;

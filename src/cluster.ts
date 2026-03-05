@@ -1,6 +1,6 @@
 import {
   Cluster, Tile, TileType, Room, Position, InterfaceExit,
-  RoomType, CorruptionStage, HazardOverlayType, FunctionalTag,
+  RoomType, CorruptionStage, HazardOverlayType, FunctionalTag, ScannerBeam,
   CLUSTER_WIDTH, CLUSTER_HEIGHT, COLORS,
   createRoomTags,
 } from './types';
@@ -294,14 +294,37 @@ export function placeEntryPoint(tiles: Tile[][], _rooms: Room[]): Position {
 
 // ── Collapse heatmap ──
 
+/**
+ * Damage scale for a cluster: cluster 0 is mostly safe (scale=0.4),
+ * rising to full intensity (scale=1.0) at cluster 3+.
+ * Multiplying the raw noise by this keeps early clusters at low collapse values
+ * while later clusters unlock higher-tier hazards.
+ */
+let _damageBase = 0.40;
+let _damageIncrement = 0.20;
+
+export function setDamageParams(base: number, inc: number): void {
+  _damageBase = Math.max(0.05, Math.min(1.0, base));
+  _damageIncrement = Math.max(0.0, Math.min(0.5, inc));
+}
+
+export function getDamageParams(): { base: number; inc: number } {
+  return { base: _damageBase, inc: _damageIncrement };
+}
+
+function clusterDamageScale(clusterId: number): number {
+  return Math.min(1.0, _damageBase + clusterId * _damageIncrement);
+}
+
 function generateCollapseMap(clusterId: number): number[][] {
   initNoise();
   const offsetX = clusterId * CLUSTER_WIDTH;
+  const scale = clusterDamageScale(clusterId);
   const map: number[][] = [];
   for (let y = 0; y < CLUSTER_HEIGHT; y++) {
     map[y] = [];
     for (let x = 0; x < CLUSTER_WIDTH; x++) {
-      map[y][x] = collapseNoise(x + offsetX, y, 0.08, 2, 0.5);
+      map[y][x] = Math.min(1.0, collapseNoise(x + offsetX, y, 0.08, 2, 0.5) * scale);
     }
   }
   return map;
@@ -587,6 +610,21 @@ function assignFunctionalTags(
   }
 }
 
+// ── Spiral path ──
+
+/** Returns all interior positions in clockwise spiral order (outermost ring first). */
+function computeSpiralPath(x1: number, y1: number, x2: number, y2: number): Position[] {
+  const path: Position[] = [];
+  let lx1 = x1, ly1 = y1, lx2 = x2, ly2 = y2;
+  while (lx1 <= lx2 && ly1 <= ly2) {
+    for (let x = lx1; x <= lx2; x++) path.push({ x, y: ly1 }); ly1++;
+    for (let y = ly1; y <= ly2; y++) path.push({ x: lx2, y }); lx2--;
+    if (ly1 <= ly2) { for (let x = lx2; x >= lx1; x--) path.push({ x, y: ly2 }); ly2--; }
+    if (lx1 <= lx2) { for (let y = ly2; y >= ly1; y--) path.push({ x: lx1, y }); lx1++; }
+  }
+  return path;
+}
+
 function initRoomHazards(tiles: Tile[][], rooms: Room[]) {
   for (const room of rooms) {
     if (room.roomType === 'normal') continue;
@@ -624,13 +662,14 @@ function initRoomHazards(tiles: Tile[][], rooms: Room[]) {
 
       case 'memory_leak': {
         room.hazardState = { floodLevel: 0 };
+        // Place leak source on inner floor tile along a wall-adjacent edge row/col
         const wallSide = randInt(0, 3);
         let lx: number, ly: number;
         switch (wallSide) {
-          case 0: lx = randInt(innerX1, innerX2); ly = room.y; break;
-          case 1: lx = randInt(innerX1, innerX2); ly = room.y + room.h - 1; break;
-          case 2: lx = room.x; ly = randInt(innerY1, innerY2); break;
-          default: lx = room.x + room.w - 1; ly = randInt(innerY1, innerY2); break;
+          case 0: lx = randInt(innerX1, innerX2); ly = innerY1; break;
+          case 1: lx = randInt(innerX1, innerX2); ly = innerY2; break;
+          case 2: lx = innerX1; ly = randInt(innerY1, innerY2); break;
+          default: lx = innerX2; ly = randInt(innerY1, innerY2); break;
         }
         if (tiles[ly]?.[lx]) {
           tiles[ly][lx].glyph = '◎';
@@ -640,21 +679,43 @@ function initRoomHazards(tiles: Tile[][], rooms: Room[]) {
       }
 
       case 'firewall': {
-        const beamCount = randInt(1, 2);
-        const beams = [];
-        for (let b = 0; b < beamCount; b++) {
-          const axis = random() < 0.5 ? 'horizontal' as const : 'vertical' as const;
-          if (axis === 'horizontal') {
-            const pos = randInt(innerY1, innerY2);
-            beams.push({ axis, position: pos, direction: 1 as const, min: innerX1, max: innerX2 });
-          } else {
-            const pos = randInt(innerX1, innerX2);
-            beams.push({ axis, position: pos, direction: 1 as const, min: innerY1, max: innerY2 });
+        const FW_PATTERNS = ['pingpong', 'wipe', 'inward', 'cross', 'spiral'] as const;
+        type FWPat = typeof FW_PATTERNS[number];
+        const pattern: FWPat = pick([...FW_PATTERNS]);
+
+        let beams: ScannerBeam[] = [];
+
+        if (pattern === 'pingpong') {
+          const beamCount = randInt(1, 2);
+          for (let b = 0; b < beamCount; b++) {
+            const axis = random() < 0.5 ? 'horizontal' as const : 'vertical' as const;
+            if (axis === 'horizontal') {
+              beams.push({ axis, position: randInt(innerY1, innerY2), direction: 1, min: innerY1, max: innerY2 });
+            } else {
+              beams.push({ axis, position: randInt(innerX1, innerX2), direction: 1, min: innerX1, max: innerX2 });
+            }
           }
+        } else if (pattern === 'cross') {
+          beams.push({ axis: 'horizontal', position: randInt(innerY1, innerY2), direction: 1, min: innerY1, max: innerY2 });
+          beams.push({ axis: 'vertical',   position: randInt(innerX1, innerX2), direction: 1, min: innerX1, max: innerX2 });
         }
-        room.hazardState = { beams, alarmTriggered: false };
-        const tx = room.x + room.w - 1;
-        const ty = Math.floor(room.y + room.h / 2);
+
+        const firewallPath = pattern === 'spiral'
+          ? computeSpiralPath(innerX1, innerY1, innerX2, innerY2)
+          : undefined;
+
+        room.hazardState = {
+          beams,
+          alarmTriggered: false,
+          firewallPattern: pattern,
+          firewallAxis: random() < 0.5 ? 'horizontal' : 'vertical', // used by wipe
+          firewallStep: 0,
+          firewallPath,
+        };
+
+        // Place terminal on inner floor tile (rightmost interior column, mid-height)
+        const tx = innerX2;
+        const ty = Math.max(innerY1, Math.min(innerY2, Math.floor(room.y + room.h / 2)));
         if (tiles[ty]?.[tx]) {
           tiles[ty][tx].glyph = '▣';
           tiles[ty][tx].fg = '#ffcc00';

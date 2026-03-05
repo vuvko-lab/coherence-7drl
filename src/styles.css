@@ -597,6 +597,30 @@ body {
   background: #0a1a0f;
 }
 
+#panel-admin .admin-section-hdr {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  border-top: 1px solid #334466;
+  color: #445588;
+  font-family: inherit;
+  font-size: inherit;
+  padding: 3px 1ch 2px;
+  margin: 4px 0 3px;
+  cursor: pointer;
+  text-align: left;
+  letter-spacing: 0.05em;
+}
+
+#panel-admin .admin-section-hdr:hover {
+  color: #6688cc;
+}
+
+#panel-admin .admin-section.collapsed {
+  display: none;
+}
+
 .admin-seed-input {
   background: #0a0a14;
   color: #6688cc;
