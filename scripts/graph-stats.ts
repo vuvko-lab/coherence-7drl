@@ -92,7 +92,7 @@ function bfsReachable(
 }
 
 function computeMetrics(cluster: Cluster): Metrics {
-  const adj = cluster.roomAdjacency;
+  const adj = cluster.doorAdjacency;
   const roomIds = cluster.rooms.map(r => r.id);
   const { entry, exit } = findEntryExitIds(cluster);
 

@@ -161,7 +161,7 @@ function updateCorruption(state: GameState, cluster: Cluster, room: Room) {
   if (newEntries.length > 0) {
     const pRoom = playerRoom(state, cluster);
     if (pRoom) {
-      const dist = roomDistance(cluster.roomAdjacency, pRoom.id, room.id);
+      const dist = roomDistance(cluster.doorAdjacency, pRoom.id, room.id);
       if (dist === 0) {
         addMessage(state, 'Data structures crack and fragment around you.', 'important');
       } else if (dist === 1) {
@@ -189,7 +189,7 @@ function updateTriggerTrap(state: GameState, cluster: Cluster, room: Room) {
   if (hz.ticksRemaining === 5) {
     const pRoom = playerRoom(state, cluster);
     if (pRoom) {
-      const dist = roomDistance(cluster.roomAdjacency, pRoom.id, room.id);
+      const dist = roomDistance(cluster.doorAdjacency, pRoom.id, room.id);
       if (dist <= 1) {
         addMessage(state, `Rapid ticking from ${dist === 0 ? 'this room' : 'nearby'}!`, 'hazard');
       }
@@ -225,7 +225,7 @@ function updateTriggerTrap(state: GameState, cluster: Cluster, room: Room) {
     // Damage: player in room = 40-60, adjacent = 15-25
     const pRoom = playerRoom(state, cluster);
     if (pRoom) {
-      const dist = roomDistance(cluster.roomAdjacency, pRoom.id, room.id);
+      const dist = roomDistance(cluster.doorAdjacency, pRoom.id, room.id);
       if (dist === 0) {
         addMessage(state, 'DETONATION! The data-bomb tears through the room!', 'hazard');
         damageCoherence(state, randInt(40, 60));
@@ -277,7 +277,7 @@ function updateMemoryLeak(state: GameState, cluster: Cluster, room: Room) {
 
     const pRoom = playerRoom(state, cluster);
     if (pRoom) {
-      const dist = roomDistance(cluster.roomAdjacency, pRoom.id, room.id);
+      const dist = roomDistance(cluster.doorAdjacency, pRoom.id, room.id);
       if (dist === 0) {
         addMessage(state, 'Data floods rise around your feet.', 'hazard');
       } else if (dist === 1 && hz.floodLevel === 1) {

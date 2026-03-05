@@ -409,10 +409,14 @@ export function renderOverviewPanel(
   let body = '';
 
   if (detailRoom) {
-    const isHall = detailRoom.tags.has('hall');
+    const isHall = detailRoom.tags.geometric.has('hall');
     const interior = isHall ? detailRoom.w * detailRoom.h : (detailRoom.w - 2) * (detailRoom.h - 2);
-    const tags = detailRoom.tags.size > 0 ? [...detailRoom.tags].join(', ') : 'none';
-    const adj = cluster.roomAdjacency.get(detailRoom.id) ?? [];
+    const geoTags = detailRoom.tags.geometric.size > 0 ? [...detailRoom.tags.geometric].join(', ') : 'none';
+    const funcTag = detailRoom.tags.functional ?? 'none';
+    const modTags = detailRoom.tags.modifiers.size > 0 ? [...detailRoom.tags.modifiers].join(', ') : 'none';
+    const cosTag = detailRoom.tags.cosmetic ?? 'none';
+    const wallAdj = cluster.wallAdjacency.get(detailRoom.id) ?? [];
+    const doorAdj = cluster.doorAdjacency.get(detailRoom.id) ?? [];
     const doors = countRoomDoors(cluster, detailRoom);
     const hazardTiles = countRoomHazardTiles(cluster, detailRoom);
     const hasPlayer = detailRoom.id === playerRoomId;
@@ -439,15 +443,17 @@ export function renderOverviewPanel(
       hazardStr = [...hazardTiles.entries()].map(([t, n]) => `${t}: ${n}`).join(', ');
     }
 
-    // Adjacent rooms with types
-    const adjStr = adj.length > 0
-      ? adj.map(id => {
+    // Format adjacency list
+    const fmtAdj = (ids: number[]) => ids.length > 0
+      ? ids.map(id => {
         const r = cluster.rooms.find(rm => rm.id === id);
         if (!r) return String(id);
         const tc = ROOM_TYPE_SHORT[r.roomType] ?? '?';
         return r.roomType !== 'normal' ? `${id}<span class="room-type">${tc}</span>` : String(id);
       }).join(', ')
       : 'none';
+    const doorAdjStr = fmtAdj(doorAdj);
+    const wallAdjStr = fmtAdj(wallAdj);
 
     // Entity list
     const entStr = ents.length > 0
@@ -458,14 +464,17 @@ export function renderOverviewPanel(
       `<div class="room-detail">` +
       `<div class="stat-row"><span class="stat-label">room</span><span class="stat-value">${detailRoom.id} ${isHall ? '(hall)' : ''}</span></div>` +
       `<div class="stat-row"><span class="stat-label">type</span><span class="room-type">${detailRoom.roomType}</span></div>` +
-      `<div class="stat-row"><span class="stat-label">tags</span><span class="room-tags">${tags}</span></div>` +
+      `<div class="stat-row"><span class="stat-label">geo</span><span class="room-tags">${geoTags}</span></div>` +
+      `<div class="stat-row"><span class="stat-label">func</span><span class="room-tags">${funcTag}</span></div>` +
+      `<div class="stat-row"><span class="stat-label">mods</span><span class="room-tags">${modTags}</span></div>` +
+      `<div class="stat-row"><span class="stat-label">cosmetic</span><span class="room-tags">${cosTag}</span></div>` +
       `<div class="panel-sep"><span class="fill"></span><span class="label">geometry</span><span class="fill"></span></div>` +
       `<div class="stat-row"><span class="stat-label">bounds</span>${detailRoom.w}x${detailRoom.h} at (${detailRoom.x},${detailRoom.y})</div>` +
       `<div class="stat-row"><span class="stat-label">interior</span>${interior} tiles</div>` +
       `<div class="stat-row"><span class="stat-label">doors</span>${doorDetail}</div>` +
       `<div class="panel-sep"><span class="fill"></span><span class="label">connections</span><span class="fill"></span></div>` +
-      `<div class="stat-row"><span class="stat-label">adj</span>${adjStr}</div>` +
-      `<div class="stat-row"><span class="stat-label">degree</span>${adj.length}</div>` +
+      `<div class="stat-row"><span class="stat-label">door adj</span>${doorAdjStr} (${doorAdj.length})</div>` +
+      `<div class="stat-row"><span class="stat-label">wall adj</span>${wallAdjStr} (${wallAdj.length})</div>` +
       ifaceRows(cluster, detailRoom) +
       `<div class="panel-sep"><span class="fill"></span><span class="label">contents</span><span class="fill"></span></div>` +
       `<div class="stat-row"><span class="stat-label">hazard tiles</span><span class="room-hazards">${hazardStr}</span></div>` +

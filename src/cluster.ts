@@ -2,6 +2,7 @@ import {
   Cluster, Tile, TileType, Room, Position, InterfaceExit,
   RoomType, CorruptionStage, HazardOverlayType,
   CLUSTER_WIDTH, CLUSTER_HEIGHT, COLORS,
+  createRoomTags,
 } from './types';
 import { generate, CellType, RoomDef, Hall } from './gen-halls';
 import { random, randInt } from './rng';
@@ -142,18 +143,18 @@ function buildRoomIdMap(rawRooms: RoomDef[], halls: Hall[], hallIdOffset: number
 
 // ── Room adjacency ──
 
-function buildRoomAdjacency(allRooms: Room[], roomIdAt: number[][]): Map<number, number[]> {
+function addEdge(adj: Map<number, number[]>, a: number, b: number) {
+  if (a === b) return;
+  if (!adj.has(a) || !adj.has(b)) return;
+  if (!adj.get(a)!.includes(b)) adj.get(a)!.push(b);
+  if (!adj.get(b)!.includes(a)) adj.get(b)!.push(a);
+}
+
+/** Wall adjacency: rooms that share a wall (adjacent tiles with different room IDs) */
+function buildWallAdjacency(allRooms: Room[], roomIdAt: number[][]): Map<number, number[]> {
   const adj = new Map<number, number[]>();
   for (const r of allRooms) adj.set(r.id, []);
 
-  const addEdge = (a: number, b: number) => {
-    if (a === b) return;
-    if (!adj.has(a) || !adj.has(b)) return;
-    if (!adj.get(a)!.includes(b)) adj.get(a)!.push(b);
-    if (!adj.get(b)!.includes(a)) adj.get(b)!.push(a);
-  };
-
-  // Scan for adjacent tiles with different room IDs → rooms are adjacent
   for (let y = 0; y < CLUSTER_HEIGHT; y++) {
     for (let x = 0; x < CLUSTER_WIDTH; x++) {
       const rid = roomIdAt[y][x];
@@ -163,7 +164,36 @@ function buildRoomAdjacency(allRooms: Room[], roomIdAt: number[][]): Map<number,
         if (nx >= CLUSTER_WIDTH || ny >= CLUSTER_HEIGHT) continue;
         const nrid = roomIdAt[ny][nx];
         if (nrid >= 0 && nrid !== rid) {
-          addEdge(rid, nrid);
+          addEdge(adj, rid, nrid);
+        }
+      }
+    }
+  }
+
+  return adj;
+}
+
+/** Door adjacency: rooms connected through a door tile */
+function buildDoorAdjacency(allRooms: Room[], cells: CellType[][], roomIdAt: number[][]): Map<number, number[]> {
+  const adj = new Map<number, number[]>();
+  for (const r of allRooms) adj.set(r.id, []);
+
+  for (let y = 0; y < CLUSTER_HEIGHT; y++) {
+    for (let x = 0; x < CLUSTER_WIDTH; x++) {
+      if (cells[y][x] !== 'door') continue;
+      // Collect distinct room IDs from cardinal neighbors
+      const neighborIds = new Set<number>();
+      for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || nx >= CLUSTER_WIDTH || ny < 0 || ny >= CLUSTER_HEIGHT) continue;
+        const nrid = roomIdAt[ny][nx];
+        if (nrid >= 0) neighborIds.add(nrid);
+      }
+      // Connect all pairs of rooms that share this door
+      const ids = [...neighborIds];
+      for (let i = 0; i < ids.length; i++) {
+        for (let j = i + 1; j < ids.length; j++) {
+          addEdge(adj, ids[i], ids[j]);
         }
       }
     }
@@ -461,67 +491,58 @@ function initRoomHazards(tiles: Tile[][], rooms: Room[]) {
 
 function assignStructuralTags(
   allRooms: Room[],
-  roomAdjacency: Map<number, number[]>,
+  wallAdjacency: Map<number, number[]>,
+  doorAdjacency: Map<number, number[]>,
   cells: CellType[][],
 ) {
-  // Add hazard roomType as tag
-  for (const r of allRooms) {
-    if (r.roomType !== 'normal') {
-      r.tags.add(r.roomType);
-    }
-  }
-
   // entry — room nearest to left interface; exit — room nearest to right interface
   let entryRoom: Room | null = null;
   let exitRoom: Room | null = null;
   for (let y = 0; y < CLUSTER_HEIGHT; y++) {
     if (cells[y][0] === 'interface') {
-      // Find room closest to left interface
-      const nonHall = allRooms.filter(r => !r.tags.has('hall'));
+      const nonHall = allRooms.filter(r => !r.tags.geometric.has('hall'));
       entryRoom = nonHall.reduce((best, r) => (r.x < best.x ? r : best), nonHall[0]);
       break;
     }
   }
   for (let y = 0; y < CLUSTER_HEIGHT; y++) {
     if (cells[y][CLUSTER_WIDTH - 1] === 'interface') {
-      const nonHall = allRooms.filter(r => !r.tags.has('hall'));
+      const nonHall = allRooms.filter(r => !r.tags.geometric.has('hall'));
       exitRoom = nonHall.reduce((best, r) => (r.x + r.w > best.x + best.w ? r : best), nonHall[0]);
       break;
     }
   }
-  if (entryRoom) entryRoom.tags.add('entry');
-  if (exitRoom && exitRoom !== entryRoom) exitRoom.tags.add('exit');
+  if (entryRoom) entryRoom.tags.geometric.add('entry');
+  if (exitRoom && exitRoom !== entryRoom) exitRoom.tags.geometric.add('exit');
 
-  // Degree-based tags
+  // Degree-based tags: dead_end uses wall adjacency, hub uses door adjacency
   for (const r of allRooms) {
-    const degree = (roomAdjacency.get(r.id) ?? []).length;
-    if (degree <= 1) r.tags.add('dead_end');
-    if (degree >= 3) r.tags.add('hub');
+    const wallDegree = (wallAdjacency.get(r.id) ?? []).length;
+    const doorDegree = (doorAdjacency.get(r.id) ?? []).length;
+    if (wallDegree <= 1) r.tags.geometric.add('dead_end');
+    if (doorDegree >= 3) r.tags.geometric.add('hub');
   }
 
   // Size-based tags (interior area = (w-2)*(h-2) for rooms, w*h for halls)
   for (const r of allRooms) {
-    const interior = r.tags.has('hall') ? r.w * r.h : (r.w - 2) * (r.h - 2);
-    if (interior >= 25) r.tags.add('large');
-    if (interior <= 12) r.tags.add('small');
+    const interior = r.tags.geometric.has('hall') ? r.w * r.h : (r.w - 2) * (r.h - 2);
+    if (interior >= 25) r.tags.geometric.add('large');
+    if (interior <= 12) r.tags.geometric.add('small');
   }
 
   // Interface tags — tag rooms/halls that contain interface tiles
-  // Build a roomId lookup for interface positions
   for (let y = 0; y < CLUSTER_HEIGHT; y++) {
     if (cells[y][0] === 'interface') {
-      // Left-edge interface → find the room/hall adjacent to it (x=1)
       const adjRoom = allRooms.find(r =>
         1 >= r.x && 1 < r.x + r.w && y >= r.y && y < r.y + r.h
       );
-      if (adjRoom) adjRoom.tags.add('entry_interface');
+      if (adjRoom) adjRoom.tags.geometric.add('entry_interface');
     }
     if (cells[y][CLUSTER_WIDTH - 1] === 'interface') {
-      // Right-edge interface → find the room/hall adjacent to it (x=CLUSTER_WIDTH-2)
       const adjRoom = allRooms.find(r =>
         (CLUSTER_WIDTH - 2) >= r.x && (CLUSTER_WIDTH - 2) < r.x + r.w && y >= r.y && y < r.y + r.h
       );
-      if (adjRoom) adjRoom.tags.add('exit_interface');
+      if (adjRoom) adjRoom.tags.geometric.add('exit_interface');
     }
   }
 }
@@ -539,7 +560,7 @@ export function generateCluster(id: number): Cluster {
     w: r.rect.w + 2,
     h: r.rect.h + 2,
     roomType: 'normal' as RoomType,
-    tags: new Set<string>(),
+    tags: createRoomTags(['room']),
     containedHazards: new Set<HazardOverlayType>(),
   }));
 
@@ -552,7 +573,7 @@ export function generateCluster(id: number): Cluster {
     w: h.rect.w,
     h: h.rect.h,
     roomType: 'normal' as RoomType,
-    tags: new Set<string>(['hall']),
+    tags: createRoomTags(['hall']),
     containedHazards: new Set<HazardOverlayType>(),
   }));
 
@@ -561,11 +582,12 @@ export function generateCluster(id: number): Cluster {
   // Build room ID map (assigns tiles to room/hall IDs)
   const roomIdAt = buildRoomIdMap(rawRooms, halls, hallIdOffset);
 
-  // Build room adjacency from tile neighbors
-  const roomAdjacency = buildRoomAdjacency(allRooms, roomIdAt);
+  // Build adjacency graphs
+  const wallAdjacency = buildWallAdjacency(allRooms, roomIdAt);
+  const doorAdjacency = buildDoorAdjacency(allRooms, grid.cells, roomIdAt);
 
   // Assign special room types (only non-hall rooms)
-  assignRoomTypes(rooms, id, roomAdjacency);
+  assignRoomTypes(rooms, id, doorAdjacency);
 
   // Convert grid cells to tiles
   const tiles = gridToTiles(grid.cells, roomIdAt);
@@ -574,17 +596,17 @@ export function generateCluster(id: number): Cluster {
   initRoomHazards(tiles, rooms);
 
   // Compute structural tags
-  assignStructuralTags(allRooms, roomAdjacency, grid.cells);
+  assignStructuralTags(allRooms, wallAdjacency, doorAdjacency, grid.cells);
 
   // Extract interface exits (right edge only; left interface is for entry)
   const interfaces = extractInterfaces(grid.cells);
 
-  const cluster = { id, width: CLUSTER_WIDTH, height: CLUSTER_HEIGHT, tiles, rooms: allRooms, interfaces, roomAdjacency };
+  const cluster = { id, width: CLUSTER_WIDTH, height: CLUSTER_HEIGHT, tiles, rooms: allRooms, interfaces, wallAdjacency, doorAdjacency };
 
   // Debug output
   const hazardRooms = allRooms.filter(r => r.roomType !== 'normal');
   const hazardSummary = hazardRooms.map(r => `  room ${r.id}: ${r.roomType} (${r.w - 2}x${r.h - 2})`).join('\n');
-  const degrees = allRooms.map(r => (roomAdjacency.get(r.id) ?? []).length);
+  const degrees = allRooms.map(r => (doorAdjacency.get(r.id) ?? []).length);
   const avgDegree = degrees.length > 0 ? (degrees.reduce((a, b) => a + b, 0) / degrees.length).toFixed(1) : '0';
   const deadEnds = degrees.filter(d => d <= 1).length;
   console.log(

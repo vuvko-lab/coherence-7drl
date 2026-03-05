@@ -101,6 +101,40 @@ export interface RoomHazardState {
 
 }
 
+// ── Room Tag Categories ──
+
+export type GeometricTag =
+  | 'hall' | 'room' | 'dead_end' | 'hub' | 'large' | 'small'
+  | 'entry' | 'exit' | 'entry_interface' | 'exit_interface'
+  | 'chokepoint' | 'peripheral';
+
+export type FunctionalTag =
+  | 'server_rack' | 'reactor' | 'medbay' | 'bridge' | 'cargo'
+  | 'barracks' | 'lab' | 'armory' | 'comms' | 'maintenance'
+  | 'hangar' | 'archive' | 'sensor_matrix';
+
+export type ModifierTag =
+  | 'encrypted' | 'orphaned' | 'overclocked'
+  | 'hard_wired' | 'degraded' | 'fragmented' | 'ghosted';
+
+export type CosmeticTag = string;
+
+export interface RoomTags {
+  geometric: Set<GeometricTag>;
+  functional: FunctionalTag | null;
+  modifiers: Set<ModifierTag>;
+  cosmetic: CosmeticTag | null;
+}
+
+export function createRoomTags(geometric?: GeometricTag[]): RoomTags {
+  return {
+    geometric: new Set<GeometricTag>(geometric ?? []),
+    functional: null,
+    modifiers: new Set<ModifierTag>(),
+    cosmetic: null,
+  };
+}
+
 export interface Room {
   id: number;
   x: number;
@@ -108,7 +142,7 @@ export interface Room {
   w: number;
   h: number;
   roomType: RoomType;
-  tags: Set<string>;
+  tags: RoomTags;
   hazardState?: RoomHazardState;
   containedHazards: Set<HazardOverlayType>;
 }
@@ -126,7 +160,8 @@ export interface Cluster {
   tiles: Tile[][];
   rooms: Room[];
   interfaces: InterfaceExit[];
-  roomAdjacency: Map<number, number[]>; // room id -> adjacent room ids (via doors)
+  wallAdjacency: Map<number, number[]>;  // rooms sharing a wall
+  doorAdjacency: Map<number, number[]>;  // rooms connected through doors
 }
 
 // ── Modules ──
