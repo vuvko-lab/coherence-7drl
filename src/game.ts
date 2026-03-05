@@ -1,11 +1,12 @@
 import {
   GameState, Entity, Cluster, Position, PlayerAction, Tile,
-  TileType, DIR_DELTA, GameMessage,
+  TileType, DIR_DELTA, GameMessage, Direction,
 } from './types';
 import { generateCluster, placeEntryPoint } from './cluster';
 import { computeFOV } from './fov';
 import { findPath } from './pathfinding';
 import { updateHazards, onPlayerEnterRoom, getPlayerRoom, applyTileHazardToPlayer, updateAlertModule } from './hazards';
+import { seed as seedRng, generateSeed } from './rng';
 
 const DOOR_CLOSE_DELAY = 5; // ticks before an unoccupied open door auto-closes
 
@@ -25,7 +26,18 @@ function closeDoor(tile: Tile) {
   tile.doorCloseTick = undefined;
 }
 
-export function createGame(): GameState {
+function deltaToDir(dx: number, dy: number): Direction {
+  if (dx === 1) return 'right';
+  if (dx === -1) return 'left';
+  if (dy === 1) return 'down';
+  return 'up';
+}
+
+export function createGame(initialSeed?: number): GameState {
+  const gameSeed = initialSeed ?? generateSeed();
+  seedRng(gameSeed);
+  console.log(`[Game] Seed: ${gameSeed} (reproduce with #seed=${gameSeed})`);
+
   const cluster = generateCluster(0);
   const entryPos = placeEntryPoint(cluster.tiles, cluster.rooms);
 
@@ -56,7 +68,12 @@ export function createGame(): GameState {
     tick: 0,
     messages: [],
     autoPath: [],
+    actionLog: [],
+    seed: gameSeed,
     debugMode: false,
+    mapReveal: false,
+    godMode: false,
+    invisibleMode: false,
   };
 
   addMessage(state, 'System boot... ego-fragment loaded from backup.', 'system');
@@ -90,8 +107,19 @@ function tryMove(state: GameState, dx: number, dy: number): boolean {
 
   if (nx < 0 || nx >= cluster.width || ny < 0 || ny >= cluster.height) return false;
 
-  // Bump-to-open: closed door (glyph '+') → open it, costs a turn, don't move
   const targetTile = cluster.tiles[ny][nx];
+
+  // God mode: walk through anything (noclip)
+  if (state.godMode) {
+    state.player.position.x = nx;
+    state.player.position.y = ny;
+    if (targetTile.type === TileType.InterfaceExit) {
+      addMessage(state, 'Interface exit detected. Press Enter to transfer.', 'important');
+    }
+    return true;
+  }
+
+  // Bump-to-open: closed door (glyph '+') → open it, costs a turn, don't move
   if (targetTile.type === TileType.Door && !targetTile.doorOpen && targetTile.glyph === '+') {
     openDoor(targetTile);
     return true;
@@ -221,6 +249,8 @@ export function processAction(state: GameState, action: PlayerAction): boolean {
   }
 
   if (acted) {
+    state.actionLog.push(action);
+
     // Track room change for entry triggers
     const prevRoom = getPlayerRoom(state);
 
@@ -297,6 +327,9 @@ export function stepAutoPath(state: GameState): boolean {
   // Check if next step is a closed door — bump to open it
   const nextTile = cluster.tiles[next.y]?.[next.x];
   if (nextTile?.type === TileType.Door && !nextTile.doorOpen && nextTile.glyph === '+') {
+    const bumpDx = next.x - state.player.position.x;
+    const bumpDy = next.y - state.player.position.y;
+    state.actionLog.push({ kind: 'move', dir: deltaToDir(bumpDx, bumpDy) });
     openDoor(nextTile);
     // Don't shift path — we'll walk through on the next step
     state.tick++;
@@ -321,6 +354,7 @@ export function stepAutoPath(state: GameState): boolean {
   const prevRoom = getPlayerRoom(state);
 
   if (tryMove(state, dx, dy)) {
+    state.actionLog.push({ kind: 'move', dir: deltaToDir(dx, dy) });
     state.autoPath.shift();
     state.tick++;
     computeFOV(cluster, state.player.position);
@@ -340,4 +374,19 @@ export function stepAutoPath(state: GameState): boolean {
 
   state.autoPath = [];
   return false;
+}
+
+// ── Save / Load ──
+
+export function exportSave(state: GameState): string {
+  return JSON.stringify({ seed: state.seed, actions: state.actionLog });
+}
+
+export function loadSave(saveJson: string): GameState {
+  const { seed, actions } = JSON.parse(saveJson);
+  const newState = createGame(seed);
+  for (const action of actions) {
+    processAction(newState, action);
+  }
+  return newState;
 }

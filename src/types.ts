@@ -166,12 +166,17 @@ export interface GameState {
   tick: number;
   messages: GameMessage[];
   autoPath: Position[];
+  actionLog: PlayerAction[];
+  seed: number;
   debugMode: boolean;
+  mapReveal: boolean;
+  godMode: boolean;
+  invisibleMode: boolean;
 }
 
 export interface GameMessage {
   text: string;
-  type: 'normal' | 'system' | 'important' | 'hazard' | 'debug';
+  type: 'normal' | 'system' | 'important' | 'hazard' | 'alert' | 'debug';
   tick: number;
 }
 

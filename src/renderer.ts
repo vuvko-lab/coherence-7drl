@@ -82,14 +82,14 @@ export class Renderer {
     this.pathHighlight = path;
   }
 
-  render(cluster: Cluster, entities: Entity[], playerPos: Position, debugMode = false) {
+  render(cluster: Cluster, entities: Entity[], playerPos: Position, mapReveal = false) {
     const pathSet = new Set(this.pathHighlight.map(p => `${p.x},${p.y}`));
 
     for (let y = 0; y < this.height; y++) {
       for (let x = 0; x < this.width; x++) {
         const tile = cluster.tiles[y][x];
         const cell = this.cells[y][x];
-        const isVisible = tile.visible || debugMode;
+        const isVisible = tile.visible || mapReveal;
 
         let glyph = tile.glyph;
         let fg = tile.fg;
@@ -164,7 +164,7 @@ export class Renderer {
       const { x, y } = entity.position;
       if (x >= 0 && x < this.width && y >= 0 && y < this.height) {
         const tile = cluster.tiles[y][x];
-        if (tile.visible || debugMode) {
+        if (tile.visible || mapReveal) {
           this.cells[y][x].textContent = entity.glyph;
           this.cells[y][x].style.color = entity.fg;
         }
@@ -179,7 +179,7 @@ export class Renderer {
     }
 
     // Debug overlay: room IDs and types
-    if (debugMode) {
+    if (mapReveal) {
       for (const room of cluster.rooms) {
         const cx = Math.floor(room.x + room.w / 2);
         const cy = Math.floor(room.y + room.h / 2);
@@ -203,7 +203,7 @@ export class Renderer {
 
 // ── SELF panel renderer ──
 
-export function renderSelfPanel(el: HTMLElement, player: Entity, clusterId: number, tick: number, debugMode = false) {
+export function renderSelfPanel(el: HTMLElement, player: Entity, clusterId: number, tick: number, debugMode = false, mapReveal = false, godMode = false, invisibleMode = false, gameSeed = 0) {
   const hexId = '0x' + player.id.toString(16).toUpperCase().padStart(4, '0');
   const coherence = player.coherence ?? 100;
   const maxCoherence = player.maxCoherence ?? 100;
@@ -241,20 +241,49 @@ export function renderSelfPanel(el: HTMLElement, player: Entity, clusterId: numb
 ${moduleRows}
 <div class="panel-sep"><span class="fill"></span><span class="label">perms</span><span class="fill"></span></div>
 <div class="stat-row"><span class="stat-label">engineer / r+w+x</span></div>
-${debugMode ? '<div class="panel-sep"><span class="fill"></span></div>\n<div class="stat-row"><span class="stat-value debug-indicator">[DEBUG MODE]</span></div>' : ''}
+${debugMode ? `<div class="panel-sep"><span class="fill"></span></div>
+<div class="stat-row"><span class="stat-value debug-indicator">[DEBUG MODE]</span></div>
+<div class="stat-row"><span class="stat-label">Seed:</span><span class="stat-value debug-indicator">${gameSeed}</span></div>
+${mapReveal ? '<div class="stat-row"><span class="stat-value debug-indicator">[MAP REVEAL]</span></div>' : ''}
+${godMode ? '<div class="stat-row"><span class="stat-value debug-indicator">[GOD MODE]</span></div>' : ''}
+${invisibleMode ? '<div class="stat-row"><span class="stat-value debug-indicator">[INVISIBLE]</span></div>' : ''}` : ''}
 </div>
 <div class="panel-edge"><span class="corner">└</span><span class="fill"></span><span class="corner">┘</span></div>`;
 }
 
 // ── Message log renderer ──
 
-export function renderMessageLog(el: HTMLElement, messages: { text: string; type: string }[]) {
+const MSG_CLASS: Record<string, string> = {
+  debug: 'msg msg-debug',
+  system: 'msg msg-system',
+  important: 'msg msg-important',
+  hazard: 'msg msg-hazard',
+  alert: 'msg msg-alert',
+};
+
+function renderLogBody(el: HTMLElement, messages: { text: string; type: string }[]) {
   const body = el.querySelector('.log-body');
   if (!body) return;
-  // Show last 20 messages, newest first
   const recent = messages.slice(-20).reverse();
-  body.innerHTML = recent.map(m => {
-    const cls = m.type === 'debug' ? 'msg msg-debug' : m.type === 'system' ? 'msg msg-system' : m.type === 'important' ? 'msg msg-important' : m.type === 'hazard' ? 'msg msg-hazard' : 'msg';
-    return `<div class="${cls}">${m.text}</div>`;
-  }).join('');
+  body.innerHTML = recent.map(m =>
+    `<div class="${MSG_CLASS[m.type] ?? 'msg'}">${m.text}</div>`
+  ).join('');
+}
+
+export function renderLogs(
+  generalEl: HTMLElement,
+  alertEl: HTMLElement,
+  messages: { text: string; type: string }[],
+) {
+  const general: typeof messages = [];
+  const alert: typeof messages = [];
+  for (const m of messages) {
+    if (m.type === 'hazard' || m.type === 'alert') {
+      alert.push(m);
+    } else {
+      general.push(m);
+    }
+  }
+  renderLogBody(generalEl, general);
+  renderLogBody(alertEl, alert);
 }

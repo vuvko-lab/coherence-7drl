@@ -212,31 +212,51 @@ body {
   grid-area: log;
 }
 
-#message-log {
+#log-area {
   position: absolute;
   bottom: 4px;
   left: 4px;
   right: 4px;
   height: 120px;
-  padding: 0;
-  overflow: hidden;
-  color: #338855;
   display: flex;
-  flex-direction: column;
-  background: #0a0a0a;
+  gap: 4px;
   z-index: 10;
   transition: height 0.35s ease;
 }
 
-#message-log.log-expanded {
+#log-area.log-any-expanded {
   height: calc(100% - 8px);
 }
 
-#message-log > .panel-edge {
+.log-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #0a0a0a;
+  color: #338855;
+  position: relative;
+}
+
+.log-panel.log-expanded {
+  position: absolute;
+  inset: 0;
+  z-index: 11;
+}
+
+#log-alert {
+  color: #cc6633;
+}
+
+#log-alert .panel-edge {
+  color: #cc6633;
+}
+
+.log-panel > .panel-edge {
   flex-shrink: 0;
 }
 
-#message-log .log-body {
+.log-panel .log-body {
   flex: 1;
   overflow-y: auto;
   padding: 2px 2ch;
@@ -260,23 +280,35 @@ body {
   color: #00ff88;
 }
 
-#message-log .msg {
+#log-alert .log-toggle {
+  color: #996633;
+}
+
+#log-alert .log-toggle:hover {
+  color: #ffaa44;
+}
+
+.log-panel .msg {
   white-space: pre-wrap;
 }
 
-#message-log .msg-system {
+.log-panel .msg-system {
   color: #557744;
 }
 
-#message-log .msg-important {
+.log-panel .msg-important {
   color: #ff8844;
 }
 
-#message-log .msg-hazard {
+.log-panel .msg-hazard {
   color: #ff4444;
 }
 
-#message-log .msg-debug {
+.log-panel .msg-alert {
+  color: #ff6633;
+}
+
+.log-panel .msg-debug {
   color: #6688cc;
 }
 
@@ -447,6 +479,22 @@ body {
 #panel-admin .admin-btn:active {
   color: #aaccff;
   background: #0f0f2a;
+}
+
+#panel-admin .admin-toggle.active {
+  color: #44ff88;
+  border-color: #228844;
+  background: #0a1a0f;
+}
+
+.admin-seed-input {
+  background: #0a0a14;
+  color: #6688cc;
+  border: 1px solid #334466;
+  font-family: inherit;
+  font-size: inherit;
+  padding: 1px 4px;
+  width: 12ch;
 }
 
 /* === GLITCH EFFECTS === */

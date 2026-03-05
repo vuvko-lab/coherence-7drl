@@ -1,19 +1,40 @@
-import { createGame, processAction, handleMapClick, stepAutoPath, addMessage } from './game';
-import { Renderer, renderSelfPanel, renderMessageLog } from './renderer';
+import { createGame, processAction, handleMapClick, stepAutoPath, addMessage, exportSave, loadSave } from './game';
+import { Renderer, renderSelfPanel, renderLogs } from './renderer';
 import { InputHandler } from './input';
 import { PlayerAction, Position, TileType } from './types';
 import { GLITCH_EFFECTS } from './glitch';
 
 // ── Bootstrap ──
 
-const state = createGame();
-const renderer = new Renderer('map-grid-wrap');
-const cluster = state.clusters.get(state.currentClusterId)!;
+// Read seed from URL hash (e.g. #seed=12345)
+function parseSeedFromURL(): number | undefined {
+  const hash = window.location.hash;
+  const match = hash.match(/seed=(\d+)/);
+  return match ? Number(match[1]) : undefined;
+}
 
-renderer.initGrid(cluster.width, cluster.height);
+let state = createGame(parseSeedFromURL());
+const renderer = new Renderer('map-grid-wrap');
+
+function initRenderer() {
+  const cluster = state.clusters.get(state.currentClusterId)!;
+  renderer.initGrid(cluster.width, cluster.height);
+}
+
+function restartGame(newSeed: number) {
+  stopAutoWalk();
+  adminInitialized = false;
+  state = createGame(newSeed);
+  initRenderer();
+  renderAll();
+}
+
+initRenderer();
 
 const panelEl = document.getElementById('panel-self')!;
-const logEl = document.getElementById('message-log')!;
+const logAreaEl = document.getElementById('log-area')!;
+const logGeneralEl = document.getElementById('log-general')!;
+const logAlertEl = document.getElementById('log-alert')!;
 const adminEl = document.getElementById('panel-admin')!;
 
 // ── Auto-walk timer ──
@@ -69,12 +90,85 @@ function initAdminPanel() {
   adminEl.innerHTML = `\
 <div class="panel-edge"><span class="corner">┌</span><span class="label">[ ADMIN ]</span><span class="fill"></span><span class="corner">┐</span></div>
 <div class="panel-body">
+<button class="admin-btn admin-toggle" data-toggle="mapReveal">&gt; map reveal: OFF</button>
+<button class="admin-btn admin-toggle" data-toggle="godMode">&gt; god mode: OFF</button>
+<button class="admin-btn admin-toggle" data-toggle="invisibleMode">&gt; invisible: OFF</button>
+<div class="panel-sep"><span class="fill"></span></div>
+<div class="stat-row"><span class="stat-label">seed:</span><input class="admin-seed-input" type="text" value="${state.seed}"></div>
+<button class="admin-btn admin-restart">&gt; restart with seed</button>
+<div class="panel-sep"><span class="fill"></span></div>
+<button class="admin-btn admin-export">&gt; export save</button>
+<button class="admin-btn admin-import">&gt; import save</button>
+<input type="file" class="admin-import-input" accept=".json" style="display:none">
+<div class="panel-sep"><span class="fill"></span></div>
 ${buttons}
 </div>
 <div class="panel-edge"><span class="corner">└</span><span class="fill"></span><span class="corner">┘</span></div>`;
 
-  // Wire up buttons
-  adminEl.querySelectorAll('.admin-btn').forEach(btn => {
+  // Wire up toggle buttons
+  adminEl.querySelectorAll('.admin-toggle').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const key = (btn as HTMLElement).dataset.toggle as 'mapReveal' | 'godMode' | 'invisibleMode';
+      (state as any)[key] = !(state as any)[key];
+      const label = key === 'godMode' ? 'god mode' : key === 'mapReveal' ? 'map reveal' : 'invisible';
+      const val = (state as any)[key];
+      (btn as HTMLElement).textContent = `> ${label}: ${val ? 'ON' : 'OFF'}`;
+      if (val) {
+        (btn as HTMLElement).classList.add('active');
+      } else {
+        (btn as HTMLElement).classList.remove('active');
+      }
+      addMessage(state, `[DEBUG] ${label} ${val ? 'ON' : 'OFF'}`, 'debug');
+      renderAll();
+    });
+  });
+
+  // Wire up restart button
+  const restartBtn = adminEl.querySelector('.admin-restart');
+  restartBtn?.addEventListener('click', () => {
+    const seedInput = adminEl.querySelector('.admin-seed-input') as HTMLInputElement;
+    const newSeed = Number(seedInput.value) || 0;
+    window.location.hash = `seed=${newSeed}`;
+    restartGame(newSeed);
+  });
+
+  // Wire up export button
+  const exportBtn = adminEl.querySelector('.admin-export');
+  exportBtn?.addEventListener('click', () => {
+    const json = exportSave(state);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `coherence-save-${state.seed}-t${state.tick}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    addMessage(state, `[DEBUG] Save exported (${state.actionLog.length} actions, tick ${state.tick})`, 'debug');
+    renderAll();
+  });
+
+  // Wire up import button
+  const importBtn = adminEl.querySelector('.admin-import');
+  const importInput = adminEl.querySelector('.admin-import-input') as HTMLInputElement;
+  importBtn?.addEventListener('click', () => importInput?.click());
+  importInput?.addEventListener('change', () => {
+    const file = importInput.files?.[0];
+    if (!file) return;
+    file.text().then(json => {
+      stopAutoWalk();
+      adminInitialized = false;
+      state = loadSave(json);
+      window.location.hash = `seed=${state.seed}`;
+      initRenderer();
+      renderAll();
+      addMessage(state, `[DEBUG] Save loaded (${state.actionLog.length} actions, tick ${state.tick})`, 'debug');
+      renderAll();
+    });
+    importInput.value = '';
+  });
+
+  // Wire up glitch effect buttons
+  adminEl.querySelectorAll('.admin-btn:not(.admin-toggle)').forEach(btn => {
     btn.addEventListener('click', () => {
       const name = (btn as HTMLElement).dataset.effect;
       const effect = GLITCH_EFFECTS.find(e => e.name === name);
@@ -82,6 +176,20 @@ ${buttons}
         effect.fn().then(() => renderAll());
       }
     });
+  });
+}
+
+function updateAdminPanel() {
+  adminEl.querySelectorAll('.admin-toggle').forEach(btn => {
+    const key = (btn as HTMLElement).dataset.toggle as 'mapReveal' | 'godMode' | 'invisibleMode';
+    const label = key === 'godMode' ? 'god mode' : key === 'mapReveal' ? 'map reveal' : 'invisible';
+    const val = (state as any)[key];
+    (btn as HTMLElement).textContent = `> ${label}: ${val ? 'ON' : 'OFF'}`;
+    if (val) {
+      (btn as HTMLElement).classList.add('active');
+    } else {
+      (btn as HTMLElement).classList.remove('active');
+    }
   });
 }
 
@@ -93,13 +201,14 @@ function renderAll() {
     renderer.initGrid(currentCluster.width, currentCluster.height);
   }
 
-  renderer.render(currentCluster, state.entities, state.player.position, state.debugMode);
-  renderSelfPanel(panelEl, state.player, state.currentClusterId, state.tick, state.debugMode);
-  renderMessageLog(logEl, state.messages);
+  renderer.render(currentCluster, state.entities, state.player.position, state.mapReveal);
+  renderSelfPanel(panelEl, state.player, state.currentClusterId, state.tick, state.debugMode, state.mapReveal, state.godMode, state.invisibleMode, state.seed);
+  renderLogs(logGeneralEl, logAlertEl, state.messages);
 
   // Show/hide admin panel based on debug mode
   if (state.debugMode) {
     initAdminPanel();
+    updateAdminPanel();
     adminEl.classList.add('visible');
   } else {
     adminEl.classList.remove('visible');
@@ -112,7 +221,7 @@ function onAction(action: PlayerAction) {
   // Debug toggle doesn't advance turns
   if (action.kind === 'debug_toggle') {
     state.debugMode = !state.debugMode;
-    addMessage(state, `[DEBUG] Map reveal ${state.debugMode ? 'ON' : 'OFF'}`, 'debug');
+    addMessage(state, `[DEBUG] Admin panel ${state.debugMode ? 'ON' : 'OFF'}`, 'debug');
     renderAll();
     return;
   }
@@ -278,11 +387,28 @@ cfgFont.addEventListener('change', applySettings);
 
 // ── Log expand/collapse ──
 
-const logExpandBtn = document.getElementById('log-expand-btn')!;
+logAreaEl.querySelectorAll('.log-expand-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const panel = btn.closest('.log-panel') as HTMLElement;
+    const expanding = !panel.classList.contains('log-expanded');
 
-logExpandBtn.addEventListener('click', () => {
-  const expanded = logEl.classList.toggle('log-expanded');
-  logExpandBtn.textContent = expanded ? '[ - ]' : '[ + ]';
+    if (expanding) {
+      // Collapse any other expanded panel first
+      logAreaEl.querySelectorAll('.log-panel.log-expanded').forEach(other => {
+        if (other !== panel) {
+          other.classList.remove('log-expanded');
+          other.querySelector('.log-expand-btn')!.textContent = '[ + ]';
+        }
+      });
+      panel.classList.add('log-expanded');
+      logAreaEl.classList.add('log-any-expanded');
+      btn.textContent = '[ - ]';
+    } else {
+      panel.classList.remove('log-expanded');
+      logAreaEl.classList.remove('log-any-expanded');
+      btn.textContent = '[ + ]';
+    }
+  });
 });
 
 // ── Initial render ──
