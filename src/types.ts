@@ -314,7 +314,7 @@ export interface GameState {
   openInteractable?: { id: string; clusterId: number };
   revealEffects: RevealEffect[];
   hazardFogMarks: Map<string, HazardOverlayType>;
-  alertLevel: number;  // 0–100 antivirus threat level
+  alertLevel: number;  // 0–300+ antivirus threat level: 0–99 friendly, 100–199 suspicious, 200+ enemy
   markedEntities: Set<number>;  // entity ids marked by Chronicler/White-Hat
 }
 
@@ -367,6 +367,10 @@ export const DIR_DELTA: Record<Direction, Position> = {
 
 export const CLUSTER_WIDTH = 50;
 export const CLUSTER_HEIGHT = 30;
+
+// Alert tier thresholds
+export const ALERT_SUSPICIOUS = 100;  // firewall triggers, antivirus pursues player
+export const ALERT_ENEMY = 200;       // player is primary threat target
 
 export const COLORS = {
   void: '#000000',

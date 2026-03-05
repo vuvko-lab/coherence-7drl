@@ -1,7 +1,7 @@
 import {
   GameState, Cluster, Room, Position, TileType,
   CorruptionStage, CLUSTER_WIDTH, CLUSTER_HEIGHT, COLORS,
-  HazardOverlayType,
+  HazardOverlayType, ALERT_SUSPICIOUS, ALERT_ENEMY,
 } from './types';
 import { addMessage } from './game';
 import { random, randInt } from './rng';
@@ -427,12 +427,17 @@ function updateFirewall(state: GameState, cluster: Cluster, room: Room) {
   clearBeamOverlays(cluster, x1, y1, x2, y2);
   markBeam(cluster, active);
 
-  // Player detection
-  if (!hz.alarmTriggered && !state.invisibleMode && posInRoom(state.player.position, room)) {
+  // Player detection — only triggers alarm when flagged suspicious or worse
+  if (!hz.alarmTriggered && !state.invisibleMode &&
+      state.alertLevel >= ALERT_SUSPICIOUS && posInRoom(state.player.position, room)) {
     const pp = state.player.position;
     if (active.some(c => c.x === pp.x && c.y === pp.y)) {
       hz.alarmTriggered = true;
+      const prev = state.alertLevel;
+      state.alertLevel += 20;
       addMessage(state, 'SCAN DETECTED! Firewall alarm triggered!', 'hazard');
+      if (prev < ALERT_ENEMY && state.alertLevel >= ALERT_ENEMY)
+        addMessage(state, 'CRITICAL: Designated hostile entity. Antivirus hunting.', 'alert');
     }
   }
 

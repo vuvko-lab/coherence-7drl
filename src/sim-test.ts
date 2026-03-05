@@ -10,10 +10,15 @@
  *   npx tsx src/sim-test.ts --ticks 150   # longer simulation
  */
 
+import { writeFileSync } from 'fs';
 import { createGame, processAction } from './game';
 import { findPath } from './pathfinding';
-import { Cluster, Position, TileType, HazardOverlayType } from './types';
+import { Cluster, Position, TileType, HazardOverlayType, RoomType } from './types';
 import type { GameState } from './types';
+
+// ── Constants ──
+
+const DE_HAZARD_ROOMS = new Set<RoomType>(['corrupted', 'trigger_trap', 'memory_leak', 'gravity_well']);
 
 // ── CLI args ──
 
@@ -34,6 +39,7 @@ interface ChokepointStatus {
   roomId: number;
   traversable: boolean;
   connectedToEntry: boolean;
+  connectedToExit: boolean;
 }
 
 interface SimSnapshot {
@@ -50,6 +56,9 @@ interface SimSnapshot {
   // Entities
   totalEntities: number;
   destroyedEntities: number;    // cumulative since tick 0
+  // D-E hazard path analysis
+  minDERoomsOnAnyPath: number;  // 0 = safe path exists; 2 = all paths need ≥2 D-E rooms; Infinity = unreachable
+  isolatedHighValueRooms: number[]; // key terminal / exit-adjacent rooms isolated from entry
   // Diagnostic
   hazardTileCounts: Record<HazardOverlayType, number>;
   collapsedTileCount: number;   // corruption stage === 2 (collapsed)
@@ -90,6 +99,101 @@ function bfsReach(cluster: Cluster, from: Position): Set<string> {
     }
   }
   return visited;
+}
+
+function bfsReachMulti(cluster: Cluster, sources: Position[]): Set<string> {
+  const w = cluster.width;
+  const h = cluster.height;
+  const visited = new Set<string>();
+  const queue: Position[] = [];
+  for (const s of sources) {
+    const k = `${s.x},${s.y}`;
+    if (!visited.has(k)) { visited.add(k); queue.push(s); }
+  }
+  while (queue.length > 0) {
+    const cur = queue.shift()!;
+    for (const [dx, dy] of [[0,-1],[0,1],[-1,0],[1,0]]) {
+      const nx = cur.x + dx, ny = cur.y + dy;
+      if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+      const nk = `${nx},${ny}`;
+      if (visited.has(nk)) continue;
+      const tile = cluster.tiles[ny][nx];
+      if (!tile.walkable && tile.type !== TileType.Door) continue;
+      visited.add(nk);
+      queue.push({ x: nx, y: ny });
+    }
+  }
+  return visited;
+}
+
+// Returns minimum number of distinct D-E hazard rooms on any entry→exit path (capped at 2).
+// 0 = a safe route exists; 2 = every route passes through ≥2 D-E rooms; Infinity = unreachable.
+function computeMinDERoomsPath(cluster: Cluster, entry: Position, exits: Position[]): number {
+  const deRoomIds = new Set(
+    cluster.rooms.filter(r => DE_HAZARD_ROOMS.has(r.roomType)).map(r => r.id)
+  );
+  if (deRoomIds.size === 0) return 0;
+
+  const exitSet = new Set(exits.map(p => `${p.x},${p.y}`));
+
+  function bfsAvoidingDE(allowedDERoomIds: Set<number>): boolean {
+    const visited = new Set<string>();
+    const queue: Position[] = [{ ...entry }];
+    visited.add(`${entry.x},${entry.y}`);
+    while (queue.length > 0) {
+      const cur = queue.shift()!;
+      if (exitSet.has(`${cur.x},${cur.y}`)) return true;
+      for (const [dx, dy] of [[0,-1],[0,1],[-1,0],[1,0]]) {
+        const nx = cur.x + dx, ny = cur.y + dy;
+        if (nx < 0 || nx >= cluster.width || ny < 0 || ny >= cluster.height) continue;
+        const k = `${nx},${ny}`;
+        if (visited.has(k)) continue;
+        const tile = cluster.tiles[ny][nx];
+        if (!tile.walkable && tile.type !== TileType.Door) continue;
+        const rId = tile.roomId;
+        if (rId !== undefined && rId >= 0 && deRoomIds.has(rId) && !allowedDERoomIds.has(rId)) continue;
+        visited.add(k);
+        queue.push({ x: nx, y: ny });
+      }
+    }
+    return false;
+  }
+
+  if (bfsAvoidingDE(new Set())) return 0;
+
+  const deRooms = cluster.rooms.filter(r => DE_HAZARD_ROOMS.has(r.roomType));
+  for (const r of deRooms) {
+    if (bfsAvoidingDE(new Set([r.id]))) return 1;
+  }
+
+  return 2; // all paths require ≥2 D-E rooms (or exit unreachable — caller checks exitReachable separately)
+}
+
+// Returns IDs of rooms that are "high value": contain key terminal or are adjacent to an interface exit.
+function getHighValueRoomIds(cluster: Cluster): Set<number> {
+  const ids = new Set<number>();
+
+  for (const t of cluster.terminals) {
+    if (!t.hasKey) continue;
+    const room = cluster.rooms.find(r =>
+      t.position.x >= r.x && t.position.x < r.x + r.w &&
+      t.position.y >= r.y && t.position.y < r.y + r.h
+    );
+    if (room) ids.add(room.id);
+  }
+
+  for (const iface of cluster.interfaces) {
+    const p = iface.position;
+    for (const [dx, dy] of [[0,-1],[0,1],[-1,0],[1,0]]) {
+      const tile = cluster.tiles[p.y + dy]?.[p.x + dx];
+      if (tile?.roomId !== undefined && tile.roomId >= 0) {
+        ids.add(tile.roomId);
+        break;
+      }
+    }
+  }
+
+  return ids;
 }
 
 function getEntryPos(cluster: Cluster): Position {
@@ -152,6 +256,7 @@ function snapshotCluster(
   const cluster = state.clusters.get(clusterId)!;
   const reachable = bfsReach(cluster, entryPos);
   const exitPositions = getExitPositions(cluster);
+  const reachableFromExit = exitPositions.length > 0 ? bfsReachMulti(cluster, exitPositions) : new Set<string>();
 
   // Exit reachability
   const exitReachable = exitPositions.some(p => reachable.has(`${p.x},${p.y}`));
@@ -205,16 +310,36 @@ function snapshotCluster(
     .map(room => {
       let traversable = false;
       let connectedToEntry = false;
+      let connectedToExit = false;
       for (let y = room.y; y < room.y + room.h; y++) {
         for (let x = room.x; x < room.x + room.w; x++) {
           const tile = cluster.tiles[y]?.[x];
           if (!tile) continue;
           if (tile.walkable || tile.type === TileType.Door) traversable = true;
           if (reachable.has(`${x},${y}`)) connectedToEntry = true;
+          if (reachableFromExit.has(`${x},${y}`)) connectedToExit = true;
         }
       }
-      return { roomId: room.id, traversable, connectedToEntry };
+      return { roomId: room.id, traversable, connectedToEntry, connectedToExit };
     });
+
+  // D-E path analysis
+  const minDERoomsOnAnyPath = exitReachable ? computeMinDERoomsPath(cluster, entryPos, exitPositions) : Infinity;
+
+  // High-value room isolation
+  const hvRoomIds = getHighValueRoomIds(cluster);
+  const isolatedHighValueRooms: number[] = [];
+  for (const hvId of hvRoomIds) {
+    const room = cluster.rooms.find(r => r.id === hvId);
+    if (!room) continue;
+    let hasReachable = false;
+    for (let y = room.y; y < room.y + room.h && !hasReachable; y++) {
+      for (let x = room.x; x < room.x + room.w && !hasReachable; x++) {
+        if (reachable.has(`${x},${y}`)) hasReachable = true;
+      }
+    }
+    if (!hasReachable) isolatedHighValueRooms.push(hvId);
+  }
 
   // Diagnostic: hazard tile counts
   const hazardTileCounts: Record<HazardOverlayType, number> = {
@@ -258,6 +383,8 @@ function snapshotCluster(
     chokepointStatus,
     totalEntities: currentEntityCount,
     destroyedEntities: initialEntityCount - currentEntityCount,
+    minDERoomsOnAnyPath,
+    isolatedHighValueRooms,
     hazardTileCounts,
     collapsedTileCount,
     floodLevel,
@@ -342,10 +469,8 @@ const GREEN = '\x1b[32m';
 const BOLD = '\x1b[1m';
 const RESET = '\x1b[0m';
 
+
 function critical(msg: string) { console.log(`${BOLD}${RED}[CRITICAL] ${msg}${RESET}`); }
-function high(msg: string) { console.log(`${RED}[HIGH] ${msg}${RESET}`); }
-function medium(msg: string) { console.log(`${YELLOW}[MEDIUM] ${msg}${RESET}`); }
-function pass(msg: string) { console.log(`${GREEN}[PASS] ${msg}${RESET}`); }
 
 // ── Main ──
 
@@ -416,12 +541,9 @@ async function main() {
     if (!s0.exitReachable) criticalFailures.push(`seed ${r.seed}: exit unreachable at tick 0`);
     if (!s0.keyTerminalReachable) criticalFailures.push(`seed ${r.seed}: key terminal unreachable at tick 0`);
 
-    const nonHazardChokeFailed = s0.chokepointStatus.filter(c => {
-      const room = r.snapshots[0] && (r.snapshots[0] as any)._cluster?.rooms.find((rm: any) => rm.id === c.roomId);
-      return !c.traversable;
-    });
-    if (nonHazardChokeFailed.length > 0) {
-      criticalFailures.push(`seed ${r.seed}: chokepoint(s) blocked at tick 0 (rooms: ${nonHazardChokeFailed.map(c => c.roomId).join(', ')})`);
+    const blockedChokepoints = s0.chokepointStatus.filter(c => !c.traversable);
+    if (blockedChokepoints.length > 0) {
+      criticalFailures.push(`seed ${r.seed}: chokepoint(s) blocked at tick 0 (rooms: ${blockedChokepoints.map(c => c.roomId).join(', ')})`);
     }
   }
 
@@ -473,6 +595,11 @@ async function main() {
   });
   const fastGrowthSeeds = damageGrowth.filter(g => g > 30).length;
 
+  // D-E path analysis
+  const noSafePath100 = validResults.filter(r => (getSnap(r, 100)?.minDERoomsOnAnyPath ?? 0) > 0).length;
+  const allPathsDE2at100 = validResults.filter(r => (getSnap(r, 100)?.minDERoomsOnAnyPath ?? 0) >= 2).length;
+  const hvIsolated100 = validResults.filter(r => (getSnap(r, 100)?.isolatedHighValueRooms.length ?? 0) > 0).length;
+
   // Entity counts
   const allDeadBy40 = validResults.filter(r => {
     const s = getSnap(r, 40);
@@ -511,11 +638,14 @@ async function main() {
   printMetric('Key terminal reachable @0', pct(keyAt0, N), keyAt0 === N, 'critical');
   printMetric('Rooms isolated @0', `${isoAt0}/${N} seeds affected`, isoAt0 === 0, 'critical');
   printMetric('Chokepoints traversable @100', pct(N - chokeFailed100, N), chokePct >= 0.90, 'high');
+  printMetric('High-value rooms isolated @100', `${hvIsolated100}/${N} seeds affected`, hvIsolated100 === 0, 'high');
 
   console.log('\nPath damage:');
   printMetric('Path damage @0 > 50 (lethal start)', `${seedsOver50atTick0}/${N} seeds`, seedsOver50atTick0 === 0, 'high');
   printMetric('Path damage (grade D) > 35 @50', `${seedsOver35atTick50}/${N} seeds`, seedsOver35atTick50 / N <= 0.25, 'medium');
   printMetric('Path damage grows > 30 per 25 ticks', `${fastGrowthSeeds}/${N} seeds`, fastGrowthSeeds / N <= 0.20, 'medium');
+  printMetric('No safe path (all routes hit D-E room) @100', `${noSafePath100}/${N} seeds`, noSafePath100 / N <= 0.10, 'medium');
+  printMetric('All paths need ≥2 D-E rooms @100', `${allPathsDE2at100}/${N} seeds`, allPathsDE2at100 === 0, 'high');
 
   console.log('\nEntities:');
   printMetric('All entities dead before tick 40', `${allDeadBy40}/${N} seeds`, allDeadBy40 / N <= 0.10, 'medium');
@@ -549,6 +679,43 @@ async function main() {
   console.log('  Hazard tile counts:');
   for (const [type, avg] of Object.entries(avgHazard)) {
     if (avg > 0) console.log(`    ${type}: ${avg.toFixed(1)}`);
+  }
+
+  // ── Write sim-results.json ──
+  const failingSeeds = results
+    .filter(r => {
+      const s0 = snapshotAt(r, 0);
+      const s100 = snapshotAt(r, 100);
+      return !r.deterministic ||
+        (s0?.isolatedRooms.length ?? 0) > 0 ||
+        !s0?.exitReachable ||
+        !s0?.keyTerminalReachable ||
+        !s100?.exitReachable ||
+        !s100?.keyTerminalReachable ||
+        (s100?.isolatedHighValueRooms.length ?? 0) > 0 ||
+        (s100?.minDERoomsOnAnyPath ?? 0) >= 2;
+    })
+    .map(r => ({
+      seed: r.seed,
+      url: `#seed=${r.seed}`,
+      issues: [
+        ...(r.deterministic ? [] : ['non-deterministic']),
+        ...((snapshotAt(r, 0)?.isolatedRooms.length ?? 0) > 0 ? [`${snapshotAt(r, 0)!.isolatedRooms.length} rooms isolated @0`] : []),
+        ...(snapshotAt(r, 0)?.exitReachable === false ? ['exit unreachable @0'] : []),
+        ...(snapshotAt(r, 100)?.exitReachable === false ? ['exit unreachable @100'] : []),
+        ...(snapshotAt(r, 100)?.keyTerminalReachable === false ? ['key terminal unreachable @100'] : []),
+        ...((snapshotAt(r, 100)?.isolatedHighValueRooms.length ?? 0) > 0 ? ['high-value rooms isolated @100'] : []),
+        ...((snapshotAt(r, 100)?.minDERoomsOnAnyPath ?? 0) >= 2 ? ['all paths need ≥2 D-E rooms @100'] : []),
+      ],
+    }));
+
+  if (failingSeeds.length > 0) {
+    const out = JSON.stringify(
+      { timestamp: new Date().toISOString(), params: { seeds: SEED_COUNT, ticks: TOTAL_TICKS }, failingSeeds },
+      null, 2
+    );
+    writeFileSync('sim-results.json', out, 'utf8');
+    console.log(`\nFailing seeds written to sim-results.json (${failingSeeds.length} seeds).`);
   }
 
   // ── Critical failure summary ──

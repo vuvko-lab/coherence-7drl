@@ -14,6 +14,18 @@ Coherence — a cyberpunk roguelike where you play as an uploaded mind navigatin
 
 No test framework is configured. No linter is configured.
 
+Simulation tests (no browser needed):
+
+- `npx tsx src/sim-test.ts` — Run the balancing/simulation test suite (headless, no browser needed)
+  - `--seeds N` — number of seeds to test (default 50)
+  - `--ticks N` — ticks to simulate per seed (default 100)
+
+- `npx tsx src/gen-html.ts` — Generate animated HTML map visualizations (output to `maps/`)
+  - `--seeds 1,3,7` — comma-separated seed list (default 1-5)
+  - `--cluster N` — cluster depth to render (default 3; depth 0 has no hazards)
+  - `--ticks N` — ticks to simulate (default 100)
+  - Open `maps/index.html` in a browser; spacebar/arrow keys control playback
+
 ## Architecture
 
 **Game loop flow:** Input → `processAction()` → move/transfer → `computeFOV()` → `updateHazards()` → `render()`
@@ -23,6 +35,7 @@ No test framework is configured. No linter is configured.
 - **cluster.ts** — Translates `gen-halls` output into game `Cluster`: assigns wall glyphs, room types, hazard overlays, interface exits, terminals. Uses `collapseNoise` for hazard-by-collapse weighting.
 - **gen-halls.ts** — Hall-first BSP layout generator. Phases: split space with corridors → subdivide blocks into rooms → merge small rooms → carve to grid → cut halls with wall+door chokepoints → place room doors → place interface exits → flood-fill connectivity guarantee. Exports `generate()`.
 - **hazards.ts** — All 9 hazard types (corrupted, trigger_trap, memory_leak, firewall, unstable, quarantine, echo_chamber, gravity_well, cascade) with per-tick update logic, spreading mechanics, and damage application
+- **ai.ts** — Entity AI: `updateEntityAI()` dispatch + per-faction state machines (Chronicler wanders/catalogs/broadcasts, Bit-Mite chases/attacks, Logic Leech wall-walks/stalks/charges, White-Hat patrols/chases/attacks). Factory functions: `makeChronicler`, `makeBitMite`, `makeLogicLeech`, `makeWhiteHat`.
 - **renderer.ts** — Creates a DOM grid of `<span>` cells (50×30). Renders tiles by visibility state, overlays hazards/entities/player, updates SELF panel and message log
 - **fov.ts** — 4-quadrant recursive shadowcasting, radius 20, doors block LOS unless you stand on them
 - **pathfinding.ts** — BFS 4-directional, only pathfinds through seen walkable tiles
@@ -30,9 +43,11 @@ No test framework is configured. No linter is configured.
 - **rng.ts** — Global seeded PRNG (mulberry32). Call `seed()` before generation; use `random()`, `randInt()`, `pick()`, `shuffle()` instead of `Math.random()` everywhere for reproducible maps.
 - **noise.ts** — Seeded 2D Perlin noise (`initNoise()` + `collapseNoise()`). Used by `cluster.ts` to generate the infrastructure collapse heatmap that weights hazard room assignment.
 - **glitch.ts** — Screen glitch effects: CSS effects (shake, chromatic, bars, flicker, hue) animate `#game`; canvas effects (static burst, horizontal tear, data bleed) use `GlitchRenderer.drawOver()`. Canvas effects are temporary — `renderAll()` in `main.ts` restores. `GLITCH_EFFECTS` registry used by admin panel.
+- **sim-test.ts** — Headless balancing test suite. Run with `npx tsx src/sim-test.ts`. Simulates clusters using real game logic, snapshots metrics every 10 ticks, reports connectivity/path damage/entity/determinism checks across N seeds.
 - **types.ts** — All type definitions, enums, constants, color palette
 
 **Key concepts:**
+
 - **Clusters** are self-contained 50×30 tile maps connected by `⇋` interface exits on left/right edges
 - **Rooms** are generated via BSP and connected with a spanning tree + extra doors for loops
 - **Hazard overlays** are separate from tile types — tiles have a `hazardOverlay` field and rooms have a `RoomHazardState`

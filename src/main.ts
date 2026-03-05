@@ -1,6 +1,6 @@
 import { createGame, processAction, handleMapClick, stepAutoPath, addMessage, exportSave, loadSave, adminRegenCluster, adminTeleportToCluster, grantExitAccess, activateTerminal, executeInteractableAction, getEntityAt, CORRUPT_M_RANGE } from './game';
 import { setDamageParams, getDamageParams, setGenSizeOverride, clearGenSizeOverride, getGenSizeOverride, clusterScaleForId } from './cluster';
-import { Renderer, renderSelfPanel, renderLogs, renderOverviewPanel } from './renderer';
+import { Renderer, renderSelfPanel, renderLogs, renderOverviewPanel, renderMapStatusBar } from './renderer';
 import { InputHandler } from './input';
 import { PlayerAction, Position, TileType } from './types';
 import { generateSeed } from './rng';
@@ -36,6 +36,7 @@ function restartGame(newSeed: number) {
 initRenderer();
 
 const panelEl = document.getElementById('panel-self')!;
+const mapStatusEl = document.getElementById('map-status-bar')!;
 const targetPanelEl = document.getElementById('panel-target')!;
 const mapGridWrap = document.getElementById('map-grid-wrap')!;
 const mapContainer = document.querySelector('#map-container') as HTMLElement;
@@ -599,7 +600,11 @@ function renderAll() {
     markedEntities: state.markedEntities,
     aimOverlay,
   });
-  renderSelfPanel(panelEl, state.player, state.currentClusterId, state.tick, state.debugMode, state.mapReveal, state.godMode, state.invisibleMode, state.seed);
+  renderSelfPanel(panelEl, state.player, state.debugMode, state.mapReveal, state.godMode, state.invisibleMode, state.seed);
+  const cm = currentCluster.collapseMap;
+  let cSum = 0, cCt = 0;
+  for (const row of cm) for (const v of row) { cSum += v; cCt++; }
+  renderMapStatusBar(mapStatusEl, state.alertLevel, state.currentClusterId, state.tick, cCt > 0 ? cSum / cCt : 0);
   renderTargetPanel(hoveredPos);
   renderLogs(logGeneralEl, logAlertEl, state.messages);
 

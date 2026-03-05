@@ -2,6 +2,7 @@ import {
   GameState, Entity, Cluster, Position, PlayerAction, Tile,
   TileType, DIR_DELTA, GameMessage, Direction,
   Interactable, DialogChoice,
+  ALERT_SUSPICIOUS, ALERT_ENEMY,
 } from './types';
 import { generateCluster, placeEntryPoint } from './cluster';
 import { computeFOV, floodFillReveal, hasLOS } from './fov';
@@ -140,8 +141,8 @@ function spawnClusterEntities(state: GameState, cluster: Cluster) {
     return pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : undefined;
   }
 
-  // Bit-Mite: spawn near exit nodes (right side of cluster)
-  const exitRooms = rooms.filter(r => r.tags.geometric.has('exit') || r.x + r.w >= cluster.width - 4);
+  // Bit-Mite: spawn in the room containing the exit interface
+  const exitRooms = rooms.filter(r => r.tags.geometric.has('exit_interface'));
   for (let i = 0; i < numBitMites; i++) {
     const room = exitRooms.length > 0
       ? exitRooms[Math.floor(Math.random() * exitRooms.length)]
@@ -619,8 +620,13 @@ export function executeInteractableAction(
       item.rewardTaken = true;
 
       if ((item.alertCost ?? 0) > 0) {
-        state.alertLevel = Math.min(100, state.alertLevel + item.alertCost!);
-        addMessage(state, `Antivirus alert level: ${state.alertLevel}%.`, 'alert');
+        const prev = state.alertLevel;
+        state.alertLevel += item.alertCost!;
+        addMessage(state, `Antivirus alert level: ${state.alertLevel}.`, 'alert');
+        if (prev < ALERT_SUSPICIOUS && state.alertLevel >= ALERT_SUSPICIOUS)
+          addMessage(state, 'WARNING: Flagged as suspicious entity. Antivirus is tracking.', 'alert');
+        else if (prev < ALERT_ENEMY && state.alertLevel >= ALERT_ENEMY)
+          addMessage(state, 'CRITICAL: Designated hostile entity. Antivirus hunting.', 'alert');
       }
       if (item.hasExitCode) {
         cluster.exitLocked = false;

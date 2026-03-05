@@ -13,5 +13,6 @@
     "skipLibCheck": true,
     "outDir": "./dist"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/sim-test.ts", "src/gen-html.ts"]
 }

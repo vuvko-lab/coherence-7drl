@@ -439,7 +439,7 @@ export class Renderer {
 
 // ── SELF panel renderer ──
 
-export function renderSelfPanel(el: HTMLElement, player: Entity, clusterId: number, tick: number, debugMode = false, mapReveal = false, godMode = false, invisibleMode = false, gameSeed = 0) {
+export function renderSelfPanel(el: HTMLElement, player: Entity, debugMode = false, mapReveal = false, godMode = false, invisibleMode = false, gameSeed = 0) {
   const hexId = '0x' + player.id.toString(16).toUpperCase().padStart(4, '0');
   const coherence = player.coherence ?? 100;
   const maxCoherence = player.maxCoherence ?? 100;
@@ -470,9 +470,7 @@ export function renderSelfPanel(el: HTMLElement, player: Entity, clusterId: numb
 <div class="stat-row"><span class="stat-label">State:</span><span class="stat-value">running</span></div>
 <div class="stat-row"><span class="stat-label">Coherence:</span><span class="stat-value">${coherencePct}%</span></div>
 <div class="coherence-bar ${barClass}"><span class="bar-fill">${barFill}</span><span class="bar-empty">${barEmpty}</span></div>
-<div class="stat-row"><span class="stat-label">Cluster:</span><span class="stat-value">${clusterId}</span></div>
 <div class="stat-row"><span class="stat-label">Position:</span><span class="stat-value">(${player.position.x}, ${player.position.y})</span></div>
-<div class="stat-row"><span class="stat-label">Tick:</span><span class="stat-value">${tick}</span></div>
 <div class="panel-sep"><span class="fill"></span><span class="label">modules</span><span class="fill"></span></div>
 ${moduleRows}
 <div class="panel-sep"><span class="fill"></span><span class="label">perms</span><span class="fill"></span></div>
@@ -485,6 +483,31 @@ ${godMode ? '<div class="stat-row"><span class="stat-value debug-indicator">[GOD
 ${invisibleMode ? '<div class="stat-row"><span class="stat-value debug-indicator">[INVISIBLE]</span></div>' : ''}` : ''}
 </div>
 <div class="panel-edge"><span class="corner">└</span><span class="fill"></span><span class="corner">┘</span></div>`;
+}
+
+// ── Map status bar ──
+
+export function renderMapStatusBar(
+  el: HTMLElement,
+  alertLevel: number,
+  clusterId: number,
+  tick: number,
+  meanCollapse: number,
+) {
+  const tierClass = alertLevel >= 200 ? 'alert-enemy' : alertLevel >= 100 ? 'alert-suspicious' : 'alert-friendly';
+  const tierLabel = alertLevel >= 200 ? 'ENEMY' : alertLevel >= 100 ? 'SUSPICIOUS' : 'FRIENDLY';
+  const tierSymbol = alertLevel >= 200 ? '◈' : alertLevel >= 100 ? '▲' : '◇';
+  const tickStr = String(tick).padStart(4, '0');
+  const collapseStr = Math.round(meanCollapse * 100) + '%';
+
+  el.innerHTML =
+    `<span class="msb-item">CL:<span class="msb-val">${clusterId}</span></span>` +
+    `<span class="msb-sep">│</span>` +
+    `<span class="msb-item">T:<span class="msb-val">${tickStr}</span></span>` +
+    `<span class="msb-sep">│</span>` +
+    `<span class="msb-item">σ:<span class="msb-val">${collapseStr}</span></span>` +
+    `<span class="msb-fill"></span>` +
+    `<span class="msb-alert ${tierClass}">${tierSymbol} ${alertLevel} [${tierLabel}]</span>`;
 }
 
 // ── Message log renderer ──

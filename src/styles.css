@@ -269,6 +269,57 @@ body {
 }
 
 
+/* --- Map status bar --- */
+#map-status-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 1px 8px;
+  font-size: 0.78em;
+  color: var(--theme-dim);
+  border-top: 1px solid #1a2a1a;
+  background: #0a0a0a;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.msb-sep {
+  margin: 0 4px;
+  color: #1a3a1a;
+}
+
+.msb-item {
+  flex-shrink: 0;
+}
+
+.msb-val {
+  color: var(--theme-fg);
+  margin-left: 2px;
+}
+
+.msb-fill {
+  flex: 1;
+}
+
+.msb-alert {
+  flex-shrink: 0;
+  font-weight: bold;
+  letter-spacing: 0.05em;
+}
+
+.msb-alert.alert-friendly {
+  color: var(--theme-dim);
+}
+
+.msb-alert.alert-suspicious {
+  color: #cc8822;
+}
+
+.msb-alert.alert-enemy {
+  color: #cc3333;
+}
+
 /* --- Message log --- */
 #log-placeholder {
   grid-area: log;

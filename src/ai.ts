@@ -1,5 +1,6 @@
 import {
   GameState, Entity, Cluster, Position, TileType,
+  ALERT_SUSPICIOUS, ALERT_ENEMY,
 } from './types';
 import { findPath } from './pathfinding';
 import { floodFillReveal } from './fov';
@@ -492,11 +493,19 @@ function pickAdjacentRoomWaypoint(cluster: Cluster, entity: Entity): Position | 
 }
 
 function findAggressiveTarget(state: GameState, sentry: Entity, cluster: Cluster): Entity | undefined {
+  // At ENEMY level, player is the primary target
+  if (state.alertLevel >= ALERT_ENEMY && state.player.clusterId === sentry.clusterId) {
+    if (canSee(cluster, sentry.position, state.player.position, sentry.ai!.sightRadius)) return state.player;
+  }
   for (const e of state.entities) {
     if (e.id === sentry.id) continue;
     if (e.clusterId !== sentry.clusterId) continue;
     if (e.ai?.faction !== 'aggressive') continue;
     if (canSee(cluster, sentry.position, e.position, sentry.ai!.sightRadius)) return e;
+  }
+  // At SUSPICIOUS level, player is a secondary target when no aggressive entity is nearby
+  if (state.alertLevel >= ALERT_SUSPICIOUS && state.player.clusterId === sentry.clusterId) {
+    if (canSee(cluster, sentry.position, state.player.position, sentry.ai!.sightRadius)) return state.player;
   }
   return undefined;
 }
