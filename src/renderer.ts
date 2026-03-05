@@ -1,4 +1,4 @@
-import { Cluster, Entity, Position, COLORS, Room } from './types';
+import { Cluster, Entity, Position, COLORS, Room, TileType } from './types';
 
 const ROOM_TYPE_SHORT: Record<string, string> = {
   normal: 'N', corrupted: 'C', trigger_trap: 'T', memory_leak: 'M',
@@ -299,19 +299,32 @@ const MSG_CLASS: Record<string, string> = {
   alert: 'msg msg-alert',
 };
 
-function renderLogBody(el: HTMLElement, messages: { text: string; type: string }[]) {
+function formatTick(tick: number): string {
+  const s = String(tick).padStart(6, '0');
+  const firstNonZero = s.search(/[1-9]/);
+  if (firstNonZero === -1) {
+    // all zeros
+    return `<span class="msg-tick"><span class="msg-tick-zero">000000</span></span>`;
+  }
+  const zeros = s.slice(0, firstNonZero);
+  const nums = s.slice(firstNonZero);
+  const zeroPart = zeros ? `<span class="msg-tick-zero">${zeros}</span>` : '';
+  return `<span class="msg-tick">${zeroPart}<span class="msg-tick-num">${nums}</span></span>`;
+}
+
+function renderLogBody(el: HTMLElement, messages: { text: string; type: string; tick: number }[]) {
   const body = el.querySelector('.log-body');
   if (!body) return;
   const recent = messages.slice(-20).reverse();
   body.innerHTML = recent.map(m =>
-    `<div class="${MSG_CLASS[m.type] ?? 'msg'}">${m.text}</div>`
+    `<div class="${MSG_CLASS[m.type] ?? 'msg'}">${formatTick(m.tick)} ${m.text}</div>`
   ).join('');
 }
 
 export function renderLogs(
   generalEl: HTMLElement,
   alertEl: HTMLElement,
-  messages: { text: string; type: string }[],
+  messages: { text: string; type: string; tick: number }[],
 ) {
   const general: typeof messages = [];
   const alert: typeof messages = [];
@@ -324,4 +337,162 @@ export function renderLogs(
   }
   renderLogBody(generalEl, general);
   renderLogBody(alertEl, alert);
+}
+
+// ── OVERVIEW panel renderer ──
+
+function countRoomDoors(cluster: Cluster, room: Room): { total: number; open: number; closed: number; locked: number } {
+  let total = 0, open = 0, closed = 0, locked = 0;
+  // Scan room perimeter (walls layer) for doors
+  for (let y = room.y; y < room.y + room.h; y++) {
+    for (let x = room.x; x < room.x + room.w; x++) {
+      if (x < 0 || x >= cluster.width || y < 0 || y >= cluster.height) continue;
+      const t = cluster.tiles[y][x];
+      if (t.type === TileType.Door) {
+        total++;
+        if (t.glyph === '▪') locked++;
+        else if (t.doorOpen) open++;
+        else closed++;
+      }
+    }
+  }
+  return { total, open, closed, locked };
+}
+
+function countRoomHazardTiles(cluster: Cluster, room: Room): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (let y = room.y; y < room.y + room.h; y++) {
+    for (let x = room.x; x < room.x + room.w; x++) {
+      if (x < 0 || x >= cluster.width || y < 0 || y >= cluster.height) continue;
+      const ho = cluster.tiles[y][x].hazardOverlay;
+      if (ho) counts.set(ho.type, (counts.get(ho.type) ?? 0) + 1);
+    }
+  }
+  return counts;
+}
+
+function ifaceRows(cluster: Cluster, room: Room): string {
+  // Find interfaces whose position is inside or adjacent to this room
+  const ifaces = cluster.interfaces.filter(iface => {
+    const { x, y } = iface.position;
+    // Interface is on the room's row range and adjacent to its x range
+    return y >= room.y && y < room.y + room.h &&
+      ((x >= room.x && x < room.x + room.w) || x === room.x - 1 || x === room.x + room.w);
+  });
+  if (ifaces.length === 0) return '';
+  return ifaces.map(iface => {
+    const dir = iface.position.x === 0 ? '⇏ entry' : '⇨ exit';
+    const target = iface.targetClusterId === -1
+      ? 'unexplored'
+      : `cluster ${iface.targetClusterId}`;
+    return `<div class="stat-row"><span class="room-iface">${dir}</span><span class="stat-label">${target}</span></div>`;
+  }).join('');
+}
+
+export function renderOverviewPanel(
+  el: HTMLElement,
+  cluster: Cluster,
+  entities: Entity[],
+  playerPos: Position,
+  hoveredPos: Position | null,
+) {
+  const playerRoomId = cluster.tiles[playerPos.y]?.[playerPos.x]?.roomId ?? -1;
+  const hoveredRoomId = hoveredPos
+    ? (cluster.tiles[hoveredPos.y]?.[hoveredPos.x]?.roomId ?? -1)
+    : -1;
+
+  const detailRoom = hoveredRoomId >= 0
+    ? cluster.rooms.find(r => r.id === hoveredRoomId)
+    : null;
+
+  let body = '';
+
+  if (detailRoom) {
+    const isHall = detailRoom.tags.has('hall');
+    const interior = isHall ? detailRoom.w * detailRoom.h : (detailRoom.w - 2) * (detailRoom.h - 2);
+    const tags = detailRoom.tags.size > 0 ? [...detailRoom.tags].join(', ') : 'none';
+    const adj = cluster.roomAdjacency.get(detailRoom.id) ?? [];
+    const doors = countRoomDoors(cluster, detailRoom);
+    const hazardTiles = countRoomHazardTiles(cluster, detailRoom);
+    const hasPlayer = detailRoom.id === playerRoomId;
+
+    // Entities in this room
+    const ents: Entity[] = [];
+    for (const e of entities) {
+      if (e.clusterId !== cluster.id) continue;
+      const rid = cluster.tiles[e.position.y]?.[e.position.x]?.roomId ?? -1;
+      if (rid === detailRoom.id) ents.push(e);
+    }
+
+    // Doors detail string
+    let doorDetail = `${doors.total}`;
+    const parts: string[] = [];
+    if (doors.open > 0) parts.push(`${doors.open} open`);
+    if (doors.closed > 0) parts.push(`${doors.closed} closed`);
+    if (doors.locked > 0) parts.push(`<span class="room-hazards">${doors.locked} locked</span>`);
+    if (parts.length > 0) doorDetail += ` (${parts.join(', ')})`;
+
+    // Hazard tiles detail
+    let hazardStr = 'none';
+    if (hazardTiles.size > 0) {
+      hazardStr = [...hazardTiles.entries()].map(([t, n]) => `${t}: ${n}`).join(', ');
+    }
+
+    // Adjacent rooms with types
+    const adjStr = adj.length > 0
+      ? adj.map(id => {
+        const r = cluster.rooms.find(rm => rm.id === id);
+        if (!r) return String(id);
+        const tc = ROOM_TYPE_SHORT[r.roomType] ?? '?';
+        return r.roomType !== 'normal' ? `${id}<span class="room-type">${tc}</span>` : String(id);
+      }).join(', ')
+      : 'none';
+
+    // Entity list
+    const entStr = ents.length > 0
+      ? ents.map(e => `<span class="room-entities">${e.glyph} ${e.name}</span> (${e.position.x},${e.position.y})`).join('<br>')
+      : 'none';
+
+    body =
+      `<div class="room-detail">` +
+      `<div class="stat-row"><span class="stat-label">room</span><span class="stat-value">${detailRoom.id} ${isHall ? '(hall)' : ''}</span></div>` +
+      `<div class="stat-row"><span class="stat-label">type</span><span class="room-type">${detailRoom.roomType}</span></div>` +
+      `<div class="stat-row"><span class="stat-label">tags</span><span class="room-tags">${tags}</span></div>` +
+      `<div class="panel-sep"><span class="fill"></span><span class="label">geometry</span><span class="fill"></span></div>` +
+      `<div class="stat-row"><span class="stat-label">bounds</span>${detailRoom.w}x${detailRoom.h} at (${detailRoom.x},${detailRoom.y})</div>` +
+      `<div class="stat-row"><span class="stat-label">interior</span>${interior} tiles</div>` +
+      `<div class="stat-row"><span class="stat-label">doors</span>${doorDetail}</div>` +
+      `<div class="panel-sep"><span class="fill"></span><span class="label">connections</span><span class="fill"></span></div>` +
+      `<div class="stat-row"><span class="stat-label">adj</span>${adjStr}</div>` +
+      `<div class="stat-row"><span class="stat-label">degree</span>${adj.length}</div>` +
+      ifaceRows(cluster, detailRoom) +
+      `<div class="panel-sep"><span class="fill"></span><span class="label">contents</span><span class="fill"></span></div>` +
+      `<div class="stat-row"><span class="stat-label">hazard tiles</span><span class="room-hazards">${hazardStr}</span></div>` +
+      `<div class="stat-row"><span class="stat-label">spread</span><span class="room-hazards">${detailRoom.containedHazards.size > 0 ? [...detailRoom.containedHazards].join(', ') : 'none'}</span></div>` +
+      `<div><span class="stat-label">entities:</span> ${entStr}</div>` +
+      (hasPlayer ? `<div><span class="room-entities">@ player here</span></div>` : '') +
+      `</div>`;
+  } else if (hoveredPos) {
+    const tile = cluster.tiles[hoveredPos.y]?.[hoveredPos.x];
+    if (tile) {
+      body =
+        `<div class="room-detail">` +
+        `<div class="stat-row"><span class="stat-label">pos</span>(${hoveredPos.x},${hoveredPos.y})</div>` +
+        `<div class="stat-row"><span class="stat-label">tile</span>${TileType[tile.type]}</div>` +
+        `<div class="stat-row"><span class="stat-label">glyph</span>${tile.glyph}</div>` +
+        `<div class="stat-row"><span class="stat-label">walkable</span>${tile.walkable}</div>` +
+        `<div class="stat-row"><span class="stat-label">transparent</span>${tile.transparent}</div>` +
+        `<div class="stat-row"><span class="stat-label">roomId</span>${tile.roomId}</div>` +
+        (tile.integrity !== undefined ? `<div class="stat-row"><span class="stat-label">integrity</span>${tile.integrity}</div>` : '') +
+        (tile.hazardOverlay ? `<div class="stat-row"><span class="stat-label">hazard</span><span class="room-hazards">${tile.hazardOverlay.type} (${tile.hazardOverlay.stage ?? 0})</span></div>` : '') +
+        `</div>`;
+    }
+  } else {
+    body = `<div class="room-detail"><span class="stat-label">hover over map</span></div>`;
+  }
+
+  el.innerHTML =
+    `<div class="panel-edge"><span class="corner">┌</span><span class="label">[ OVERVIEW ]</span><span class="fill"></span><span class="corner">┐</span></div>` +
+    `<div class="panel-body">${body}</div>` +
+    `<div class="panel-edge"><span class="corner">└</span><span class="fill"></span><span class="corner">┘</span></div>`;
 }

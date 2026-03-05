@@ -1,5 +1,5 @@
 import { createGame, processAction, handleMapClick, stepAutoPath, addMessage, exportSave, loadSave } from './game';
-import { Renderer, renderSelfPanel, renderLogs } from './renderer';
+import { Renderer, renderSelfPanel, renderLogs, renderOverviewPanel } from './renderer';
 import { InputHandler } from './input';
 import { PlayerAction, Position, TileType } from './types';
 import { generateSeed } from './rng';
@@ -37,6 +37,8 @@ const logAreaEl = document.getElementById('log-area')!;
 const logGeneralEl = document.getElementById('log-general')!;
 const logAlertEl = document.getElementById('log-alert')!;
 const adminEl = document.getElementById('panel-admin')!;
+const overviewEl = document.getElementById('panel-overview')!;
+let hoveredPos: Position | null = null;
 
 // ── Auto-walk timer ──
 
@@ -228,13 +230,16 @@ function renderAll() {
   renderSelfPanel(panelEl, state.player, state.currentClusterId, state.tick, state.debugMode, state.mapReveal, state.godMode, state.invisibleMode, state.seed);
   renderLogs(logGeneralEl, logAlertEl, state.messages);
 
-  // Show/hide admin panel based on debug mode
+  // Show/hide admin + overview panels based on debug mode
   if (state.debugMode) {
     initAdminPanel();
     updateAdminPanel();
     adminEl.classList.add('visible');
+    renderOverviewPanel(overviewEl, currentCluster, state.entities, state.player.position, hoveredPos);
+    overviewEl.classList.add('visible');
   } else {
     adminEl.classList.remove('visible');
+    overviewEl.classList.remove('visible');
   }
 }
 
@@ -298,8 +303,8 @@ renderer.onCellClick = (pos) => {
   input.handleMapClick(pos);
 };
 
-renderer.onCellHover = (_pos) => {
-  // Re-render to update hover highlight
+renderer.onCellHover = (pos) => {
+  hoveredPos = pos;
   renderAll();
 };
 
@@ -358,6 +363,41 @@ function initSlider(slider: HTMLElement, onChange: () => void) {
   });
 }
 
+// ── Theme presets ──
+
+interface ThemeColors {
+  bg: string; fg: string; accent: string; dim: string; panel: string; panelDim: string;
+}
+
+const THEME_PRESETS: Record<string, ThemeColors> = {
+  matrix:   { bg: '#0a0a0a', fg: '#33aa66', accent: '#00ff88', dim: '#2a6a3a', panel: '#44bb77', panelDim: '#1a2a1a' },
+  amber:    { bg: '#0a0a04', fg: '#aa8833', accent: '#ffcc44', dim: '#6a5a2a', panel: '#ccaa44', panelDim: '#2a2210' },
+  ice:      { bg: '#040a0e', fg: '#3388aa', accent: '#44ccff', dim: '#2a5a6a', panel: '#55aacc', panelDim: '#0a1a2a' },
+  phosphor: { bg: '#000800', fg: '#44dd44', accent: '#88ff88', dim: '#226622', panel: '#55ee55', panelDim: '#0a1a0a' },
+  slate:    { bg: '#0e0e12', fg: '#8888aa', accent: '#aaaadd', dim: '#555566', panel: '#9999bb', panelDim: '#1a1a22' },
+};
+
+function applyTheme(colors: ThemeColors) {
+  const root = document.documentElement;
+  root.style.setProperty('--theme-bg', colors.bg);
+  root.style.setProperty('--theme-fg', colors.fg);
+  root.style.setProperty('--theme-accent', colors.accent);
+  root.style.setProperty('--theme-dim', colors.dim);
+  root.style.setProperty('--theme-panel', colors.panel);
+  root.style.setProperty('--theme-panel-dim', colors.panelDim);
+}
+
+function getCurrentThemeColors(): ThemeColors {
+  return {
+    bg: cfgHexBg.value,
+    fg: cfgHexFg.value,
+    accent: cfgHexAccent.value,
+    dim: cfgHexDim.value,
+    panel: cfgHexPanel.value,
+    panelDim: getComputedStyle(document.documentElement).getPropertyValue('--theme-panel-dim').trim(),
+  };
+}
+
 // ── Settings overlay ──
 
 const settingsBtn = document.getElementById('settings-btn')!;
@@ -365,10 +405,96 @@ const settingsOverlay = document.getElementById('settings-overlay')!;
 const cfgFont = document.getElementById('cfg-font') as HTMLSelectElement;
 const fontSizeSlider = document.getElementById('cfg-font-size-slider')!;
 
+// Theme color inputs
+const cfgColorBg = document.getElementById('cfg-color-bg') as HTMLInputElement;
+const cfgHexBg = document.getElementById('cfg-hex-bg') as HTMLInputElement;
+const cfgColorFg = document.getElementById('cfg-color-fg') as HTMLInputElement;
+const cfgHexFg = document.getElementById('cfg-hex-fg') as HTMLInputElement;
+const cfgColorAccent = document.getElementById('cfg-color-accent') as HTMLInputElement;
+const cfgHexAccent = document.getElementById('cfg-hex-accent') as HTMLInputElement;
+const cfgColorDim = document.getElementById('cfg-color-dim') as HTMLInputElement;
+const cfgHexDim = document.getElementById('cfg-hex-dim') as HTMLInputElement;
+const cfgColorPanel = document.getElementById('cfg-color-panel') as HTMLInputElement;
+const cfgHexPanel = document.getElementById('cfg-hex-panel') as HTMLInputElement;
+
+const colorPairs: [HTMLInputElement, HTMLInputElement, string][] = [
+  [cfgColorBg, cfgHexBg, '--theme-bg'],
+  [cfgColorFg, cfgHexFg, '--theme-fg'],
+  [cfgColorAccent, cfgHexAccent, '--theme-accent'],
+  [cfgColorDim, cfgHexDim, '--theme-dim'],
+  [cfgColorPanel, cfgHexPanel, '--theme-panel'],
+];
+
+function syncAdvancedInputs(colors: ThemeColors) {
+  cfgColorBg.value = colors.bg; cfgHexBg.value = colors.bg;
+  cfgColorFg.value = colors.fg; cfgHexFg.value = colors.fg;
+  cfgColorAccent.value = colors.accent; cfgHexAccent.value = colors.accent;
+  cfgColorDim.value = colors.dim; cfgHexDim.value = colors.dim;
+  cfgColorPanel.value = colors.panel; cfgHexPanel.value = colors.panel;
+}
+
+// Wire color picker ↔ hex input sync
+for (const [picker, hex, cssVar] of colorPairs) {
+  picker.addEventListener('input', () => {
+    hex.value = picker.value;
+    document.documentElement.style.setProperty(cssVar, picker.value);
+    clearActivePreset();
+    persistTheme();
+  });
+  hex.addEventListener('change', () => {
+    if (/^#[0-9a-fA-F]{6}$/.test(hex.value)) {
+      picker.value = hex.value;
+      document.documentElement.style.setProperty(cssVar, hex.value);
+      clearActivePreset();
+      persistTheme();
+    }
+  });
+}
+
+function clearActivePreset() {
+  document.querySelectorAll('.theme-preset-btn').forEach(b => b.classList.remove('active'));
+}
+
+function persistTheme() {
+  localStorage.setItem('cfg-theme', JSON.stringify(getCurrentThemeColors()));
+  // Find matching preset
+  for (const [name, colors] of Object.entries(THEME_PRESETS)) {
+    const current = getCurrentThemeColors();
+    if (colors.bg === current.bg && colors.fg === current.fg &&
+        colors.accent === current.accent && colors.dim === current.dim &&
+        colors.panel === current.panel) {
+      localStorage.setItem('cfg-theme-name', name);
+      return;
+    }
+  }
+  localStorage.setItem('cfg-theme-name', 'custom');
+}
+
+// Wire presets
+document.getElementById('cfg-theme-presets')!.addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest('.theme-preset-btn') as HTMLElement | null;
+  if (!btn) return;
+  const name = btn.dataset.theme!;
+  const colors = THEME_PRESETS[name];
+  if (!colors) return;
+
+  document.querySelectorAll('.theme-preset-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+
+  applyTheme(colors);
+  syncAdvancedInputs(colors);
+  localStorage.setItem('cfg-theme-name', name);
+  persistTheme();
+});
+
+// Advanced toggle
+document.getElementById('cfg-advanced-toggle')!.addEventListener('click', () => {
+  document.getElementById('cfg-advanced')!.classList.toggle('open');
+});
+
 function applySettings() {
   document.body.style.fontFamily = cfgFont.value;
   document.body.style.fontSize = getSliderValue(fontSizeSlider) + 'px';
-  // Persist
   localStorage.setItem('cfg-font', cfgFont.value);
   localStorage.setItem('cfg-font-size', String(getSliderValue(fontSizeSlider)));
 }
@@ -378,17 +504,45 @@ function loadSettings() {
   const size = localStorage.getItem('cfg-font-size');
   if (font) cfgFont.value = font;
   if (size) setSliderValue(fontSizeSlider, Number(size));
+
+  // Load theme
+  const savedTheme = localStorage.getItem('cfg-theme');
+  const savedName = localStorage.getItem('cfg-theme-name') ?? 'matrix';
+  if (savedTheme) {
+    try {
+      const colors: ThemeColors = JSON.parse(savedTheme);
+      applyTheme(colors);
+      syncAdvancedInputs(colors);
+    } catch { /* fallback to preset */ }
+  }
+  // Highlight active preset button
+  document.querySelectorAll('.theme-preset-btn').forEach(btn => {
+    const name = (btn as HTMLElement).dataset.theme;
+    btn.classList.toggle('active', name === savedName);
+  });
+
   applySettings();
 }
 
 initSlider(fontSizeSlider, applySettings);
 
+const aboutBtn = document.getElementById('about-btn')!;
+const aboutOverlay = document.getElementById('about-overlay')!;
+
 settingsBtn.addEventListener('click', () => {
   settingsOverlay.classList.toggle('open');
 });
 
+aboutBtn.addEventListener('click', () => {
+  aboutOverlay.classList.toggle('open');
+});
+
 settingsOverlay.addEventListener('click', (e) => {
   if (e.target === settingsOverlay) settingsOverlay.classList.remove('open');
+});
+
+aboutOverlay.addEventListener('click', (e) => {
+  if (e.target === aboutOverlay) aboutOverlay.classList.remove('open');
 });
 
 // Close buttons [X]
@@ -400,9 +554,16 @@ document.querySelectorAll('.overlay-close').forEach(btn => {
 });
 
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && settingsOverlay.classList.contains('open')) {
-    settingsOverlay.classList.remove('open');
-    e.stopPropagation();
+  if (e.key === 'Escape') {
+    if (aboutOverlay.classList.contains('open')) {
+      aboutOverlay.classList.remove('open');
+      e.stopPropagation();
+      return;
+    }
+    if (settingsOverlay.classList.contains('open')) {
+      settingsOverlay.classList.remove('open');
+      e.stopPropagation();
+    }
   }
 });
 

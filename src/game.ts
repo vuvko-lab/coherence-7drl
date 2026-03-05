@@ -177,7 +177,7 @@ function tryTransfer(state: GameState): boolean {
     // Make the entry tile an interface exit for the back connection
     if (newCluster.tiles[entryPos.y]?.[0]) {
       newCluster.tiles[entryPos.y][0].type = TileType.InterfaceExit;
-      newCluster.tiles[entryPos.y][0].glyph = '⇋';
+      newCluster.tiles[entryPos.y][0].glyph = '⇏';
       newCluster.tiles[entryPos.y][0].fg = '#ff8844';
       newCluster.tiles[entryPos.y][0].walkable = true;
     }

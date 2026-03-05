@@ -108,6 +108,7 @@ export interface Room {
   w: number;
   h: number;
   roomType: RoomType;
+  tags: Set<string>;
   hazardState?: RoomHazardState;
   containedHazards: Set<HazardOverlayType>;
 }
