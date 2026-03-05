@@ -20,12 +20,16 @@ No test framework is configured. No linter is configured.
 
 - **main.ts** — Bootstrap, wires InputHandler callbacks to GameState, runs render loop with auto-walk timer
 - **game.ts** — GameState creation and mutation: `processAction()`, `tryMove()`, `tryTransfer()`, `stepAutoPath()`, entity turn scheduling (speed-based energy accumulation)
-- **cluster.ts** — Procedural level generation: BSP recursive division → maze-like door placement via union-find spanning tree → box-drawing wall glyphs → interface exits → hazard room assignment
+- **cluster.ts** — Translates `gen-halls` output into game `Cluster`: assigns wall glyphs, room types, hazard overlays, interface exits, terminals. Uses `collapseNoise` for hazard-by-collapse weighting.
+- **gen-halls.ts** — Hall-first BSP layout generator. Phases: split space with corridors → subdivide blocks into rooms → merge small rooms → carve to grid → cut halls with wall+door chokepoints → place room doors → place interface exits → flood-fill connectivity guarantee. Exports `generate()`.
 - **hazards.ts** — All 9 hazard types (corrupted, trigger_trap, memory_leak, firewall, unstable, quarantine, echo_chamber, gravity_well, cascade) with per-tick update logic, spreading mechanics, and damage application
 - **renderer.ts** — Creates a DOM grid of `<span>` cells (50×30). Renders tiles by visibility state, overlays hazards/entities/player, updates SELF panel and message log
 - **fov.ts** — 4-quadrant recursive shadowcasting, radius 20, doors block LOS unless you stand on them
 - **pathfinding.ts** — BFS 4-directional, only pathfinds through seen walkable tiles
 - **input.ts** — WASD/arrows for movement, Enter for cluster transfer, click-to-move (adjacent=immediate, far=auto-walk)
+- **rng.ts** — Global seeded PRNG (mulberry32). Call `seed()` before generation; use `random()`, `randInt()`, `pick()`, `shuffle()` instead of `Math.random()` everywhere for reproducible maps.
+- **noise.ts** — Seeded 2D Perlin noise (`initNoise()` + `collapseNoise()`). Used by `cluster.ts` to generate the infrastructure collapse heatmap that weights hazard room assignment.
+- **glitch.ts** — Screen glitch effects: CSS effects (shake, chromatic, bars, flicker, hue) animate `#game`; canvas effects (static burst, horizontal tear, data bleed) use `GlitchRenderer.drawOver()`. Canvas effects are temporary — `renderAll()` in `main.ts` restores. `GLITCH_EFFECTS` registry used by admin panel.
 - **types.ts** — All type definitions, enums, constants, color palette
 
 **Key concepts:**

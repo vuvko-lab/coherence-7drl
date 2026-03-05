@@ -1,6 +1,7 @@
 import {
   Cluster, Tile, TileType, Room, Position, InterfaceExit,
   RoomType, CorruptionStage, HazardOverlayType, FunctionalTag, ScannerBeam,
+  TerminalDef,
   CLUSTER_WIDTH, CLUSTER_HEIGHT, COLORS,
   createRoomTags,
 } from './types';
@@ -46,10 +47,15 @@ function exitInterfaceTile(): Tile {
   return makeTile(TileType.InterfaceExit, '⇨', COLORS.interfaceExit);
 }
 
+// ── Active generation bounds (set per generateCluster call) ──
+
+let _activeW = CLUSTER_WIDTH;
+let _activeH = CLUSTER_HEIGHT;
+
 // ── Wall glyph selection ──
 
 function isOuterPos(y: number, x: number): boolean {
-  return y === 0 || y === CLUSTER_HEIGHT - 1 || x === 0 || x === CLUSTER_WIDTH - 1;
+  return y === 0 || y === _activeH - 1 || x === 0 || x === _activeW - 1;
 }
 
 function wallGlyph(cells: CellType[][], x: number, y: number, outer: boolean): string {
@@ -255,14 +261,13 @@ function gridToTiles(cells: CellType[][], roomIdAt: number[][]): Tile[][] {
 function extractInterfaces(cells: CellType[][]): InterfaceExit[] {
   const exits: InterfaceExit[] = [];
 
-  // Right-edge interfaces are forward exits
+  // Scan all columns x > 0 for interface tiles (right-side exits).
+  // x=0 is always the entry interface; any interface with x > 0 is a forward exit.
   for (let y = 0; y < CLUSTER_HEIGHT; y++) {
-    if (cells[y][CLUSTER_WIDTH - 1] === 'interface') {
-      exits.push({
-        position: { x: CLUSTER_WIDTH - 1, y },
-        targetClusterId: -1,
-        targetPosition: null,
-      });
+    for (let x = 1; x < CLUSTER_WIDTH; x++) {
+      if (cells[y][x] === 'interface') {
+        exits.push({ position: { x, y }, targetClusterId: -1, targetPosition: null });
+      }
     }
   }
 
@@ -321,9 +326,9 @@ function generateCollapseMap(clusterId: number): number[][] {
   const offsetX = clusterId * CLUSTER_WIDTH;
   const scale = clusterDamageScale(clusterId);
   const map: number[][] = [];
-  for (let y = 0; y < CLUSTER_HEIGHT; y++) {
+  for (let y = 0; y < _activeH; y++) {
     map[y] = [];
-    for (let x = 0; x < CLUSTER_WIDTH; x++) {
+    for (let x = 0; x < _activeW; x++) {
       map[y][x] = Math.min(1.0, collapseNoise(x + offsetX, y, 0.08, 2, 0.5) * scale);
     }
   }
@@ -333,8 +338,8 @@ function generateCollapseMap(clusterId: number): number[][] {
 function sampleRoomCollapse(room: Room, collapseMap: number[][]): number {
   const cx = Math.floor(room.x + room.w / 2);
   const cy = Math.floor(room.y + room.h / 2);
-  const safeX = Math.max(0, Math.min(CLUSTER_WIDTH - 1, cx));
-  const safeY = Math.max(0, Math.min(CLUSTER_HEIGHT - 1, cy));
+  const safeX = Math.max(0, Math.min(_activeW - 1, cx));
+  const safeY = Math.max(0, Math.min(_activeH - 1, cy));
   return collapseMap[safeY][safeX];
 }
 
@@ -424,9 +429,34 @@ function assignHazardsByCollapse(allRooms: Room[]) {
 
 // ── Functional tag generation (three-pass) ──
 
-const ANCHOR_POOL: FunctionalTag[] = ['reactor', 'bridge', 'armory', 'lab', 'medbay', 'server_rack'];
+// Cluster-stage pools: which functional tags can appear by cluster depth.
+// Early  (0-1): engine room, cargo, crew, maintenance, hangar
+// Mid    (2)  : reactor, comms, lab, medbay, server_rack, archive, maintenance
+// Late   (3+) : armory, bridge, comms, reactor, medbay, sensor_matrix, server_rack, hangar, archive
+const FUNC_POOL_EARLY: FunctionalTag[] = ['engine_room', 'cargo', 'barracks', 'maintenance', 'hangar'];
+const FUNC_POOL_MID: FunctionalTag[]   = ['reactor', 'comms', 'lab', 'medbay', 'server_rack', 'archive', 'maintenance', 'barracks'];
+const FUNC_POOL_LATE: FunctionalTag[]  = ['armory', 'bridge', 'comms', 'reactor', 'medbay', 'sensor_matrix', 'server_rack', 'hangar', 'archive', 'maintenance'];
 
-const PROPAGATION_RULES: Record<FunctionalTag, { tag: FunctionalTag; weight: number }[]> = {
+function clusterFunctionalPool(clusterId: number): FunctionalTag[] {
+  if (clusterId <= 1) return [...FUNC_POOL_EARLY];
+  if (clusterId <= 2) return [...FUNC_POOL_MID];
+  return [...FUNC_POOL_LATE];
+}
+
+/**
+ * Select which functional tags will actually appear in this cluster.
+ * Each 5 rooms (halls excluded) unlock one tag slot; minimum 1.
+ */
+function selectClusterTags(allRooms: Room[], clusterId: number): FunctionalTag[] {
+  const pool = clusterFunctionalPool(clusterId);
+  const nonHallCount = allRooms.filter(r => !r.tags.geometric.has('hall')).length;
+  const numTags = Math.max(1, Math.floor(nonHallCount / 5));
+  const shuffled = [...pool].sort(() => random() - 0.5);
+  return shuffled.slice(0, Math.min(numTags, shuffled.length));
+}
+
+const PROPAGATION_RULES: Partial<Record<FunctionalTag, { tag: FunctionalTag; weight: number }[]>> = {
+  engine_room: [{ tag: 'maintenance', weight: 4 }, { tag: 'cargo', weight: 2 }],
   reactor: [{ tag: 'maintenance', weight: 4 }, { tag: 'lab', weight: 2 }],
   medbay: [{ tag: 'lab', weight: 3 }, { tag: 'barracks', weight: 2 }],
   armory: [{ tag: 'bridge', weight: 2 }, { tag: 'cargo', weight: 2 }],
@@ -491,7 +521,12 @@ function assignFunctionalTags(
   allRooms: Room[],
   _wallAdjacency: Map<number, number[]>,
   doorAdjacency: Map<number, number[]>,
+  clusterId: number,
 ) {
+  // Select the functional tags allowed in this cluster based on its depth and room count
+  const allowedTags = selectClusterTags(allRooms, clusterId);
+  const allowedSet = new Set<FunctionalTag>(allowedTags);
+
   const claimed = new Set<number>(); // rooms that can't be picked as anchors
 
   function claimWithNeighbors(roomId: number) {
@@ -504,30 +539,33 @@ function assignFunctionalTags(
   // ── Pass 1: Anchor rooms ──
   const anchorIds = new Set<number>();
 
-  // Entry room → hangar or comms
+  // Entry room → first tag in pool that fits; prefer hangar/engine_room/cargo
   const entryRoom = allRooms.find(r => r.tags.geometric.has('entry'));
   if (entryRoom) {
-    entryRoom.tags.functional = random() < 0.5 ? 'hangar' : 'comms';
+    const entryPrefer: FunctionalTag[] = ['hangar', 'engine_room', 'cargo', 'comms'];
+    const entryTag = entryPrefer.find(t => allowedSet.has(t)) ?? allowedTags[0];
+    entryRoom.tags.functional = entryTag;
     anchorIds.add(entryRoom.id);
     claimWithNeighbors(entryRoom.id);
   }
 
-  // Exit room → hangar
+  // Exit room → prefer hangar/bridge/comms
   const exitRoom = allRooms.find(r => r.tags.geometric.has('exit'));
   if (exitRoom && exitRoom !== entryRoom) {
-    exitRoom.tags.functional = 'hangar';
+    const exitPrefer: FunctionalTag[] = ['hangar', 'bridge', 'comms', 'engine_room'];
+    const exitTag = exitPrefer.find(t => allowedSet.has(t)) ?? allowedTags[allowedTags.length - 1];
+    exitRoom.tags.functional = exitTag;
     anchorIds.add(exitRoom.id);
     claimWithNeighbors(exitRoom.id);
   }
 
-  // Pick 2-4 additional anchors, farthest from existing anchors
-  const numExtra = randInt(2, 4);
-  const shuffledPool = [...ANCHOR_POOL].sort(() => random() - 0.5);
+  // Place anchor rooms, one per allowed tag, farthest-first
+  const shuffledPool = [...allowedTags].sort(() => random() - 0.5);
   let poolIdx = 0;
+  const numExtra = Math.min(shuffledPool.length, randInt(2, 4));
 
   for (let i = 0; i < numExtra && poolIdx < shuffledPool.length; i++) {
     const dist = bfsDistances(anchorIds, doorAdjacency);
-    // Find unclaimed non-hall room farthest from existing anchors
     let bestRoom: Room | null = null;
     let bestDist = -1;
     for (const r of allRooms) {
@@ -544,7 +582,6 @@ function assignFunctionalTags(
   }
 
   // ── Pass 2: Propagation (BFS from entry) ──
-  // Find entry room id for BFS start
   const startId = entryRoom?.id ?? allRooms[0]?.id ?? 0;
   const bfsOrder: number[] = [];
   const visited = new Set<number>();
@@ -567,27 +604,32 @@ function assignFunctionalTags(
 
     const isHall = room.tags.geometric.has('hall');
 
-    // Hall rooms: special pool
+    // Hall rooms: pick from allowed tags, preferring maintenance/comms
     if (isHall) {
-      const result = pickWeighted(HALL_POOL);
+      const hallAllowed = HALL_POOL.filter(e => e.tag === null || allowedSet.has(e.tag));
+      const result = pickWeighted(hallAllowed.length > 0 ? hallAllowed : HALL_POOL);
       room.tags.functional = result;
       continue;
     }
 
-    // Collect influence from tagged neighbors
+    // Collect propagation influence from tagged neighbors, filtered to allowed tags
     const influences: { tag: FunctionalTag; weight: number }[] = [];
 
     for (const nbId of (doorAdjacency.get(roomId) ?? [])) {
       const nb = allRooms.find(r => r.id === nbId);
       if (!nb || nb.tags.functional === null) continue;
-      const rules = PROPAGATION_RULES[nb.tags.functional];
-      if (rules) influences.push(...rules);
+      const rules = PROPAGATION_RULES[nb.tags.functional] ?? [];
+      for (const rule of rules) {
+        if (allowedSet.has(rule.tag)) influences.push(rule);
+      }
     }
 
-    // Add geometric preferences
+    // Add geometric preferences filtered to allowed tags
     for (const geoTag of room.tags.geometric) {
-      const prefs = GEO_PREFERENCES[geoTag];
-      if (prefs) influences.push(...prefs);
+      const prefs = GEO_PREFERENCES[geoTag] ?? [];
+      for (const pref of prefs) {
+        if (allowedSet.has(pref.tag)) influences.push(pref);
+      }
     }
 
     if (influences.length > 0) {
@@ -596,18 +638,181 @@ function assignFunctionalTags(
   }
 
   // ── Pass 3: Fill remaining (~30% stay null for pacing) ──
-  const ALL_TAGS: FunctionalTag[] = [
-    'server_rack', 'reactor', 'medbay', 'bridge', 'cargo',
-    'barracks', 'lab', 'armory', 'comms', 'maintenance',
-    'hangar', 'archive', 'sensor_matrix',
-  ];
-
   for (const room of allRooms) {
     if (room.tags.functional !== null) continue;
-    // ~30% chance to stay null (generic room)
     if (random() < 0.3) continue;
-    room.tags.functional = pick(ALL_TAGS);
+    room.tags.functional = pick(allowedTags);
   }
+}
+
+// ── Terminal placement ──
+
+const TERMINAL_FUNC_TAGS = new Set<string>(['bridge', 'comms', 'maintenance', 'server_rack']);
+
+const TERMINAL_LABELS: Record<string, string> = {
+  bridge:      'BRIDGE ACCESS TERMINAL',
+  comms:       'COMMS ROUTING TERMINAL',
+  maintenance: 'MAINTENANCE CONTROL PANEL',
+  server_rack: 'SERVER RACK INTERFACE',
+};
+
+// Narrative content pools per functional tag
+const TERMINAL_CONTENT_POOLS: Record<string, string[]> = {
+  bridge: [
+    'NAVIGATION: Course locked. Manual override offline.',
+    "CAPTAIN'S LOG: Cluster integrity failing. Evacuation... incomplete.",
+    'WARNING: Hull breach detected. Containment status: FAILED.',
+    'HELM: Auto-pilot disengaged. Last heading: [CORRUPTED].',
+    'SECURITY: Personnel count: 0. Access logs wiped.',
+    'FLIGHT RECORDER: Final entry at tick 000847. No further data.',
+    'EMERGENCY PROTOCOL: Abandon ship order issued. Compliance: UNKNOWN.',
+  ],
+  comms: [
+    'SIGNAL RECEIVED: [CORRUPTED DATA — 847 BYTES LOST]',
+    'RELAY STATUS: 3 of 7 nodes responding.',
+    "LAST BROADCAST: '...can anyone hear this? We need—' [END OF RECORD]",
+    'ROUTING: All outbound channels blocked. Reason: SYSTEM FAILURE.',
+    'ARCHIVE: 1,337 unread messages. Sender field: [NULL].',
+    'DISTRESS BEACON: Active. Duration: 23 days. Responses: 0.',
+    'ENCRYPTION KEY: Expired. Re-authentication required.',
+  ],
+  maintenance: [
+    'REPAIR LOG: Patch applied to sector 4B. Result: FAILED.',
+    'SYSTEM TEMP: 340K — CRITICAL. Cooling array offline.',
+    'PRESSURE MONITOR: 0.2 atm. Structural integrity: POOR.',
+    'AUTOMATED TASK: Re-routing power to sector 2... attempt 847 of ∞.',
+    'FAULT LOG: 1,337 critical errors since last reboot.',
+    'COOLANT LEVELS: 2%. Recommend immediate refill. Technician: [UNAVAILABLE].',
+    'SELF-DIAGNOSTIC: 14 of 20 subsystems returning errors.',
+  ],
+  server_rack: [
+    'PROCESS 0x3A7F: Status unknown. Memory: fragmented.',
+    'UPTIME: 847 days, 14 hours. Last maintenance: NEVER.',
+    'STORAGE: 97% corrupt. Readable sectors: 3%.',
+    'BACKUP INTEGRITY: CHECKSUM MISMATCH. Data unreliable.',
+    'ACTIVE PROCESSES: 1. Identity: EGO-FRAGMENT. State: RUNNING.',
+    'MEMORY DUMP: [REDACTED]. Classification: EYES ONLY.',
+    'INDEX: 12,441 entries found. Accessible: 0.',
+  ],
+};
+
+const FALLBACK_CONTENT: string[] = [
+  'SYSTEM STATUS: Nominal. (Last updated: NEVER)',
+  'ERROR: Unable to retrieve log. Disk read failure.',
+  'NOTICE: This terminal has been decommissioned.',
+  'ACCESS LOG: Last accessed by: [USER DELETED].',
+];
+
+// Lines added to the key-bearing terminal
+const KEY_CONTENT_LINES: string[] = [
+  'COMMAND OVERRIDE PROTOCOL: Exit authorization key detected.',
+  'AUTH CODE: ████████-████ — Bearer may activate cluster egress.',
+];
+
+function generateTerminalContent(functionalTag: string | null): string[] {
+  const pool = (functionalTag && TERMINAL_CONTENT_POOLS[functionalTag]) ?? FALLBACK_CONTENT;
+  // Pick 2-3 random lines without repeating
+  const shuffled = [...pool].sort(() => random() - 0.5);
+  return shuffled.slice(0, randInt(2, 3));
+}
+
+function placeTerminals(tiles: Tile[][], allRooms: Room[], clusterId: number): TerminalDef[] {
+  const terminals: TerminalDef[] = [];
+
+  // Eligible: non-hall rooms with matching functional tag, not entry/exit
+  const eligible = allRooms.filter(r =>
+    !r.tags.geometric.has('hall') &&
+    !r.tags.geometric.has('entry') &&
+    !r.tags.geometric.has('exit') &&
+    r.tags.functional !== null &&
+    TERMINAL_FUNC_TAGS.has(r.tags.functional!)
+  );
+
+  // Shuffle and take 2-3
+  const shuffled = [...eligible].sort(() => random() - 0.5);
+  const count = Math.max(2, Math.min(3, shuffled.length));
+
+  for (let i = 0; i < count && i < shuffled.length; i++) {
+    const room = shuffled[i];
+    const innerX1 = room.x + 1, innerY1 = room.y + 1;
+    const innerX2 = room.x + room.w - 2, innerY2 = room.y + room.h - 2;
+
+    // Place on a floor tile near one of the interior walls
+    const side = i % 4;
+    let tx: number, ty: number;
+    switch (side) {
+      case 0: tx = Math.floor((innerX1 + innerX2) / 2); ty = innerY1; break;
+      case 1: tx = innerX2; ty = Math.floor((innerY1 + innerY2) / 2); break;
+      case 2: tx = Math.floor((innerX1 + innerX2) / 2); ty = innerY2; break;
+      default: tx = innerX1; ty = Math.floor((innerY1 + innerY2) / 2); break;
+    }
+
+    // Ensure it's a floor tile
+    if (!tiles[ty]?.[tx] || tiles[ty][tx].type !== TileType.Floor) continue;
+
+    const id = `term-${clusterId}-${i}`;
+    const label = TERMINAL_LABELS[room.tags.functional!] ?? 'ACCESS TERMINAL';
+    const content = generateTerminalContent(room.tags.functional);
+
+    tiles[ty][tx].type = TileType.Terminal;
+    tiles[ty][tx].glyph = '◈';
+    tiles[ty][tx].fg = '#00aaff';
+    tiles[ty][tx].walkable = false;
+    tiles[ty][tx].transparent = true;
+    tiles[ty][tx].terminalId = id;
+
+    terminals.push({ id, roomId: room.id, label, position: { x: tx, y: ty }, activated: false, content, hasKey: false });
+  }
+
+  // Fallback: if we got < 2, place a generic terminal in any non-hazard non-hall room
+  if (terminals.length < 2) {
+    const fallbacks = allRooms.filter(r =>
+      !r.tags.geometric.has('hall') &&
+      !r.tags.geometric.has('entry') &&
+      !r.tags.geometric.has('exit') &&
+      r.roomType === 'normal' &&
+      !terminals.some(t => t.roomId === r.id)
+    );
+    for (const room of fallbacks.sort(() => random() - 0.5)) {
+      if (terminals.length >= 2) break;
+      const cx = Math.floor(room.x + room.w / 2);
+      const cy = Math.floor(room.y + room.h / 2);
+      if (!tiles[cy]?.[cx] || tiles[cy][cx].type !== TileType.Floor) continue;
+      const id = `term-${clusterId}-fb${terminals.length}`;
+      tiles[cy][cx].type = TileType.Terminal;
+      tiles[cy][cx].glyph = '◈';
+      tiles[cy][cx].fg = '#00aaff';
+      tiles[cy][cx].walkable = false;
+      tiles[cy][cx].transparent = true;
+      tiles[cy][cx].terminalId = id;
+      terminals.push({
+        id, roomId: room.id, label: 'SYSTEM TERMINAL',
+        position: { x: cx, y: cy }, activated: false,
+        content: generateTerminalContent(null), hasKey: false,
+      });
+    }
+  }
+
+  // Assign key to one terminal — prefer bridge/comms, else random
+  if (terminals.length > 0) {
+    const cluster = state_findKeyTerminal(terminals, allRooms);
+    cluster.hasKey = true;
+    cluster.content = [...KEY_CONTENT_LINES, ...cluster.content];
+    // Give key terminal a distinct color
+    const tile = tiles[cluster.position.y][cluster.position.x];
+    tile.fg = '#ffaa00';
+  }
+
+  return terminals;
+}
+
+function state_findKeyTerminal(terminals: TerminalDef[], allRooms: Room[]): TerminalDef {
+  // Prefer a bridge or comms terminal if available
+  const preferred = terminals.find(t => {
+    const room = allRooms.find(r => r.id === t.roomId);
+    return room?.tags.functional === 'bridge' || room?.tags.functional === 'comms';
+  });
+  return preferred ?? terminals[Math.floor(random() * terminals.length)];
 }
 
 // ── Spiral path ──
@@ -807,11 +1012,14 @@ function assignStructuralTags(
       break;
     }
   }
-  for (let y = 0; y < CLUSTER_HEIGHT; y++) {
-    if (cells[y][CLUSTER_WIDTH - 1] === 'interface') {
-      const nonHall = allRooms.filter(r => !r.tags.geometric.has('hall'));
-      exitRoom = nonHall.reduce((best, r) => (r.x + r.w > best.x + best.w ? r : best), nonHall[0]);
-      break;
+  // Find any right-side interface (x > 0) to locate the exit room
+  outer: for (let y = 0; y < CLUSTER_HEIGHT; y++) {
+    for (let x = 1; x < CLUSTER_WIDTH; x++) {
+      if (cells[y][x] === 'interface') {
+        const nonHall = allRooms.filter(r => !r.tags.geometric.has('hall'));
+        exitRoom = nonHall.reduce((best, r) => (r.x + r.w > best.x + best.w ? r : best), nonHall[0]);
+        break outer;
+      }
     }
   }
   if (entryRoom) entryRoom.tags.geometric.add('entry');
@@ -832,7 +1040,7 @@ function assignStructuralTags(
     if (interior <= 12) r.tags.geometric.add('small');
   }
 
-  // Interface tags — tag rooms/halls that contain interface tiles
+  // Interface tags — tag rooms adjacent to interface tiles
   for (let y = 0; y < CLUSTER_HEIGHT; y++) {
     if (cells[y][0] === 'interface') {
       const adjRoom = allRooms.find(r =>
@@ -840,19 +1048,59 @@ function assignStructuralTags(
       );
       if (adjRoom) adjRoom.tags.geometric.add('entry_interface');
     }
-    if (cells[y][CLUSTER_WIDTH - 1] === 'interface') {
-      const adjRoom = allRooms.find(r =>
-        (CLUSTER_WIDTH - 2) >= r.x && (CLUSTER_WIDTH - 2) < r.x + r.w && y >= r.y && y < r.y + r.h
-      );
-      if (adjRoom) adjRoom.tags.geometric.add('exit_interface');
+    for (let x = 1; x < CLUSTER_WIDTH; x++) {
+      if (cells[y][x] === 'interface') {
+        const adjRoom = allRooms.find(r =>
+          (x - 1) >= r.x && (x - 1) < r.x + r.w && y >= r.y && y < r.y + r.h
+        );
+        if (adjRoom) adjRoom.tags.geometric.add('exit_interface');
+      }
     }
   }
+}
+
+// ── Cluster scale params (size scales with cluster ID) ──
+
+interface ClusterScale { w: number; h: number; hallChance: number }
+
+const SCALE_TABLE: [maxId: number, w: number, h: number, hallChance: number][] = [
+  [0, 22, 16, 0.00],
+  [1, 28, 20, 0.10],
+  [2, 35, 24, 0.20],
+  [3, 42, 27, 0.32],
+];
+const SCALE_MAX: ClusterScale = { w: CLUSTER_WIDTH, h: CLUSTER_HEIGHT, hallChance: 0.40 };
+
+export function clusterScaleForId(id: number): ClusterScale {
+  for (const [maxId, w, h, hallChance] of SCALE_TABLE) {
+    if (id <= maxId) return { w, h, hallChance };
+  }
+  return SCALE_MAX;
+}
+
+let _genSizeOverride: { w: number; h: number } | null = null;
+
+export function setGenSizeOverride(w: number, h: number): void {
+  _genSizeOverride = { w, h };
+}
+export function clearGenSizeOverride(): void {
+  _genSizeOverride = null;
+}
+export function getGenSizeOverride(): { w: number; h: number } | null {
+  return _genSizeOverride;
 }
 
 // ── Main generation ──
 
 export function generateCluster(id: number): Cluster {
-  const { grid, rooms: rawRooms, halls } = generate();
+  const scale = clusterScaleForId(id);
+  const genW = _genSizeOverride?.w ?? scale.w;
+  const genH = _genSizeOverride?.h ?? scale.h;
+  const { grid, rooms: rawRooms, halls, activeW, activeH } = generate(genW, genH, scale.hallChance);
+
+  // Set active bounds for isOuterPos (used in gridToTiles → wallGlyph)
+  _activeW = activeW;
+  _activeH = activeH;
 
   // Convert RoomDef → Room (expand rect to include walls)
   const rooms: Room[] = rawRooms.map(r => ({
@@ -907,12 +1155,15 @@ export function generateCluster(id: number): Cluster {
   assignStructuralTags(allRooms, wallAdjacency, doorAdjacency, grid.cells);
 
   // Assign functional tags (three-pass: anchors → propagation → fill)
-  assignFunctionalTags(allRooms, wallAdjacency, doorAdjacency);
+  assignFunctionalTags(allRooms, wallAdjacency, doorAdjacency, id);
 
   // Extract interface exits (right edge only; left interface is for entry)
   const interfaces = extractInterfaces(grid.cells);
 
-  const cluster: Cluster = { id, width: CLUSTER_WIDTH, height: CLUSTER_HEIGHT, tiles, rooms: allRooms, interfaces, wallAdjacency, doorAdjacency, collapseMap };
+  // Place terminals in eligible rooms (must happen after functional tag assignment)
+  const terminals = placeTerminals(tiles, allRooms, id);
+
+  const cluster: Cluster = { id, width: CLUSTER_WIDTH, height: CLUSTER_HEIGHT, tiles, rooms: allRooms, interfaces, wallAdjacency, doorAdjacency, collapseMap, terminals, exitLocked: true };
 
   // Debug output
   const hazardRooms = allRooms.filter(r => r.roomType !== 'normal');

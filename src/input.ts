@@ -65,6 +65,13 @@ export class InputHandler {
       return;
     }
 
+    // Interact with adjacent terminal
+    if (e.key === 'e' || e.key === 'E') {
+      e.preventDefault();
+      this.onAction({ kind: 'interact' });
+      return;
+    }
+
     // Debug toggle
     if (e.key === '`') {
       e.preventDefault();

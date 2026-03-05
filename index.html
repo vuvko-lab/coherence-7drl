@@ -93,8 +93,20 @@
         <div class="panel-sep"><span class="fill"></span><span class="label">controls</span><span class="fill"></span></div>
         <p>WASD / Arrows — move</p>
         <p>Enter — transfer at interface</p>
-        <p>Click — move to tile</p>
+        <p>E — interact with adjacent terminal</p>
+        <p>Click — move to tile / open terminal</p>
         <p>~ — toggle debug mode</p>
+      </div>
+      <div class="panel-edge"><span class="corner">└</span><span class="fill"></span><span class="corner">┘</span></div>
+    </div>
+  </div>
+  <div id="terminal-overlay">
+    <div id="terminal-panel">
+      <div class="panel-edge"><span class="corner">┌</span><span class="label" id="terminal-title">[ TERMINAL ]</span><span class="fill"></span><button class="overlay-close" data-close="terminal-overlay">[X]</button><span class="corner">┐</span></div>
+      <div id="terminal-body">
+        <div id="terminal-content"></div>
+        <div class="panel-sep"><span class="fill"></span></div>
+        <div id="terminal-options"></div>
       </div>
       <div class="panel-edge"><span class="corner">└</span><span class="fill"></span><span class="corner">┘</span></div>
     </div>

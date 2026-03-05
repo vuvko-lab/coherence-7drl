@@ -6,6 +6,7 @@ export enum TileType {
   Wall,
   Door,
   InterfaceExit,
+  Terminal,
 }
 
 export type HazardOverlayType = 'corruption' | 'flood' | 'spark' | 'scorch' | 'beam' | 'gravity';
@@ -29,6 +30,7 @@ export interface Tile {
   integrity?: number; // wall=3, door=2; corruption degrades to 0 → floor
   doorOpen?: boolean; // true = open, undefined/false = closed
   doorCloseTick?: number; // tick when door was last vacated (for auto-close)
+  terminalId?: string; // set when TileType.Terminal
 }
 
 // ── Geometry ──
@@ -113,7 +115,7 @@ export type GeometricTag =
   | 'chokepoint' | 'peripheral';
 
 export type FunctionalTag =
-  | 'server_rack' | 'reactor' | 'medbay' | 'bridge' | 'cargo'
+  | 'engine_room' | 'server_rack' | 'reactor' | 'medbay' | 'bridge' | 'cargo'
   | 'barracks' | 'lab' | 'armory' | 'comms' | 'maintenance'
   | 'hangar' | 'archive' | 'sensor_matrix';
 
@@ -158,6 +160,16 @@ export interface InterfaceExit {
   targetPosition: Position | null;
 }
 
+export interface TerminalDef {
+  id: string;
+  roomId: number;
+  label: string;         // e.g. "BRIDGE ACCESS TERMINAL"
+  position: Position;
+  activated: boolean;    // has the player used it?
+  content: string[];     // narrative/lore lines displayed in the overlay
+  hasKey: boolean;       // true for the one terminal per cluster that holds the exit key
+}
+
 export interface Cluster {
   id: number;
   width: number;
@@ -168,6 +180,8 @@ export interface Cluster {
   wallAdjacency: Map<number, number[]>;  // rooms sharing a wall
   doorAdjacency: Map<number, number[]>;  // rooms connected through doors
   collapseMap: number[][];               // per-tile collapse intensity [0, 1]
+  terminals: TerminalDef[];
+  exitLocked: boolean;                   // true until player grants access
 }
 
 // ── Modules ──
@@ -221,6 +235,7 @@ export interface GameState {
   showAlertOverlay: boolean;
   alertFill?: Map<string, number>;
   alertThreats?: { x: number; y: number; desc: string }[];
+  openTerminal?: { terminalId: string; clusterId: number };
 }
 
 export interface GameMessage {
@@ -250,7 +265,11 @@ export interface ActionDebugToggle {
   kind: 'debug_toggle';
 }
 
-export type PlayerAction = ActionMove | ActionTransfer | ActionWait | ActionDebugToggle;
+export interface ActionInteract {
+  kind: 'interact';
+}
+
+export type PlayerAction = ActionMove | ActionTransfer | ActionWait | ActionDebugToggle | ActionInteract;
 
 // ── Constants ──
 

@@ -123,10 +123,16 @@ function tryMove(state: GameState, dx: number, dy: number): boolean {
     return true;
   }
 
-  // Bump-to-open: closed door (glyph '+') → open it, costs a turn, don't move
+  // Bump-to-open: closed door → open it, costs a turn, don't move
   if (targetTile.type === TileType.Door && !targetTile.doorOpen && targetTile.glyph === '+') {
     openDoor(targetTile);
     return true;
+  }
+
+  // Bump-into-terminal → open it, no turn cost
+  if (targetTile.type === TileType.Terminal && targetTile.terminalId) {
+    state.openTerminal = { terminalId: targetTile.terminalId, clusterId: state.currentClusterId };
+    return false;
   }
 
   if (!isWalkable(cluster, nx, ny)) {
@@ -160,6 +166,12 @@ function tryTransfer(state: GameState): boolean {
     i => i.position.x === x && i.position.y === y
   );
   if (!iface) return false;
+
+  // Forward exits (x > 0; x=0 is always the back-entry) require authorization
+  if (x > 0 && cluster.exitLocked) {
+    addMessage(state, 'Exit locked — authorization required. Find and activate a terminal.', 'hazard');
+    return false;
+  }
 
   // Generate target cluster if needed
   if (iface.targetClusterId === -1) {
@@ -250,6 +262,22 @@ export function processAction(state: GameState, action: PlayerAction): boolean {
     case 'wait':
       acted = true;
       break;
+    case 'interact': {
+      // Check adjacent tiles for terminals
+      const cluster = getCurrentCluster(state);
+      const pp = state.player.position;
+      const dirs = [[-1,0],[1,0],[0,-1],[0,1]] as const;
+      for (const [dx, dy] of dirs) {
+        const t = cluster.tiles[pp.y + dy]?.[pp.x + dx];
+        if (t?.type === TileType.Terminal && t.terminalId) {
+          state.openTerminal = { terminalId: t.terminalId, clusterId: state.currentClusterId };
+          break;
+        }
+      }
+      // interact doesn't cost a turn (opening terminal is a menu action)
+      acted = false;
+      break;
+    }
   }
 
   if (acted) {
@@ -294,6 +322,33 @@ export function processAction(state: GameState, action: PlayerAction): boolean {
   return acted;
 }
 
+// ── Terminal / exit access ──
+
+/** Called from the terminal overlay when the player activates a terminal. */
+export function grantExitAccess(state: GameState, terminalId: string, clusterId: number) {
+  const cluster = state.clusters.get(clusterId);
+  if (!cluster) return;
+  const terminal = cluster.terminals.find(t => t.id === terminalId);
+  if (!terminal) return;
+  terminal.activated = true;
+  if (!terminal.hasKey) {
+    addMessage(state, 'No exit key found on this terminal.', 'normal');
+    state.openTerminal = undefined;
+    return;
+  }
+  cluster.exitLocked = false;
+  addMessage(state, 'Exit authorization granted. Cluster egress unlocked.', 'important');
+  state.openTerminal = undefined;
+}
+
+/** Called from the terminal overlay to mark a terminal accessed (read only). */
+export function activateTerminal(state: GameState, terminalId: string, clusterId: number) {
+  const cluster = state.clusters.get(clusterId);
+  if (!cluster) return;
+  const terminal = cluster.terminals.find(t => t.id === terminalId);
+  if (terminal) terminal.activated = true;
+}
+
 // ── Click-to-move ──
 
 export function handleMapClick(state: GameState, target: Position): Position[] {
@@ -305,8 +360,29 @@ export function handleMapClick(state: GameState, target: Position): Position[] {
     return [];
   }
 
-  // Only pathfind to seen tiles that are walkable or doors
+  // Click on a terminal: if adjacent open it, otherwise pathfind to adjacent
   const tile = cluster.tiles[target.y]?.[target.x];
+  if (tile?.type === TileType.Terminal && tile.terminalId && tile.seen) {
+    const pp = state.player.position;
+    if (Math.abs(target.x - pp.x) + Math.abs(target.y - pp.y) === 1) {
+      state.openTerminal = { terminalId: tile.terminalId, clusterId: state.currentClusterId };
+      state.autoPath = [];
+      return [];
+    }
+    // Pathfind toward the terminal tile (to a walkable neighbour)
+    const adj = ([ [-1,0],[1,0],[0,-1],[0,1] ] as const)
+      .map(([dx, dy]) => ({ x: target.x + dx, y: target.y + dy }))
+      .filter(p => cluster.tiles[p.y]?.[p.x]?.walkable);
+    let best: Position[] = [];
+    for (const a of adj) {
+      const p = findPath(cluster, pp, a);
+      if (p && p.length > 0 && (best.length === 0 || p.length < best.length)) best = p;
+    }
+    state.autoPath = best;
+    return best;
+  }
+
+  // Only pathfind to seen tiles that are walkable or doors
   if (!tile || !tile.seen || (!tile.walkable && tile.type !== TileType.Door)) {
     state.autoPath = [];
     return [];

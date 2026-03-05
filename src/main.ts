@@ -1,5 +1,5 @@
-import { createGame, processAction, handleMapClick, stepAutoPath, addMessage, exportSave, loadSave, adminRegenCluster, adminTeleportToCluster } from './game';
-import { setDamageParams, getDamageParams } from './cluster';
+import { createGame, processAction, handleMapClick, stepAutoPath, addMessage, exportSave, loadSave, adminRegenCluster, adminTeleportToCluster, grantExitAccess, activateTerminal } from './game';
+import { setDamageParams, getDamageParams, setGenSizeOverride, clearGenSizeOverride, getGenSizeOverride, clusterScaleForId } from './cluster';
 import { Renderer, renderSelfPanel, renderLogs, renderOverviewPanel } from './renderer';
 import { InputHandler } from './input';
 import { PlayerAction, Position, TileType } from './types';
@@ -129,6 +129,10 @@ function initAdminPanel() {
 <div class="admin-section collapsed" id="admin-sec-cluster">
 <div class="stat-row"><span class="stat-label">dmg base:</span><button class="admin-btn admin-dm-base-m">[-]</button><span class="admin-val admin-dm-base"> ${p.base.toFixed(2)} </span><button class="admin-btn admin-dm-base-p">[+]</button></div>
 <div class="stat-row"><span class="stat-label">dmg step:</span><button class="admin-btn admin-dm-inc-m">[-]</button><span class="admin-val admin-dm-inc"> ${p.inc.toFixed(2)} </span><button class="admin-btn admin-dm-inc-p">[+]</button></div>
+<div class="admin-sep">grid size (override)</div>
+<div class="stat-row"><span class="stat-label">width:</span><button class="admin-btn admin-gw-m">[-]</button><span class="admin-val admin-gw"> ${clusterScaleForId(state.currentClusterId).w} </span><button class="admin-btn admin-gw-p">[+]</button></div>
+<div class="stat-row"><span class="stat-label">height:</span><button class="admin-btn admin-gh-m">[-]</button><span class="admin-val admin-gh"> ${clusterScaleForId(state.currentClusterId).h} </span><button class="admin-btn admin-gh-p">[+]</button></div>
+<button class="admin-btn admin-grid-reset">&gt; reset to auto-scale</button>
 <button class="admin-btn admin-regen-cluster">&gt; regen cluster ${state.currentClusterId}</button>
 <div class="stat-row"><span class="stat-label">cluster #:</span><input class="admin-cluster-input" type="number" min="0" max="20" value="${state.currentClusterId}"></div>
 <button class="admin-btn admin-goto-cluster">&gt; goto cluster</button>
@@ -244,6 +248,35 @@ ${buttons}
     const { base, inc } = getDamageParams(); setDamageParams(base, inc + 0.05); updateDamageDisplay();
   });
 
+  // Wire up grid size +/- buttons
+  function currentGridSize(): { w: number; h: number } {
+    const ov = getGenSizeOverride();
+    return ov ?? clusterScaleForId(state.currentClusterId);
+  }
+  function updateGridDisplay() {
+    const { w, h } = currentGridSize();
+    const gwEl = adminEl.querySelector('.admin-gw');
+    const ghEl = adminEl.querySelector('.admin-gh');
+    if (gwEl) gwEl.textContent = ` ${w} `;
+    if (ghEl) ghEl.textContent = ` ${h} `;
+  }
+  adminEl.querySelector('.admin-gw-m')?.addEventListener('click', () => {
+    const { w, h } = currentGridSize(); setGenSizeOverride(Math.max(14, w - 2), h); updateGridDisplay();
+  });
+  adminEl.querySelector('.admin-gw-p')?.addEventListener('click', () => {
+    const { w, h } = currentGridSize(); setGenSizeOverride(Math.min(50, w + 2), h); updateGridDisplay();
+  });
+  adminEl.querySelector('.admin-gh-m')?.addEventListener('click', () => {
+    const { w, h } = currentGridSize(); setGenSizeOverride(w, Math.max(10, h - 1)); updateGridDisplay();
+  });
+  adminEl.querySelector('.admin-gh-p')?.addEventListener('click', () => {
+    const { w, h } = currentGridSize(); setGenSizeOverride(w, Math.min(30, h + 1)); updateGridDisplay();
+  });
+  adminEl.querySelector('.admin-grid-reset')?.addEventListener('click', () => {
+    clearGenSizeOverride(); updateGridDisplay();
+    addMessage(state, '[DEBUG] Grid size: auto-scale', 'debug'); renderAll();
+  });
+
   // Wire up regen cluster button
   adminEl.querySelector('.admin-regen-cluster')?.addEventListener('click', () => {
     adminRegenCluster(state);
@@ -288,6 +321,85 @@ function updateAdminPanel() {
       (btn as HTMLElement).classList.remove('active');
     }
   });
+
+  // Update grid size display to reflect current cluster's auto-scale
+  const { w: aw, h: ah } = getGenSizeOverride() ?? clusterScaleForId(state.currentClusterId);
+  const gwEl = adminEl.querySelector('.admin-gw');
+  const ghEl = adminEl.querySelector('.admin-gh');
+  if (gwEl) gwEl.textContent = ` ${aw} `;
+  if (ghEl) ghEl.textContent = ` ${ah} `;
+}
+
+// ── Terminal overlay ──
+
+const terminalOverlay = document.getElementById('terminal-overlay')!;
+const terminalTitle = document.getElementById('terminal-title')!;
+const terminalContent = document.getElementById('terminal-content')!;
+const terminalOptions = document.getElementById('terminal-options')!;
+
+function openTerminalOverlay() {
+  const { openTerminal } = state;
+  if (!openTerminal) return;
+
+  const cluster = state.clusters.get(openTerminal.clusterId);
+  if (!cluster) return;
+
+  const terminal = cluster.terminals.find(t => t.id === openTerminal.terminalId);
+  if (!terminal) return;
+
+  // Mark as accessed on open
+  activateTerminal(state, openTerminal.terminalId, openTerminal.clusterId);
+
+  const exitLocked = cluster.exitLocked;
+
+  terminalTitle.textContent = `[ ${terminal.label} ]`;
+
+  const contentLines = terminal.content.map(line =>
+    `<div class="t-log-line">${line}</div>`
+  ).join('');
+
+  let keyRow: string;
+  if (terminal.hasKey && exitLocked) {
+    keyRow = `<div class="t-row t-key-present"><span class="t-label">ACCESS KEY:</span><span class="t-ok">PRESENT — egress authorization available</span></div>`;
+  } else if (terminal.hasKey && !exitLocked) {
+    keyRow = `<div class="t-row"><span class="t-label">ACCESS KEY:</span><span class="t-ok">USED — egress already authorized</span></div>`;
+  } else {
+    keyRow = `<div class="t-row"><span class="t-label">ACCESS KEY:</span><span class="t-dim">NONE</span></div>`;
+  }
+
+  terminalContent.innerHTML =
+    `<div class="t-log">${contentLines}</div>` +
+    `<div class="t-separator">──────────────────────────</div>` +
+    `<div class="t-row"><span class="t-label">CLUSTER:</span><span class="t-value">${openTerminal.clusterId}</span></div>` +
+    `<div class="t-row"><span class="t-label">EGRESS:</span><span class="${exitLocked ? 't-warn' : 't-ok'}">${exitLocked ? 'LOCKED' : 'AUTHORIZED'}</span></div>` +
+    keyRow;
+
+  terminalOptions.innerHTML = '';
+
+  if (terminal.hasKey && exitLocked) {
+    const grantBtn = document.createElement('button');
+    grantBtn.className = 'terminal-opt-btn opt-grant';
+    grantBtn.textContent = '> [EXECUTE] authorize cluster egress';
+    grantBtn.addEventListener('click', () => {
+      grantExitAccess(state, openTerminal.terminalId, openTerminal.clusterId);
+      closeTerminalOverlay();
+      renderAll();
+    });
+    terminalOptions.appendChild(grantBtn);
+  }
+
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'terminal-opt-btn opt-close';
+  closeBtn.textContent = '> [ESC] disconnect';
+  closeBtn.addEventListener('click', closeTerminalOverlay);
+  terminalOptions.appendChild(closeBtn);
+
+  terminalOverlay.classList.add('open');
+}
+
+function closeTerminalOverlay() {
+  terminalOverlay.classList.remove('open');
+  state.openTerminal = undefined;
 }
 
 function renderAll() {
@@ -317,6 +429,11 @@ function renderAll() {
     adminEl.classList.remove('visible');
     overviewEl.classList.remove('visible');
   }
+
+  // Open terminal overlay if requested
+  if (state.openTerminal) {
+    openTerminalOverlay();
+  }
 }
 
 // ── Input handling ──
@@ -335,10 +452,8 @@ function onAction(action: PlayerAction) {
   state.autoPath = [];
   renderer.setPathHighlight([]);
 
-  const acted = processAction(state, action);
-  if (acted) {
-    renderAll();
-  }
+  processAction(state, action);
+  renderAll();
 }
 
 function onMapClick(pos: Position) {
@@ -624,16 +739,30 @@ aboutOverlay.addEventListener('click', (e) => {
   if (e.target === aboutOverlay) aboutOverlay.classList.remove('open');
 });
 
+terminalOverlay.addEventListener('click', (e) => {
+  if (e.target === terminalOverlay) closeTerminalOverlay();
+});
+
 // Close buttons [X]
 document.querySelectorAll('.overlay-close').forEach(btn => {
   btn.addEventListener('click', () => {
     const targetId = (btn as HTMLElement).dataset.close;
-    if (targetId) document.getElementById(targetId)?.classList.remove('open');
+    if (!targetId) return;
+    if (targetId === 'terminal-overlay') {
+      closeTerminalOverlay();
+    } else {
+      document.getElementById(targetId)?.classList.remove('open');
+    }
   });
 });
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
+    if (terminalOverlay.classList.contains('open')) {
+      closeTerminalOverlay();
+      e.stopPropagation();
+      return;
+    }
     if (aboutOverlay.classList.contains('open')) {
       aboutOverlay.classList.remove('open');
       e.stopPropagation();

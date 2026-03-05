@@ -3,6 +3,7 @@ import { Cluster, Entity, Position, COLORS, Room, TileType } from './types';
 import type { FunctionalTag } from './types';
 
 const FUNC_TAG_ABBREV: Record<FunctionalTag, string> = {
+  engine_room: 'ENG',
   server_rack: 'SRV', reactor: 'RCT', medbay: 'MED', bridge: 'BRG',
   cargo: 'CRG', barracks: 'BRK', lab: 'LAB', armory: 'ARM',
   comms: 'COM', maintenance: 'MNT', hangar: 'HNG', archive: 'ARC',
@@ -11,7 +12,7 @@ const FUNC_TAG_ABBREV: Record<FunctionalTag, string> = {
 
 const FUNC_TAG_COLOR: Record<string, string> = {
   // Infrastructure — cyan
-  server_rack: '#44cccc', maintenance: '#44cccc', reactor: '#44cccc',
+  engine_room: '#44cccc', server_rack: '#44cccc', maintenance: '#44cccc', reactor: '#44cccc',
   // Military — red
   armory: '#cc4444', bridge: '#cc4444',
   // Science — purple

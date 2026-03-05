@@ -546,12 +546,14 @@ body {
   position: fixed;
   top: 4px;
   right: 4px;
+  bottom: 4px;
   width: 400px;
   z-index: 50;
   padding: 0;
   line-height: 1.4;
   color: #6688cc;
   background: #0a0a0a;
+  overflow-y: auto;
 }
 
 #panel-admin.visible {
@@ -692,6 +694,153 @@ body {
 
 #panel-overview .room-iface {
   color: #ff8844;
+}
+
+/* --- Terminal overlay --- */
+#terminal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.75);
+  justify-content: center;
+  align-items: center;
+}
+
+#terminal-overlay.open {
+  display: flex;
+}
+
+#terminal-panel {
+  background: var(--theme-bg);
+  border: 1px solid #00aaff;
+  padding: 0;
+  min-width: 360px;
+  max-width: 520px;
+  width: 90%;
+  color: #00aaff;
+  line-height: 1.6;
+}
+
+#terminal-panel .panel-edge {
+  color: #00aaff;
+}
+
+#terminal-panel .panel-edge .fill::after {
+  color: #005588;
+}
+
+#terminal-body {
+  padding: 8px 2ch 4px;
+}
+
+#terminal-content {
+  color: #00ccff;
+  line-height: 1.5;
+  padding-bottom: 4px;
+}
+
+#terminal-content .t-label {
+  color: #0077aa;
+}
+
+#terminal-content .t-value {
+  color: #00ccff;
+}
+
+#terminal-content .t-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1ch;
+}
+
+#terminal-content .t-warn {
+  color: #ff8844;
+}
+
+#terminal-content .t-ok {
+  color: #44ff88;
+}
+
+#terminal-content .t-dim {
+  color: #446677;
+}
+
+#terminal-content .t-log {
+  border-left: 2px solid #003355;
+  padding-left: 1ch;
+  margin-bottom: 6px;
+  color: #0099bb;
+}
+
+#terminal-content .t-log-line {
+  line-height: 1.6;
+  font-size: 0.92em;
+}
+
+#terminal-content .t-separator {
+  color: #004466;
+  margin: 4px 0;
+}
+
+#terminal-content .t-key-present {
+  border-left: 2px solid #ffaa00;
+  padding-left: 1ch;
+}
+
+#terminal-content .t-key-present .t-label {
+  color: #cc8800;
+}
+
+#terminal-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 4px;
+}
+
+.terminal-opt-btn {
+  display: block;
+  width: 100%;
+  background: none;
+  border: 1px solid #005588;
+  color: #0088bb;
+  font-family: inherit;
+  font-size: inherit;
+  padding: 3px 1ch;
+  cursor: pointer;
+  text-align: left;
+}
+
+.terminal-opt-btn:hover {
+  color: #00ccff;
+  border-color: #0099cc;
+  background: #001a2a;
+}
+
+.terminal-opt-btn:active {
+  color: #00ffff;
+  background: #002233;
+}
+
+.terminal-opt-btn.opt-grant {
+  color: #44ff88;
+  border-color: #228844;
+}
+
+.terminal-opt-btn.opt-grant:hover {
+  background: #0a1a0f;
+  border-color: #44ff88;
+}
+
+.terminal-opt-btn.opt-close {
+  color: #557766;
+  border-color: #334444;
+}
+
+.terminal-opt-btn.opt-close:hover {
+  color: #88aaaa;
+  border-color: #557766;
 }
 
 /* === GLITCH EFFECTS === */

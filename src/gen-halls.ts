@@ -799,26 +799,56 @@ function ensureConnectivity(grid: Grid, rooms: RoomDef[]) {
 
 const PAD = 1;
 
-export function generate(): { grid: Grid; rooms: RoomDef[]; halls: Hall[] } {
+export function generate(
+  gridW = CLUSTER_WIDTH,
+  gridH = CLUSTER_HEIGHT,
+  hallChance = PARAMS.smallBlockHallChance,
+): { grid: Grid; rooms: RoomDef[]; halls: Hall[]; activeW: number; activeH: number } {
   nextHallId = 0;
   nextRoomId = 0;
 
-  const mapRect: Rect = { x: PAD, y: PAD, w: PARAMS.gridW - 2 * PAD, h: PARAMS.gridH - 2 * PAD };
+  const activeW = Math.max(10, Math.min(gridW, CLUSTER_WIDTH));
+  const activeH = Math.max(8,  Math.min(gridH, CLUSTER_HEIGHT));
 
-  const { halls, pendingBlocks } = buildHallTree(mapRect);
-  const rooms = processBlocks(pendingBlocks, mapRect);
-  mergeSmallRooms(rooms);
+  // Temporarily override params for this call
+  const prevW = PARAMS.gridW, prevH = PARAMS.gridH, prevChance = PARAMS.smallBlockHallChance;
+  PARAMS.gridW = activeW;
+  PARAMS.gridH = activeH;
+  PARAMS.smallBlockHallChance = hallChance;
 
-  const grid = createGrid();
-  for (let x = 0; x < grid.w; x++) { grid.cells[0][x] = 'wall'; grid.cells[grid.h - 1][x] = 'wall'; }
-  for (let y = 0; y < grid.h; y++) { grid.cells[y][0] = 'wall'; grid.cells[y][grid.w - 1] = 'wall'; }
+  try {
+    const mapRect: Rect = { x: PAD, y: PAD, w: PARAMS.gridW - 2 * PAD, h: PARAMS.gridH - 2 * PAD };
 
-  carveToGrid(grid, halls, rooms);
-  cutHalls(grid, halls);
-  placeHallEndDoors(grid, halls);
-  placeDoors(grid, rooms, halls);
-  placeInterfaces(grid, halls, rooms, mapRect);
-  ensureConnectivity(grid, rooms);
+    const { halls, pendingBlocks } = buildHallTree(mapRect);
+    const rooms = processBlocks(pendingBlocks, mapRect);
+    mergeSmallRooms(rooms);
 
-  return { grid, rooms, halls };
+    const grid = createGrid(); // uses PARAMS.gridW/H → activeW×activeH
+    for (let x = 0; x < grid.w; x++) { grid.cells[0][x] = 'wall'; grid.cells[grid.h - 1][x] = 'wall'; }
+    for (let y = 0; y < grid.h; y++) { grid.cells[y][0] = 'wall'; grid.cells[y][grid.w - 1] = 'wall'; }
+
+    carveToGrid(grid, halls, rooms);
+    cutHalls(grid, halls);
+    placeHallEndDoors(grid, halls);
+    placeDoors(grid, rooms, halls);
+    placeInterfaces(grid, halls, rooms, mapRect);
+    ensureConnectivity(grid, rooms);
+
+    // Pad grid to full CLUSTER_WIDTH×CLUSTER_HEIGHT so cluster.ts can iterate uniformly
+    for (let y = 0; y < CLUSTER_HEIGHT; y++) {
+      if (grid.cells[y] === undefined) {
+        grid.cells[y] = new Array(CLUSTER_WIDTH).fill('void' as CellType);
+      } else {
+        while (grid.cells[y].length < CLUSTER_WIDTH) grid.cells[y].push('void');
+      }
+    }
+    grid.w = CLUSTER_WIDTH;
+    grid.h = CLUSTER_HEIGHT;
+
+    return { grid, rooms, halls, activeW, activeH };
+  } finally {
+    PARAMS.gridW = prevW;
+    PARAMS.gridH = prevH;
+    PARAMS.smallBlockHallChance = prevChance;
+  }
 }
