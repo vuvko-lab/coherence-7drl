@@ -512,9 +512,9 @@ function renderTargetPanel(pos: Position | null) {
     const hasCorrM = state.player.modules?.some(m => m.id === 'corrupt.m' && m.status === 'loaded');
 
     html += `<div class="target-name">${entity.glyph} ${entity.name}</div>`;
-    html += `<div class="target-stat-row"><span>faction:</span><span class="t-val target-faction-${faction}">${factionLabel}</span></div>`;
-    html += `<div class="target-stat-row"><span>dist:</span><span class="t-val">${dist}</span></div>`;
-    if (ai?.aiState) html += `<div class="target-stat-row"><span>state:</span><span class="t-val">${ai.aiState}</span></div>`;
+    html += `<div class="stat-row"><span class="stat-label">faction:</span><span class="stat-value target-faction-${faction}">${factionLabel}</span></div>`;
+    html += `<div class="stat-row"><span class="stat-label">dist:</span><span class="stat-value">${dist}</span></div>`;
+    if (ai?.aiState) html += `<div class="stat-row"><span class="stat-label">state:</span><span class="stat-value">${ai.aiState}</span></div>`;
     html += `<div class="target-bar">${bar} ${coh}/${maxCoh}</div>`;
     if (faction === 'aggressive') {
       const hint = hasCorrM
@@ -524,7 +524,7 @@ function renderTargetPanel(pos: Position | null) {
     }
   } else if (entity && isPlayer) {
     html += `<div class="target-name">@ ${entity.name}</div>`;
-    html += `<div class="target-stat-row"><span>that's you</span></div>`;
+    html += `<div class="stat-row"><span class="stat-label">that's you</span></div>`;
   } else {
     // Tile info
     const tileLabel = tile.type === TileType.Door ? (tile.doorOpen ? 'Door (open)' : 'Door')
@@ -535,11 +535,11 @@ function renderTargetPanel(pos: Position | null) {
       : 'Void';
     html += `<div class="target-name">${tileLabel}</div>`;
     if (tile.hazardOverlay) {
-      html += `<div class="target-stat-row"><span>hazard:</span><span class="t-val target-faction-aggressive">${tile.hazardOverlay.type}</span></div>`;
+      html += `<div class="stat-row"><span class="stat-label">hazard:</span><span class="stat-value target-faction-aggressive">${tile.hazardOverlay.type}</span></div>`;
     }
     const room = cluster.rooms.find(r => pos.x >= r.x && pos.x < r.x + r.w && pos.y >= r.y && pos.y < r.y + r.h);
     if (room?.tags.functional) {
-      html += `<div class="target-stat-row"><span>room:</span><span class="t-val">${room.tags.functional}</span></div>`;
+      html += `<div class="stat-row"><span class="stat-label">room:</span><span class="stat-value">${room.tags.functional}</span></div>`;
     }
   }
 
