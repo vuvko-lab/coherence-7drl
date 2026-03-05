@@ -112,10 +112,12 @@ function buildRoomIdMap(rawRooms: RoomDef[], halls: Hall[], hallIdOffset: number
   for (let y = 0; y < CLUSTER_HEIGHT; y++) {
     map[y] = new Array(CLUSTER_WIDTH).fill(-1);
   }
+  // Mark rooms with expanded bounds (including surrounding walls)
+  // so adjacency scan can detect rooms separated by a single wall row/col
   for (const rd of rawRooms) {
     const r = rd.rect;
-    for (let ry = r.y; ry < r.y + r.h; ry++) {
-      for (let rx = r.x; rx < r.x + r.w; rx++) {
+    for (let ry = r.y - 1; ry < r.y + r.h + 1; ry++) {
+      for (let rx = r.x - 1; rx < r.x + r.w + 1; rx++) {
         if (ry >= 0 && ry < CLUSTER_HEIGHT && rx >= 0 && rx < CLUSTER_WIDTH) {
           map[ry][rx] = rd.id;
         }

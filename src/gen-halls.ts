@@ -57,6 +57,7 @@ interface GenParams {
   minHallWidth: number;
   maxHallWidth: number;
   cutPercentage: number;
+  cutMinSize: number;
   cutTimes: number;
   extraDoor: number;
   numExitInterface: number;
@@ -70,8 +71,9 @@ const PARAMS: GenParams = {
   maxRoomSize: 6,
   minHallWidth: 2,
   maxHallWidth: 4,
-  cutPercentage: 0.2,
-  cutTimes: 2,
+  cutPercentage: 0.01,
+  cutMinSize: 6,
+  cutTimes: 3,
   extraDoor: 0.2,
   numExitInterface: 3,
   smallBlockHallChance: 0.4,
@@ -394,29 +396,55 @@ function carveToGrid(grid: Grid, halls: Hall[], rooms: RoomDef[]) {
 
 function cutHalls(grid: Grid, halls: Hall[]) {
   for (const hall of halls) {
-    if (random() >= PARAMS.cutPercentage) continue;
     const r = hall.rect;
+    const isVert = hall.orientation === 'vertical';
+    const longDim = isVert ? r.h : r.w;
+    if (longDim < PARAMS.cutMinSize) continue;
+
+    // Track sub-segments along the hall's long axis as [start, end)
+    let segments = [{ start: isVert ? r.y : r.x, end: isVert ? r.y + r.h : r.x + r.w }];
 
     for (let cut = 0; cut < PARAMS.cutTimes; cut++) {
-      if (hall.orientation === 'vertical') {
-        if (r.h < 3) continue;
-        const cutY = randInt(r.y + 1, r.y + r.h - 2);
+      // Pick the longest sub-segment
+      let longest = segments[0];
+      for (const seg of segments) {
+        if (seg.end - seg.start > longest.end - longest.start) longest = seg;
+      }
+
+      const segLen = longest.end - longest.start;
+      if (segLen < PARAMS.cutMinSize) break;
+
+      // Roll with chance scaled by segment length
+      if (random() >= PARAMS.cutPercentage * segLen) continue;
+
+      // Cut position must leave at least 3 tiles on each side
+      const cutMin = longest.start + 3;
+      const cutMax = longest.end - 4; // sub-hall after cut: end-(cutPos+1) >= 3
+      if (cutMin > cutMax) continue;
+      const cutPos = randInt(cutMin, cutMax);
+
+      if (isVert) {
         const doorX = randInt(r.x, r.x + r.w - 1);
         for (let x = r.x; x < r.x + r.w; x++) {
-          if (x >= 0 && x < grid.w && cutY >= 0 && cutY < grid.h) {
-            grid.cells[cutY][x] = (x === doorX) ? 'door' : 'wall';
+          if (x >= 0 && x < grid.w && cutPos >= 0 && cutPos < grid.h) {
+            grid.cells[cutPos][x] = (x === doorX) ? 'door' : 'wall';
           }
         }
       } else {
-        if (r.w < 3) continue;
-        const cutX = randInt(r.x + 1, r.x + r.w - 2);
         const doorY = randInt(r.y, r.y + r.h - 1);
         for (let y = r.y; y < r.y + r.h; y++) {
-          if (y >= 0 && y < grid.h && cutX >= 0 && cutX < grid.w) {
-            grid.cells[y][cutX] = (y === doorY) ? 'door' : 'wall';
+          if (y >= 0 && y < grid.h && cutPos >= 0 && cutPos < grid.w) {
+            grid.cells[y][cutPos] = (y === doorY) ? 'door' : 'wall';
           }
         }
       }
+
+      // Split the segment at the cut position
+      const idx = segments.indexOf(longest);
+      segments.splice(idx, 1,
+        { start: longest.start, end: cutPos },
+        { start: cutPos + 1, end: longest.end },
+      );
     }
   }
 }

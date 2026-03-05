@@ -74,6 +74,7 @@ export function createGame(initialSeed?: number): GameState {
     mapReveal: false,
     godMode: false,
     invisibleMode: false,
+    showRoomLabels: false,
     showAlertOverlay: false,
   };
 

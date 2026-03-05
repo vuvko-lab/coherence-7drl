@@ -98,6 +98,7 @@ export class Renderer {
     entities: Entity[],
     playerPos: Position,
     mapReveal = false,
+    showRoomLabels = false,
     alertOverlay?: { fill?: Map<string, number>; threats?: { x: number; y: number }[]; budget: number },
   ) {
     const pathSet = new Set(this.pathHighlight.map(p => `${p.x},${p.y}`));
@@ -217,7 +218,7 @@ export class Renderer {
     }
 
     // Debug overlay: room IDs and types
-    if (mapReveal) {
+    if (showRoomLabels) {
       for (const room of cluster.rooms) {
         const cx = Math.floor(room.x + room.w / 2);
         const cy = Math.floor(room.y + room.h / 2);

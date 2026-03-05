@@ -174,6 +174,7 @@ export interface GameState {
   mapReveal: boolean;
   godMode: boolean;
   invisibleMode: boolean;
+  showRoomLabels: boolean;
   showAlertOverlay: boolean;
   alertFill?: Map<string, number>;
   alertThreats?: { x: number; y: number; desc: string }[];
