@@ -4,12 +4,7 @@ import {
   HazardOverlayType,
 } from './types';
 import { addMessage } from './game';
-
-// ── Helpers ──
-
-function randInt(min: number, max: number): number {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
-}
+import { random, randInt } from './rng';
 
 function roomInterior(room: Room): { x1: number; y1: number; x2: number; y2: number } {
   return { x1: room.x + 1, y1: room.y + 1, x2: room.x + room.w - 2, y2: room.y + room.h - 2 };
@@ -51,6 +46,7 @@ function roomDistance(adj: Map<number, number[]>, fromId: number, toId: number):
 }
 
 function damageCoherence(state: GameState, amount: number) {
+  if (state.godMode) return;
   if (state.player.coherence == null) return;
   state.player.coherence = Math.max(0, state.player.coherence - amount);
 }
@@ -116,7 +112,7 @@ function updateCorruption(state: GameState, cluster: Cluster, room: Room) {
     // Spread to adjacent tile (floor, wall, or door)
     const [cx, cy] = key.split(',').map(Number);
     const dirs = [[-1, 0], [1, 0], [0, -1], [0, 1]];
-    const shuffled = dirs.sort(() => Math.random() - 0.5);
+    const shuffled = dirs.sort(() => random() - 0.5);
     for (const [dx, dy] of shuffled) {
       const nx = cx + dx;
       const ny = cy + dy;
@@ -135,7 +131,7 @@ function updateCorruption(state: GameState, cluster: Cluster, room: Room) {
         target.hazardOverlay = { type: 'corruption', stage: 0 };
         markTileHazardInRoom(cluster, nx, ny, 'corruption');
 
-        if (Math.random() < degradeChance) {
+        if (random() < degradeChance) {
           const integrity = tileIntegrity(cluster, nx, ny);
           const newIntegrity = integrity - 1;
           if (newIntegrity <= 0) {
@@ -308,7 +304,7 @@ function updateMemoryLeak(state: GameState, cluster: Cluster, room: Room) {
             cluster.tiles[ay]?.[ax]?.hazardOverlay?.type === 'flood';
         });
 
-        if (adjacentToFlood && Math.random() < 0.30) {
+        if (adjacentToFlood && random() < 0.30) {
           breachTile(cluster, x, y);
           cluster.tiles[y][x].hazardOverlay = { type: 'flood', stage: 0 };
           markTileHazardInRoom(cluster, x, y, 'flood');
@@ -353,7 +349,7 @@ function updateFirewall(state: GameState, cluster: Cluster, room: Room) {
           cluster.tiles[beam.position][x].hazardOverlay = { type: 'beam' };
         }
       }
-      if (state.player.position.y === beam.position && posInRoom(state.player.position, room)) {
+      if (!state.invisibleMode && state.player.position.y === beam.position && posInRoom(state.player.position, room)) {
         if (!hz.alarmTriggered) {
           hz.alarmTriggered = true;
           addMessage(state, 'SCAN DETECTED! Firewall alarm triggered!', 'hazard');
@@ -365,7 +361,7 @@ function updateFirewall(state: GameState, cluster: Cluster, room: Room) {
           cluster.tiles[y][beam.position].hazardOverlay = { type: 'beam' };
         }
       }
-      if (state.player.position.x === beam.position && posInRoom(state.player.position, room)) {
+      if (!state.invisibleMode && state.player.position.x === beam.position && posInRoom(state.player.position, room)) {
         if (!hz.alarmTriggered) {
           hz.alarmTriggered = true;
           addMessage(state, 'SCAN DETECTED! Firewall alarm triggered!', 'hazard');
@@ -405,7 +401,7 @@ function updateUnstable(state: GameState, cluster: Cluster, room: Room) {
   hz.sparkedTiles = sparks;
 
   const pp = state.player.position;
-  if (sparks.some(s => s.x === pp.x && s.y === pp.y)) {
+  if (!state.invisibleMode && sparks.some(s => s.x === pp.x && s.y === pp.y)) {
     addMessage(state, 'Electric discharge surges through you!', 'hazard');
     damageCoherence(state, randInt(5, 10));
   }
@@ -459,8 +455,8 @@ function updateGravityWell(state: GameState, cluster: Cluster, room: Room) {
   if (state.tick - (hz.lastPullTick ?? 0) < interval) return;
   hz.lastPullTick = state.tick;
 
-  // Pull player if in room
-  if (posInRoom(state.player.position, room)) {
+  // Pull player if in room (invisible mode: player doesn't exist on map)
+  if (!state.invisibleMode && posInRoom(state.player.position, room)) {
     const pp = state.player.position;
     const sp = hz.singularityPos;
 
@@ -531,6 +527,7 @@ export function updateHazards(state: GameState) {
 
 /** Called when player moves to a new room */
 export function onPlayerEnterRoom(state: GameState, room: Room) {
+  if (state.invisibleMode) return; // player doesn't trigger room events
   switch (room.roomType) {
     case 'trigger_trap':
       onPlayerEnterTriggerTrap(state, room);
@@ -553,6 +550,7 @@ export function getPlayerRoom(state: GameState): Room | undefined {
 
 /** Apply per-tile hazard damage for standing on hazard tiles */
 export function applyTileHazardToPlayer(state: GameState) {
+  if (state.invisibleMode) return; // player doesn't exist on the map
   const cluster = state.clusters.get(state.currentClusterId);
   if (!cluster) return;
 
@@ -592,8 +590,13 @@ export function updateAlertModule(state: GameState) {
   const cluster = state.clusters.get(state.currentClusterId);
   if (!cluster) return;
 
+  const wasActive = alertMod.alertActive ?? false;
+
   const pRoom = playerRoom(state, cluster);
   if (!pRoom) {
+    if (wasActive) {
+      addMessage(state, 'alert.m ▽ area clear', 'alert');
+    }
     alertMod.alertActive = false;
     return;
   }
@@ -641,6 +644,14 @@ export function updateAlertModule(state: GameState) {
   }
 
   alertMod.alertActive = detected;
+
+  // Post alert messages on state transitions
+  if (detected && !wasActive) {
+    const source = pRoom.roomType !== 'normal' ? pRoom.roomType : 'spread hazard';
+    addMessage(state, `alert.m ▲ threat detected — ${source}`, 'alert');
+  } else if (!detected && wasActive) {
+    addMessage(state, 'alert.m ▽ area clear', 'alert');
+  }
 
   if (state.debugMode && detected) {
     const hazards = pRoom.containedHazards.size > 0 ? ` spread:[${[...pRoom.containedHazards].join(',')}]` : '';

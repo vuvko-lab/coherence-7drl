@@ -4,12 +4,7 @@ import {
   CLUSTER_WIDTH, CLUSTER_HEIGHT, COLORS,
 } from './types';
 import { generate, CellType, RoomDef } from './gen-halls';
-
-// ── RNG helpers ──
-
-function randInt(min: number, max: number): number {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
-}
+import { random, randInt } from './rng';
 
 // ── Tile factories ──
 
@@ -296,7 +291,7 @@ const HAZARD_WEIGHTS: { type: RoomType; weight: number }[] = [
 
 function weightedPick(pool: { type: RoomType; weight: number }[]): RoomType {
   const total = pool.reduce((s, e) => s + e.weight, 0);
-  let r = Math.random() * total;
+  let r = random() * total;
   for (const entry of pool) {
     r -= entry.weight;
     if (r <= 0) return entry.type;
@@ -326,7 +321,7 @@ function assignRoomTypes(
   // 1-3 special rooms per cluster
   const numSpecial = Math.min(candidates.length, randInt(1, 3));
   const usedTypes = new Set<RoomType>();
-  const shuffled = candidates.sort(() => Math.random() - 0.5);
+  const shuffled = candidates.sort(() => random() - 0.5);
 
   for (let i = 0; i < numSpecial && i < shuffled.length; i++) {
     const available = HAZARD_WEIGHTS.filter(e => !usedTypes.has(e.type));
@@ -394,7 +389,7 @@ function initRoomHazards(tiles: Tile[][], rooms: Room[]) {
         const beamCount = randInt(1, 2);
         const beams = [];
         for (let b = 0; b < beamCount; b++) {
-          const axis = Math.random() < 0.5 ? 'horizontal' as const : 'vertical' as const;
+          const axis = random() < 0.5 ? 'horizontal' as const : 'vertical' as const;
           if (axis === 'horizontal') {
             const pos = randInt(innerY1, innerY2);
             beams.push({ axis, position: pos, direction: 1 as const, min: innerX1, max: innerX2 });
@@ -511,5 +506,19 @@ export function generateCluster(id: number): Cluster {
   // Extract interface exits (right edge only; left interface is for entry)
   const interfaces = extractInterfaces(grid.cells);
 
-  return { id, width: CLUSTER_WIDTH, height: CLUSTER_HEIGHT, tiles, rooms, interfaces, roomAdjacency };
+  const cluster = { id, width: CLUSTER_WIDTH, height: CLUSTER_HEIGHT, tiles, rooms, interfaces, roomAdjacency };
+
+  // Debug output
+  const hazardRooms = rooms.filter(r => r.roomType !== 'normal');
+  const hazardSummary = hazardRooms.map(r => `  room ${r.id}: ${r.roomType} (${r.w - 2}x${r.h - 2})`).join('\n');
+  const degrees = rooms.map(r => (roomAdjacency.get(r.id) ?? []).length);
+  const avgDegree = degrees.length > 0 ? (degrees.reduce((a, b) => a + b, 0) / degrees.length).toFixed(1) : '0';
+  const deadEnds = degrees.filter(d => d <= 1).length;
+  console.log(
+    `[Cluster ${id}] ${rooms.length} rooms, ${hazardRooms.length} hazards, ` +
+    `${interfaces.length} exits, avg degree ${avgDegree}, ${deadEnds} dead-ends\n` +
+    (hazardSummary || '  (no hazards)')
+  );
+
+  return cluster;
 }

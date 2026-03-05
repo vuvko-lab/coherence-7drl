@@ -9,6 +9,7 @@
 //   6. Ensure full connectivity from left interface to all rooms
 
 import { CLUSTER_WIDTH, CLUSTER_HEIGHT } from './types';
+import { random, randInt as rngRandInt } from './rng';
 
 // ── Types ──
 
@@ -78,9 +79,7 @@ const PARAMS: GenParams = {
 
 // ── Helpers ──
 
-function randInt(min: number, max: number): number {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
-}
+const randInt = rngRandInt;
 
 function createGrid(): Grid {
   const grid: Grid = { w: PARAMS.gridW, h: PARAMS.gridH, cells: [] };
@@ -182,10 +181,10 @@ function buildHallTree(mapRect: Rect): { root: BSPNode; halls: Hall[]; pendingBl
     const block = item.rect;
 
     const mustSplit = block.w > maxBlockSize && block.h > maxBlockSize;
-    const canSplit = !mustSplit && Math.random() < PARAMS.smallBlockHallChance;
+    const canSplit = !mustSplit && random() < PARAMS.smallBlockHallChance;
     if (mustSplit || canSplit) {
       const orientation = mustSplit
-        ? (Math.random() < 0.5 ? 'vertical' as const : 'horizontal' as const)
+        ? (random() < 0.5 ? 'vertical' as const : 'horizontal' as const)
         : (block.w >= block.h ? 'vertical' as const : 'horizontal' as const);
       const split = splitWithHall(block, orientation);
       if (split) {
@@ -395,7 +394,7 @@ function carveToGrid(grid: Grid, halls: Hall[], rooms: RoomDef[]) {
 
 function cutHalls(grid: Grid, halls: Hall[]) {
   for (const hall of halls) {
-    if (Math.random() >= PARAMS.cutPercentage) continue;
+    if (random() >= PARAMS.cutPercentage) continue;
     const r = hall.rect;
 
     for (let cut = 0; cut < PARAMS.cutTimes; cut++) {
@@ -461,7 +460,7 @@ function tryPlaceEndDoor(
   }
 
   if (candidates.length > 0) {
-    const pos = candidates[Math.floor(Math.random() * candidates.length)];
+    const pos = candidates[Math.floor(random() * candidates.length)];
     grid.cells[pos.y][pos.x] = 'door';
   }
 }
@@ -515,7 +514,7 @@ function findDoorToHall(grid: Grid, room: RoomDef, hall: Hall): { x: number; y: 
   }
 
   if (candidates.length === 0) return null;
-  return candidates[Math.floor(Math.random() * candidates.length)];
+  return candidates[Math.floor(random() * candidates.length)];
 }
 
 function findDoorBetweenRooms(grid: Grid, a: RoomDef, b: RoomDef): { x: number; y: number } | null {
@@ -564,7 +563,7 @@ function findDoorBetweenRooms(grid: Grid, a: RoomDef, b: RoomDef): { x: number; 
   }
 
   if (candidates.length === 0) return null;
-  return candidates[Math.floor(Math.random() * candidates.length)];
+  return candidates[Math.floor(random() * candidates.length)];
 }
 
 function placeDoors(grid: Grid, rooms: RoomDef[], halls: Hall[]) {
@@ -585,7 +584,7 @@ function placeDoors(grid: Grid, rooms: RoomDef[], halls: Hall[]) {
 
   for (const siblings of byHall.values()) {
     for (let i = 0; i < siblings.length; i++) {
-      if (Math.random() >= PARAMS.extraDoor) continue;
+      if (random() >= PARAMS.extraDoor) continue;
       for (let j = 0; j < siblings.length; j++) {
         if (i === j) continue;
         const pos = findDoorBetweenRooms(grid, siblings[i], siblings[j]);
@@ -638,14 +637,14 @@ function fallbackEdgeY(grid: Grid, innerX: number): number | null {
     if (c === 'floor' || c === 'hall') candidates.push(y);
   }
   if (candidates.length === 0) return null;
-  return candidates[Math.floor(Math.random() * candidates.length)];
+  return candidates[Math.floor(random() * candidates.length)];
 }
 
 function placeInterfaces(grid: Grid, halls: Hall[], rooms: RoomDef[], mapRect: Rect) {
   const leftRegions = collectEdgeRegions(halls, rooms, mapRect, 'left');
 
   if (leftRegions.length > 0) {
-    const region = leftRegions[Math.floor(Math.random() * leftRegions.length)];
+    const region = leftRegions[Math.floor(random() * leftRegions.length)];
     const y = randInt(region.yMin, region.yMax);
     if (y >= 0 && y < grid.h) grid.cells[y][0] = 'interface';
   } else {
@@ -656,7 +655,7 @@ function placeInterfaces(grid: Grid, halls: Hall[], rooms: RoomDef[], mapRect: R
   const rightRegions = collectEdgeRegions(halls, rooms, mapRect, 'right');
   const numExits = randInt(1, PARAMS.numExitInterface);
   const usedRegionIds = new Set<string>();
-  const shuffled = [...rightRegions].sort(() => Math.random() - 0.5);
+  const shuffled = [...rightRegions].sort(() => random() - 0.5);
 
   let placed = 0;
   for (const region of shuffled) {
