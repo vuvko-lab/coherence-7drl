@@ -223,17 +223,25 @@ function spawnClusterEntities(state: GameState, cluster: Cluster) {
     const hasEnemies = id >= 2; // enemies only in cluster 2+
 
     // Weights: [bit_mite, logic_leech, chronicler, white_hat, gate_keeper, repair_scrapper]
-    // GateKeeper: only appears at depth 4+ (cluster 3+), prefers high-collapse rooms
-    const gkWeight = hasEnemies ? Math.max(0, (depth - 3) * 0.8) * (room.collapse > 0.5 ? 2 : 1) : 0;
-    // Repair scrapper: low weight in cluster 1, higher in clusters 4-5
-    const rsWeight = id >= 4 ? 2 : id >= 2 ? 0.8 : 0.4;
+    // Logic Leech and Gate-Keeper scale up significantly with cluster depth.
+    // White-Hat sentry spawns are rare and capped to avoid friendly flood.
+    const leechWeight = hasEnemies
+      ? (isPeripheral ? 2 + depth : 1 + depth * 0.5)  // leech loves edges, scales with depth
+      : 0;
+    const gkWeight = hasEnemies
+      ? Math.max(0, (depth - 2) * 1.2) * (room.collapse > 0.5 ? 2 : 1)  // starts cluster 2+, steeper ramp
+      : 0;
+    // White-Hat: rare overall, capped weight so it never dominates
+    const whWeight = hasEnemies && inSafeRoom ? Math.min(0.5, 0.1 * depth) : 0;
+    // Repair scrapper: low weight in cluster 1, slightly higher in clusters 4-5
+    const rsWeight = id >= 4 ? 1.5 : id >= 2 ? 0.6 : 0.4;
     const w = [
-      hasEnemies ? 4 + depth : 0,                              // bit_mite: cluster 2+
-      hasEnemies ? (isPeripheral ? 2 + depth * 0.5 : 1) : 0,  // logic_leech: prefers edges
-      hasEnemies ? 1.5 : 0,                                    // chronicler: cluster 2+
-      hasEnemies && inSafeRoom ? 1 : 0,                        // white_hat: only in normal rooms
-      gkWeight,                                                 // gate_keeper: rare, depth-4+ only
-      rsWeight,                                                 // repair_scrapper: all clusters 1+
+      hasEnemies ? 6 + depth * 1.5 : 0,  // bit_mite: dominant, grows fast with depth
+      leechWeight,                         // logic_leech: scales with depth, prefers edges
+      hasEnemies ? 1.2 : 0,               // chronicler: constant low neutral presence
+      whWeight,                            // white_hat: rare sentry, capped
+      gkWeight,                            // gate_keeper: scales from cluster 2+
+      rsWeight,                            // repair_scrapper: all clusters 1+
     ];
     const total = w[0] + w[1] + w[2] + w[3] + w[4] + w[5];
     const roll = Math.random() * total;
