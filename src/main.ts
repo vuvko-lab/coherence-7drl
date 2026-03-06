@@ -774,7 +774,11 @@ const victoryStats = document.getElementById('victory-stats')!;
 const victoryKills = document.getElementById('victory-kills')!;
 const victoryRestartBtn = document.getElementById('victory-restart')!;
 
-victoryRestartBtn.addEventListener('click', () => location.reload());
+victoryRestartBtn.addEventListener('click', () => {
+  victoryOverlay.classList.remove('open');
+  window.location.hash = ''; // clear pinned seed so the new game is truly random
+  restartGame(generateSeed());
+});
 
 function showVictoryOverlay() {
   const coherencePct = Math.round(((state.player.coherence ?? 0) / (state.player.maxCoherence ?? 100)) * 100);
@@ -1382,6 +1386,14 @@ document.querySelectorAll('.overlay-close').forEach(btn => {
       document.getElementById(targetId)?.classList.remove('open');
     }
   });
+});
+
+// CFG reboot button
+const cfgRebootBtn = document.getElementById('cfg-reboot-btn');
+cfgRebootBtn?.addEventListener('click', () => {
+  settingsOverlay.classList.remove('open');
+  window.location.hash = '';
+  restartGame(generateSeed());
 });
 
 // Wire corrupt.m module hover for range preview

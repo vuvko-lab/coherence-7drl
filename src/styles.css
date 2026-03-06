@@ -588,6 +588,24 @@ body {
   border-color: var(--theme-accent);
 }
 
+.cfg-reboot-btn {
+  background: none;
+  border: 1px solid var(--theme-dim);
+  color: var(--theme-accent);
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  padding: 5px 8px;
+  width: 100%;
+  text-align: left;
+  margin-top: 2px;
+}
+
+.cfg-reboot-btn:hover {
+  background: var(--theme-accent);
+  color: var(--theme-bg);
+}
+
 .settings-advanced-toggle {
   background: none;
   border: none;
