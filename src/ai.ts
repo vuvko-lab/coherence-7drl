@@ -1,24 +1,28 @@
 import {
   GameState, Entity, Cluster, Position, TileType,
-  ALERT_SUSPICIOUS, ALERT_ENEMY,
 } from './types';
 import { findPath } from './pathfinding';
 import { floodFillReveal } from './fov';
 
 // ── Helpers ──
 
-function canSee(cluster: Cluster, from: Position, to: Position, radius: number): boolean {
+export function canSee(cluster: Cluster, from: Position, to: Position, radius: number, wallPen = 0): boolean {
   const dx = to.x - from.x;
   const dy = to.y - from.y;
   if (dx * dx + dy * dy > radius * radius) return false;
-  // Bresenham line-of-sight using transparency
+  // Bresenham line-of-sight with wall penetration
   const steps = Math.max(Math.abs(dx), Math.abs(dy));
+  let wallsHit = 0;
   for (let i = 1; i <= steps; i++) {
     const x = Math.round(from.x + (dx * i) / steps);
     const y = Math.round(from.y + (dy * i) / steps);
     if (x === to.x && y === to.y) break;
     const tile = cluster.tiles[y]?.[x];
-    if (!tile || !tile.transparent) return false;
+    if (!tile) return false;
+    if (!tile.transparent) {
+      wallsHit++;
+      if (wallsHit > wallPen) return false;
+    }
   }
   return true;
 }
@@ -103,7 +107,7 @@ function updateChronicler(state: GameState, entity: Entity, cluster: Cluster) {
       const targets = getAllEntitiesInCluster(state, cluster);
       for (const t of targets) {
         if (t.id === entity.id) continue;
-        if (canSee(cluster, entity.position, t.position, ai.sightRadius)) {
+        if (canSee(cluster, entity.position, t.position, ai.sightRadius, ai.wallPenetration)) {
           ai.targetId = t.id;
           ai.catalogTicks = 0;
           ai.aiState = 'catalog';
@@ -123,7 +127,7 @@ function updateChronicler(state: GameState, entity: Entity, cluster: Cluster) {
         ai.targetId = undefined;
         return;
       }
-      if (!canSee(cluster, entity.position, target.position, ai.sightRadius)) {
+      if (!canSee(cluster, entity.position, target.position, ai.sightRadius, ai.wallPenetration)) {
         ai.aiState = 'wander';
         ai.targetId = undefined;
         return;
@@ -166,24 +170,23 @@ function updateChronicler(state: GameState, entity: Entity, cluster: Cluster) {
 }
 
 // ── Bit-Mite Swarm (aggressive) ──
-// Speed 12 (fast). Wanders (20% door/wall bust) → chases player → attacks adjacent
+// Speed 12 (fast). Wanders (20% door bash) → chases any non-aggressive target → attacks adjacent
 
 function updateBitMite(state: GameState, entity: Entity, cluster: Cluster) {
   const ai = entity.ai!;
-  const player = state.player;
 
-  const playerVisible = player.clusterId === entity.clusterId &&
-    canSee(cluster, entity.position, player.position, ai.sightRadius);
+  // Find nearest visible non-aggressive target
+  const target = findNonFactionTarget(state, entity, cluster, 'aggressive');
 
   switch (ai.aiState) {
     case 'wander': {
-      if (playerVisible) {
-        ai.targetId = player.id;
+      if (target) {
+        ai.targetId = target.id;
         ai.aiState = 'chase';
-        ai.lastTargetPos = { ...player.position };
+        ai.lastTargetPos = { ...target.position };
         return;
       }
-      // Sporadic movement with 20% chance to bash a door/wall
+      // Sporadic movement with 20% chance to bash a door
       if (Math.random() < 0.2) {
         const dirs = [{ x: 0, y: -1 }, { x: 0, y: 1 }, { x: -1, y: 0 }, { x: 1, y: 0 }];
         const dir = dirs[Math.floor(Math.random() * dirs.length)];
@@ -205,22 +208,28 @@ function updateBitMite(state: GameState, entity: Entity, cluster: Cluster) {
     }
 
     case 'chase': {
-      // Check if player still in sight
-      if (playerVisible) {
-        ai.lastTargetPos = { ...player.position };
+      const chaseTarget = getEntityById(state, ai.targetId);
+      if (!chaseTarget || chaseTarget.clusterId !== entity.clusterId) {
+        ai.aiState = 'wander';
+        ai.targetId = undefined;
+        return;
+      }
+
+      const visible = canSee(cluster, entity.position, chaseTarget.position, ai.sightRadius, ai.wallPenetration);
+      if (visible) {
+        ai.lastTargetPos = { ...chaseTarget.position };
       }
 
       // Adjacent attack
-      const pp = player.position;
-      const dx = Math.abs(entity.position.x - pp.x);
-      const dy = Math.abs(entity.position.y - pp.y);
-      if (dx + dy <= 1 && player.clusterId === entity.clusterId) {
+      const dx = Math.abs(entity.position.x - chaseTarget.position.x);
+      const dy = Math.abs(entity.position.y - chaseTarget.position.y);
+      if (dx + dy <= 1) {
         ai.aiState = 'attack';
         return;
       }
 
-      // If we lost sight, chase last known position then give up
-      if (!playerVisible) {
+      // Lost sight — chase last known position then give up
+      if (!visible) {
         if (!ai.lastTargetPos) { ai.aiState = 'wander'; return; }
         if (entity.position.x === ai.lastTargetPos.x && entity.position.y === ai.lastTargetPos.y) {
           ai.aiState = 'wander';
@@ -229,7 +238,7 @@ function updateBitMite(state: GameState, entity: Entity, cluster: Cluster) {
         }
       }
 
-      const dest = playerVisible ? player.position : ai.lastTargetPos!;
+      const dest = visible ? chaseTarget.position : ai.lastTargetPos!;
       const step = stepToward(cluster, entity.position, dest);
       if (step) move(entity, cluster, step);
       else ai.aiState = 'wander';
@@ -237,17 +246,29 @@ function updateBitMite(state: GameState, entity: Entity, cluster: Cluster) {
     }
 
     case 'attack': {
-      const pp = player.position;
-      const dx = Math.abs(entity.position.x - pp.x);
-      const dy = Math.abs(entity.position.y - pp.y);
-      if (dx + dy > 1 || player.clusterId !== entity.clusterId) {
-        ai.aiState = playerVisible ? 'chase' : 'wander';
+      const attackTarget = getEntityById(state, ai.targetId);
+      if (!attackTarget || attackTarget.clusterId !== entity.clusterId) {
+        ai.aiState = 'wander';
+        ai.targetId = undefined;
+        return;
+      }
+      const dx = Math.abs(entity.position.x - attackTarget.position.x);
+      const dy = Math.abs(entity.position.y - attackTarget.position.y);
+      if (dx + dy > 1) {
+        ai.aiState = 'chase';
         return;
       }
       // Deal damage
-      if (player.coherence !== undefined) {
-        player.coherence = Math.max(0, player.coherence - 5);
-        addAiMessage(state, `Bit-Mite Swarm attacks! −5 coherence. (${player.coherence}/${player.maxCoherence})`, 'hazard');
+      if (attackTarget.coherence !== undefined) {
+        attackTarget.coherence = Math.max(0, attackTarget.coherence - 5);
+        addAiMessage(state, `Bit-Mite Swarm attacks ${attackTarget.name}! −5 coherence. (${attackTarget.coherence}/${attackTarget.maxCoherence})`, 'hazard');
+        if (attackTarget.coherence <= 0) {
+          addAiMessage(state, `Bit-Mite Swarm destroys ${attackTarget.name}!`, 'hazard');
+          removeEntity(state, attackTarget);
+          ai.aiState = 'wander';
+          ai.targetId = undefined;
+          return;
+        }
       }
       ai.aiState = 'chase';
       break;
@@ -256,20 +277,17 @@ function updateBitMite(state: GameState, entity: Entity, cluster: Cluster) {
 }
 
 // ── Logic Leech (aggressive) ──
-// Speed 30. Hugs walls → spots target → becomes invisible (stalk 3t) → fast straight-line charge → rest 6t
+// Speed 30. Hugs walls → spots non-aggressive target → invisible stalk 3t → cardinal charge → rest 6t
 
 function updateLogicLeech(state: GameState, entity: Entity, cluster: Cluster) {
   const ai = entity.ai!;
-  const player = state.player;
-
-  const playerVisible = player.clusterId === entity.clusterId &&
-    canSee(cluster, entity.position, player.position, ai.sightRadius);
 
   switch (ai.aiState) {
     case 'wall_walk': {
-      if (playerVisible) {
-        ai.targetId = player.id;
-        ai.lastTargetPos = { ...player.position };
+      const target = findNonFactionTarget(state, entity, cluster, 'aggressive');
+      if (target) {
+        ai.targetId = target.id;
+        ai.lastTargetPos = { ...target.position };
         ai.aiState = 'stalk';
         ai.actionCooldown = 3;
         ai.invisible = true;
@@ -281,19 +299,22 @@ function updateLogicLeech(state: GameState, entity: Entity, cluster: Cluster) {
     }
 
     case 'stalk': {
-      // Stand still while counting down
-      if (!playerVisible) {
+      const stalkTarget = getEntityById(state, ai.targetId);
+      if (!stalkTarget || stalkTarget.clusterId !== entity.clusterId) {
+        ai.aiState = 'wall_walk'; ai.invisible = false; ai.actionCooldown = undefined; return;
+      }
+      const visible = canSee(cluster, entity.position, stalkTarget.position, ai.sightRadius, ai.wallPenetration);
+      if (!visible) {
         ai.aiState = 'wall_walk';
         ai.invisible = false;
         ai.actionCooldown = undefined;
         return;
       }
-      ai.lastTargetPos = { ...player.position };
+      ai.lastTargetPos = { ...stalkTarget.position };
       ai.actionCooldown = (ai.actionCooldown ?? 1) - 1;
       if (ai.actionCooldown <= 0) {
-        // Compute charge direction (toward player)
-        const dx = player.position.x - entity.position.x;
-        const dy = player.position.y - entity.position.y;
+        const dx = stalkTarget.position.x - entity.position.x;
+        const dy = stalkTarget.position.y - entity.position.y;
         const len = Math.max(Math.abs(dx), Math.abs(dy));
         if (len === 0) { ai.aiState = 'rest'; ai.actionCooldown = 6; ai.invisible = false; return; }
         ai.chargeDir = {
@@ -302,7 +323,6 @@ function updateLogicLeech(state: GameState, entity: Entity, cluster: Cluster) {
         };
         // Only charge cardinally
         if (Math.abs(ai.chargeDir.x) > 0 && Math.abs(ai.chargeDir.y) > 0) {
-          // Pick dominant axis
           if (Math.abs(dx) >= Math.abs(dy)) ai.chargeDir.y = 0;
           else ai.chargeDir.x = 0;
         }
@@ -325,12 +345,16 @@ function updateLogicLeech(state: GameState, entity: Entity, cluster: Cluster) {
       const ny = entity.position.y + dir.y;
       ai.chargeSteps = (ai.chargeSteps ?? 1) - 1;
 
-      // Check for player hit
-      const pp = player.position;
-      if (nx === pp.x && ny === pp.y && player.clusterId === entity.clusterId) {
-        if (player.coherence !== undefined) {
-          player.coherence = Math.max(0, player.coherence - 15);
-          addAiMessage(state, `Logic Leech charge hits! −15 coherence. (${player.coherence}/${player.maxCoherence})`, 'hazard');
+      // Check for entity hit at charge destination
+      const hitTarget = findEntityAt(state, cluster.id, nx, ny);
+      if (hitTarget && hitTarget.ai?.faction !== 'aggressive') {
+        if (hitTarget.coherence !== undefined) {
+          hitTarget.coherence = Math.max(0, hitTarget.coherence - 15);
+          addAiMessage(state, `Logic Leech charge hits ${hitTarget.name}! −15 coherence. (${hitTarget.coherence}/${hitTarget.maxCoherence})`, 'hazard');
+          if (hitTarget.coherence <= 0) {
+            addAiMessage(state, `Logic Leech destroys ${hitTarget.name}!`, 'hazard');
+            removeEntity(state, hitTarget);
+          }
         }
         ai.aiState = 'rest';
         ai.actionCooldown = 6;
@@ -397,7 +421,7 @@ function updateWhiteHat(state: GameState, entity: Entity, cluster: Cluster) {
         ai.targetId = undefined;
         return;
       }
-      if (!canSee(cluster, entity.position, target.position, ai.sightRadius)) {
+      if (!canSee(cluster, entity.position, target.position, ai.sightRadius, ai.wallPenetration)) {
         // Lost sight — last known pos
         if (!ai.lastTargetPos) { ai.aiState = 'patrol'; return; }
         if (entity.position.x === ai.lastTargetPos.x && entity.position.y === ai.lastTargetPos.y) {
@@ -492,22 +516,49 @@ function pickAdjacentRoomWaypoint(cluster: Cluster, entity: Entity): Position | 
   return undefined;
 }
 
-function findAggressiveTarget(state: GameState, sentry: Entity, cluster: Cluster): Entity | undefined {
-  // At ENEMY level, player is the primary target
-  if (state.alertLevel >= ALERT_ENEMY && state.player.clusterId === sentry.clusterId) {
-    if (canSee(cluster, sentry.position, state.player.position, sentry.ai!.sightRadius)) return state.player;
+/** Find the nearest visible entity NOT of the given faction. */
+function findNonFactionTarget(state: GameState, entity: Entity, cluster: Cluster, excludeFaction: string): Entity | undefined {
+  const ai = entity.ai!;
+  const all = getAllEntitiesInCluster(state, cluster);
+  let best: Entity | undefined;
+  let bestDist = Infinity;
+  for (const t of all) {
+    if (t.id === entity.id) continue;
+    if (t.ai?.faction === excludeFaction) continue;
+    if (!canSee(cluster, entity.position, t.position, ai.sightRadius, ai.wallPenetration)) continue;
+    const dx = t.position.x - entity.position.x;
+    const dy = t.position.y - entity.position.y;
+    const dist = dx * dx + dy * dy;
+    if (dist < bestDist) { bestDist = dist; best = t; }
   }
+  return best;
+}
+
+/** Find the nearest visible aggressive-faction entity (for White-Hat). */
+function findAggressiveTarget(state: GameState, sentry: Entity, cluster: Cluster): Entity | undefined {
+  const ai = sentry.ai!;
   for (const e of state.entities) {
     if (e.id === sentry.id) continue;
     if (e.clusterId !== sentry.clusterId) continue;
     if (e.ai?.faction !== 'aggressive') continue;
-    if (canSee(cluster, sentry.position, e.position, sentry.ai!.sightRadius)) return e;
-  }
-  // At SUSPICIOUS level, player is a secondary target when no aggressive entity is nearby
-  if (state.alertLevel >= ALERT_SUSPICIOUS && state.player.clusterId === sentry.clusterId) {
-    if (canSee(cluster, sentry.position, state.player.position, sentry.ai!.sightRadius)) return state.player;
+    if (canSee(cluster, sentry.position, e.position, ai.sightRadius, ai.wallPenetration)) return e;
   }
   return undefined;
+}
+
+/** Find any entity (including player) at a given position in a cluster. */
+function findEntityAt(state: GameState, clusterId: number, x: number, y: number): Entity | undefined {
+  if (state.player.clusterId === clusterId && state.player.position.x === x && state.player.position.y === y) {
+    return state.player;
+  }
+  return state.entities.find(e => e.clusterId === clusterId && e.position.x === x && e.position.y === y);
+}
+
+/** Remove an entity from the game state. */
+function removeEntity(state: GameState, target: Entity) {
+  if (target.id === state.player.id) return; // never remove player
+  state.entities = state.entities.filter(e => e.id !== target.id);
+  state.markedEntities.delete(target.id);
 }
 
 function getAllEntitiesInCluster(state: GameState, cluster: Cluster): Entity[] {
@@ -558,6 +609,7 @@ export function makeChronicler(pos: Position, clusterId: number): Entity {
       faction: 'neutral',
       aiState: 'wander',
       sightRadius: 6,
+      wallPenetration: 0,
     },
   };
 }
@@ -579,6 +631,7 @@ export function makeBitMite(pos: Position, clusterId: number): Entity {
       faction: 'aggressive',
       aiState: 'wander',
       sightRadius: 8,
+      wallPenetration: 0,
     },
   };
 }
@@ -600,6 +653,7 @@ export function makeLogicLeech(pos: Position, clusterId: number): Entity {
       faction: 'aggressive',
       aiState: 'wall_walk',
       sightRadius: 7,
+      wallPenetration: 1,
       invisible: false,
     },
   };
@@ -622,6 +676,7 @@ export function makeWhiteHat(pos: Position, clusterId: number): Entity {
       faction: 'friendly',
       aiState: 'patrol',
       sightRadius: 10,
+      wallPenetration: 2,
     },
   };
 }

@@ -233,6 +233,7 @@ export interface EntityAI {
   faction: Faction;
   aiState: AIState;
   sightRadius: number;
+  wallPenetration: number;    // 0 = stopped by walls, 1+ = can see through N walls
   targetId?: number;          // id of entity being targeted
   lastTargetPos?: Position;   // last known position
   actionCooldown?: number;    // ticks until next action
@@ -308,6 +309,7 @@ export interface GameState {
   showCollapseOverlay: boolean;
   showFunctionalOverlay: boolean;
   showAlertOverlay: boolean;
+  showEnemyVision: boolean;
   alertFill?: Map<string, number>;
   alertThreats?: { x: number; y: number; desc: string }[];
   openTerminal?: { terminalId: string; clusterId: number };

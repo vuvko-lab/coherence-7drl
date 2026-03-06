@@ -6,6 +6,7 @@ import { PlayerAction, Position, TileType } from './types';
 import { generateSeed } from './rng';
 import { GLITCH_EFFECTS, initGlitch } from './glitch';
 import { hasLOS } from './fov';
+import { canSee } from './ai';
 
 // ── Bootstrap ──
 
@@ -97,6 +98,7 @@ const TOGGLE_LABELS: Record<string, string> = {
   showCollapseOverlay: 'collapse heatmap',
   showFunctionalOverlay: 'functional tags',
   showAlertOverlay: 'alert overlay',
+  showEnemyVision: 'enemy vision',
 };
 
 let adminInitialized = false;
@@ -122,6 +124,7 @@ function initAdminPanel() {
 <button class="admin-btn admin-toggle" data-toggle="showCollapseOverlay">&gt; collapse heatmap: OFF</button>
 <button class="admin-btn admin-toggle" data-toggle="showFunctionalOverlay">&gt; functional tags: OFF</button>
 <button class="admin-btn admin-toggle" data-toggle="showAlertOverlay">&gt; alert overlay: OFF</button>
+<button class="admin-btn admin-toggle" data-toggle="showEnemyVision">&gt; enemy vision: OFF</button>
 </div>
 <button class="admin-section-hdr" data-section="restart">[-] SEED / RESTART</button>
 <div class="admin-section" id="admin-sec-restart">
@@ -165,7 +168,7 @@ ${buttons}
   // Wire up toggle buttons
   adminEl.querySelectorAll('.admin-toggle').forEach(btn => {
     btn.addEventListener('click', () => {
-      const key = (btn as HTMLElement).dataset.toggle as 'mapReveal' | 'godMode' | 'invisibleMode' | 'showRoomLabels' | 'showCollapseOverlay' | 'showFunctionalOverlay' | 'showAlertOverlay';
+      const key = (btn as HTMLElement).dataset.toggle as 'mapReveal' | 'godMode' | 'invisibleMode' | 'showRoomLabels' | 'showCollapseOverlay' | 'showFunctionalOverlay' | 'showAlertOverlay' | 'showEnemyVision';
       (state as any)[key] = !(state as any)[key];
       const label = TOGGLE_LABELS[key] ?? key;
       const val = (state as any)[key];
@@ -318,7 +321,7 @@ ${buttons}
 
 function updateAdminPanel() {
   adminEl.querySelectorAll('.admin-toggle').forEach(btn => {
-    const key = (btn as HTMLElement).dataset.toggle as 'mapReveal' | 'godMode' | 'invisibleMode' | 'showRoomLabels' | 'showCollapseOverlay' | 'showFunctionalOverlay' | 'showAlertOverlay';
+    const key = (btn as HTMLElement).dataset.toggle as 'mapReveal' | 'godMode' | 'invisibleMode' | 'showRoomLabels' | 'showCollapseOverlay' | 'showFunctionalOverlay' | 'showAlertOverlay' | 'showEnemyVision';
     const label = TOGGLE_LABELS[key] ?? key;
     const val = (state as any)[key];
     (btn as HTMLElement).textContent = `> ${label}: ${val ? 'ON' : 'OFF'}`;
@@ -593,12 +596,48 @@ function renderAll() {
     ? { origin: state.player.position, radius: CORRUPT_M_RANGE, target: hoveredPos ?? undefined }
     : undefined;
 
+  // Compute enemy vision overlay for hovered entity
+  let enemyVision: Set<string> | undefined;
+  let enemyVisionColor: string | undefined;
+  if (state.showEnemyVision && hoveredPos) {
+    const hoveredEntity = state.entities.find(e =>
+      e.clusterId === state.currentClusterId &&
+      e.position.x === hoveredPos!.x && e.position.y === hoveredPos!.y && e.ai
+    );
+    if (hoveredEntity && hoveredEntity.ai) {
+      const ai = hoveredEntity.ai;
+      const r = ai.sightRadius;
+      const wp = ai.wallPenetration;
+      enemyVision = new Set<string>();
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (dx * dx + dy * dy > r * r) continue;
+          const tx = hoveredEntity.position.x + dx;
+          const ty = hoveredEntity.position.y + dy;
+          if (tx < 0 || tx >= currentCluster.width || ty < 0 || ty >= currentCluster.height) continue;
+          if (canSee(currentCluster, hoveredEntity.position, { x: tx, y: ty }, r, wp)) {
+            enemyVision.add(`${tx},${ty}`);
+          }
+        }
+      }
+      // Color by faction
+      const VISION_COLORS: Record<string, string> = {
+        aggressive: '#442200',
+        neutral: '#333300',
+        friendly: '#003322',
+      };
+      enemyVisionColor = VISION_COLORS[ai.faction] ?? '#222222';
+    }
+  }
+
   renderer.render(currentCluster, state.entities, state.player.position, state.mapReveal, state.showRoomLabels, alertOverlay, collapseOverlay, state.showFunctionalOverlay, {
     tick: state.tick,
     revealEffects: state.revealEffects,
     hazardFogMarks: state.hazardFogMarks,
     markedEntities: state.markedEntities,
     aimOverlay,
+    enemyVision,
+    enemyVisionColor,
   });
   renderSelfPanel(panelEl, state.player, state.debugMode, state.mapReveal, state.godMode, state.invisibleMode, state.seed);
   const cm = currentCluster.collapseMap;

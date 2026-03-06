@@ -179,6 +179,8 @@ export class Renderer {
       hazardFogMarks?: Map<string, HazardOverlayType>;
       markedEntities?: Set<number>;
       aimOverlay?: { origin: Position; radius: number; target?: Position };
+      enemyVision?: Set<string>; // "x,y" keys of tiles visible to hovered entity
+      enemyVisionColor?: string; // tint color for the vision overlay
     },
   ) {
     if (!this.display) return;
@@ -321,6 +323,25 @@ export class Renderer {
             const i = (c - 0.6) / 0.4;
             bg = `rgb(${Math.round(30 + i * 40)},10,10)`;
           }
+        }
+
+        // Enemy vision overlay
+        if (extras?.enemyVision?.has(tileKey)) {
+          const vc = extras.enemyVisionColor ?? '#442200';
+          // Parse hex and blend
+          const vn = parseInt(vc.replace('#', ''), 16);
+          const vr = (vn >> 16) & 0xff, vg = (vn >> 8) & 0xff, vb = vn & 0xff;
+          // Parse current bg (may be rgb(...) or #hex)
+          let br = 10, bgc = 10, bb = 10;
+          if (bg.startsWith('#')) {
+            const bn = parseInt(bg.replace('#', ''), 16);
+            br = (bn >> 16) & 0xff; bgc = (bn >> 8) & 0xff; bb = bn & 0xff;
+          } else {
+            const m = bg.match(/(\d+)/g);
+            if (m) { br = +m[0]; bgc = +m[1]; bb = +m[2]; }
+          }
+          const a = 0.45;
+          bg = `rgb(${Math.round(br * (1 - a) + vr * a)},${Math.round(bgc * (1 - a) + vg * a)},${Math.round(bb * (1 - a) + vb * a)})`;
         }
 
         this.bgCache[y][x] = bg;

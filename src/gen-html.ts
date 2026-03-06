@@ -142,6 +142,7 @@ function createStateForCluster(seed: number, clusterId: number): GameState {
     showCollapseOverlay: false,
     showFunctionalOverlay: false,
     showAlertOverlay: false,
+    showEnemyVision: false,
     revealEffects: [],
     hazardFogMarks: new Map(),
     alertLevel: 0,
