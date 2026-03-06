@@ -1,6 +1,7 @@
 import {
   GameState, Entity, Cluster, Position, TileType,
 } from './types';
+import { shootingAnimation } from './combat_animations';
 import { findPath } from './pathfinding';
 import { floodFillReveal } from './fov';
 
@@ -91,7 +92,7 @@ function move(entity: Entity, cluster: Cluster, target: Position): boolean {
   return true;
 }
 
-function addAiMessage(state: GameState, text: string, type: 'normal' | 'system' | 'hazard' | 'alert' = 'normal') {
+function addAiMessage(state: GameState, text: string, type: 'normal' | 'system' | 'hazard' | 'alert' | 'combat' = 'normal') {
   state.messages.push({ text, type, tick: state.tick });
 }
 
@@ -260,10 +261,10 @@ function updateBitMite(state: GameState, entity: Entity, cluster: Cluster) {
       }
       // Deal damage
       if (attackTarget.coherence !== undefined) {
-        attackTarget.coherence = Math.max(0, attackTarget.coherence - 5);
-        addAiMessage(state, `Bit-Mite Swarm attacks ${attackTarget.name}! −5 coherence. (${attackTarget.coherence}/${attackTarget.maxCoherence})`, 'hazard');
+        attackTarget.coherence = Math.max(0, attackTarget.coherence - entity.attackValue);
+        addAiMessage(state, `Bit-Mite Swarm attacks ${attackTarget.name}! −${entity.attackValue} coherence. (${attackTarget.coherence}/${attackTarget.maxCoherence})`, 'combat');
         if (attackTarget.coherence <= 0) {
-          addAiMessage(state, `Bit-Mite Swarm destroys ${attackTarget.name}!`, 'hazard');
+          addAiMessage(state, `Bit-Mite Swarm destroys ${attackTarget.name}!`, 'combat');
           removeEntity(state, attackTarget);
           ai.aiState = 'wander';
           ai.targetId = undefined;
@@ -336,7 +337,7 @@ function updateLogicLeech(state: GameState, entity: Entity, cluster: Cluster) {
     case 'charge': {
       if ((ai.chargeSteps ?? 0) <= 0) {
         ai.aiState = 'rest';
-        ai.actionCooldown = 6;
+        ai.actionCooldown = 2;
         ai.chargeDir = undefined;
         return;
       }
@@ -349,22 +350,22 @@ function updateLogicLeech(state: GameState, entity: Entity, cluster: Cluster) {
       const hitTarget = findEntityAt(state, cluster.id, nx, ny);
       if (hitTarget && hitTarget.ai?.faction !== 'aggressive') {
         if (hitTarget.coherence !== undefined) {
-          hitTarget.coherence = Math.max(0, hitTarget.coherence - 15);
-          addAiMessage(state, `Logic Leech charge hits ${hitTarget.name}! −15 coherence. (${hitTarget.coherence}/${hitTarget.maxCoherence})`, 'hazard');
+          hitTarget.coherence = Math.max(0, hitTarget.coherence - entity.attackValue);
+          addAiMessage(state, `Logic Leech charge hits ${hitTarget.name}! −${entity.attackValue} coherence. (${hitTarget.coherence}/${hitTarget.maxCoherence})`, 'combat');
           if (hitTarget.coherence <= 0) {
-            addAiMessage(state, `Logic Leech destroys ${hitTarget.name}!`, 'hazard');
+            addAiMessage(state, `Logic Leech destroys ${hitTarget.name}!`, 'combat');
             removeEntity(state, hitTarget);
           }
         }
         ai.aiState = 'rest';
-        ai.actionCooldown = 6;
+        ai.actionCooldown = 1;
         ai.chargeDir = undefined;
         return;
       }
 
       if (!isWalkableTile(cluster, nx, ny)) {
         ai.aiState = 'rest';
-        ai.actionCooldown = 6;
+        ai.actionCooldown = 2;
         ai.chargeDir = undefined;
         return;
       }
@@ -388,12 +389,13 @@ function updateLogicLeech(state: GameState, entity: Entity, cluster: Cluster) {
 
 function updateWhiteHat(state: GameState, entity: Entity, cluster: Cluster) {
   const ai = entity.ai!;
+  // addAiMessage(state, `Sentry state ${ai.aiState}`);
 
   // Look for aggressive entities in sight
   const threat = findAggressiveTarget(state, entity, cluster);
   if (threat) {
     ai.targetId = threat.id;
-    ai.aiState = 'chase';
+    ai.aiState = 'attack';
   }
 
   switch (ai.aiState) {
@@ -437,7 +439,7 @@ function updateWhiteHat(state: GameState, entity: Entity, cluster: Cluster) {
       // Adjacent attack
       const dx = Math.abs(entity.position.x - target.position.x);
       const dy = Math.abs(entity.position.y - target.position.y);
-      if (dx + dy <= 1) {
+      if (dx * dx + dy * dy <= entity.attackDistance * entity.attackDistance) {
         ai.aiState = 'attack';
         return;
       }
@@ -450,20 +452,23 @@ function updateWhiteHat(state: GameState, entity: Entity, cluster: Cluster) {
 
     case 'attack': {
       const target = getEntityById(state, ai.targetId);
+      // addAiMessage(state, `Sentry targets ${JSON.stringify(target)}`);
       if (!target || target.clusterId !== entity.clusterId) {
         ai.aiState = 'patrol';
         return;
       }
       const dx = Math.abs(entity.position.x - target.position.x);
       const dy = Math.abs(entity.position.y - target.position.y);
-      if (dx + dy > 1) {
+      if (dx * dx + dy * dy > entity.attackDistance * entity.attackDistance) {
         ai.aiState = 'chase';
         return;
       }
       if (target.coherence !== undefined) {
-        target.coherence = Math.max(0, target.coherence - 10);
+        target.coherence = Math.max(0, target.coherence - entity.attackValue);
+        addAiMessage(state, `White-Hat Sentry strikes ${target.name}! −${entity.attackValue}. (${target.coherence} left)`, 'combat');
+        shootingAnimation(state, entity.position, target.position, 'single');
         if (target.coherence <= 0) {
-          addAiMessage(state, `White-Hat Sentry destroys ${target.name}!`, 'system');
+          addAiMessage(state, `White-Hat Sentry destroys ${target.name}!`, 'combat');
           // Remove entity
           state.entities = state.entities.filter(e => e.id !== target.id);
           state.markedEntities.delete(target.id);
@@ -471,7 +476,6 @@ function updateWhiteHat(state: GameState, entity: Entity, cluster: Cluster) {
           ai.targetId = undefined;
           return;
         }
-        addAiMessage(state, `White-Hat Sentry strikes ${target.name}! −10. (${target.coherence} left)`, 'system');
       }
       ai.aiState = 'chase';
       break;
@@ -541,6 +545,7 @@ function findAggressiveTarget(state: GameState, sentry: Entity, cluster: Cluster
     if (e.id === sentry.id) continue;
     if (e.clusterId !== sentry.clusterId) continue;
     if (e.ai?.faction !== 'aggressive') continue;
+    // if (e.id === 0x3A7F && )
     if (canSee(cluster, sentry.position, e.position, ai.sightRadius, ai.wallPenetration)) return e;
   }
   return undefined;
@@ -604,6 +609,8 @@ export function makeChronicler(pos: Position, clusterId: number): Entity {
     energy: 0,
     coherence: 30,
     maxCoherence: 30,
+    attackDistance: 5,
+    attackValue: 0,
     ai: {
       kind: 'chronicler',
       faction: 'neutral',
@@ -626,6 +633,8 @@ export function makeBitMite(pos: Position, clusterId: number): Entity {
     energy: 0,
     coherence: 20,
     maxCoherence: 20,
+    attackDistance: 1,
+    attackValue: 3,
     ai: {
       kind: 'bit_mite',
       faction: 'aggressive',
@@ -648,6 +657,8 @@ export function makeLogicLeech(pos: Position, clusterId: number): Entity {
     energy: 0,
     coherence: 25,
     maxCoherence: 25,
+    attackDistance: 1,
+    attackValue: 30,
     ai: {
       kind: 'logic_leech',
       faction: 'aggressive',
@@ -663,7 +674,7 @@ export function makeWhiteHat(pos: Position, clusterId: number): Entity {
   return {
     id: _nextEntityId++,
     name: 'White-Hat Sentry',
-    glyph: '⊢',
+    glyph: 'S',
     fg: '#44ccaa',
     position: { ...pos },
     clusterId,
@@ -671,12 +682,38 @@ export function makeWhiteHat(pos: Position, clusterId: number): Entity {
     energy: 0,
     coherence: 40,
     maxCoherence: 40,
+    attackDistance: 5,
+    attackValue: 5,
     ai: {
       kind: 'white_hat',
       faction: 'friendly',
       aiState: 'patrol',
       sightRadius: 10,
       wallPenetration: 2,
+    },
+  };
+}
+
+export function makeGateKeeper(pos: Position, clusterId: number): Entity {
+  return {
+    id: _nextEntityId++,
+    name: 'Gate-Keeper',
+    glyph: '⛨',
+    fg: '#88ffaa',
+    position: { ...pos },
+    clusterId,
+    speed: 15,
+    energy: 0,
+    coherence: 150,
+    maxCoherence: 150,
+    attackDistance: 2,
+    attackValue: 20,
+    ai: {
+      kind: 'gate_keeper',
+      faction: 'friendly',
+      aiState: 'lockdown',        // pulls targets onto inself
+      sightRadius: 6,
+      wallPenetration: 0,
     },
   };
 }

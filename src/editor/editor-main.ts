@@ -2,7 +2,7 @@ import { generateCluster, placeEntryPoint } from '../cluster';
 import { computeFOV } from '../fov';
 import { processAction } from '../game';
 import { seed as seedRng } from '../rng';
-import { makeChronicler, makeBitMite, makeLogicLeech, makeWhiteHat } from '../ai';
+import { makeChronicler, makeBitMite, makeLogicLeech, makeWhiteHat, makeGateKeeper } from '../ai';
 import { TileType, COLORS, CLUSTER_WIDTH, CLUSTER_HEIGHT } from '../types';
 import type {
   Cluster, Entity, GameState, Position, Room,
@@ -342,6 +342,7 @@ const entityFactories: Record<EntityKind, (pos: Position, clusterId: number) => 
   bit_mite: makeBitMite,
   logic_leech: makeLogicLeech,
   white_hat: makeWhiteHat,
+  gate_keeper: makeGateKeeper,
 };
 
 function placeEntity(kind: EntityKind, pos: Position) {
@@ -377,6 +378,8 @@ function buildSimState(): GameState {
     energy: 0,
     coherence: 100,
     maxCoherence: 100,
+    attackDistance: 1,
+    attackValue: 3,
     modules: [
       { id: 'alert.m', status: 'loaded' },
       { id: 'overclock.m', status: 'loaded' },

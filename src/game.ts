@@ -12,6 +12,7 @@ import { seed as seedRng, generateSeed, randInt } from './rng';
 import {
   updateEntityAI, makeChronicler, makeBitMite, makeLogicLeech, makeWhiteHat,
 } from './ai';
+import { shootingAnimation } from './combat_animations';
 
 const DOOR_CLOSE_DELAY = 5; // ticks before an unoccupied open door auto-closes
 export const CORRUPT_M_RANGE = 8;
@@ -59,6 +60,8 @@ export function createGame(initialSeed?: number): GameState {
     energy: 0,
     coherence: 100,
     maxCoherence: 100,
+    attackDistance: 1,
+    attackValue: 3,
     modules: [
       { id: 'alert.m', status: 'loaded' },
       { id: 'overclock.m', status: 'loaded' },
@@ -240,12 +243,14 @@ function tryShoot(state: GameState, target: Position): boolean {
     return false;
   }
 
+  shootingAnimation(state, from, target, 'single');
+
   const damage = 10;
   if (targetEntity.coherence !== undefined) {
     targetEntity.coherence = Math.max(0, targetEntity.coherence - damage);
     addMessage(state,
       `Corrupt shot hits ${targetEntity.name} for ${damage}. (${targetEntity.coherence}/${targetEntity.maxCoherence})`,
-      'important');
+      'combat');
   }
   return true;
 }

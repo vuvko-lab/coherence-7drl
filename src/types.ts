@@ -214,7 +214,13 @@ export interface RevealEffect {
 
 // ── Entity AI ──
 
-export type EntityKind = 'chronicler' | 'bit_mite' | 'logic_leech' | 'white_hat';
+export type EntityKind = 
+  | 'chronicler'
+  | 'bit_mite'
+  | 'logic_leech'
+  | 'white_hat'
+  | 'gate_keeper'
+  ;
 export type Faction = 'neutral' | 'aggressive' | 'friendly';
 export type AIState =
   | 'wander'     // random movement
@@ -222,11 +228,13 @@ export type AIState =
   | 'catalog'    // chronicler: observing a target
   | 'broadcast'  // chronicler: emitting reveal
   | 'chase'      // bit_mite: BFS toward target
-  | 'attack'     // bit_mite/white_hat: adjacent strike
+  | 'attack'     // basic target's attack
   | 'wall_walk'  // logic_leech: hug walls
   | 'stalk'      // logic_leech: invisible, locked on
   | 'charge'     // logic_leech: straight-line dash
-  | 'rest';      // logic_leech: cooldown after charge
+  | 'rest'       // logic_leech: cooldown after charge
+  | 'lockdown'   // gatekeeper: stay in place, and pull enemies
+  ;
 
 export interface EntityAI {
   kind: EntityKind;
@@ -282,6 +290,8 @@ export interface Entity {
   clusterId: number;
   speed: number; // lower = faster
   energy: number;
+  attackDistance: number;
+  attackValue: number;
   coherence?: number;
   maxCoherence?: number;
   modules?: PlayerModule[];
@@ -322,7 +332,7 @@ export interface GameState {
 
 export interface GameMessage {
   text: string;
-  type: 'normal' | 'system' | 'important' | 'hazard' | 'alert' | 'debug';
+  type: 'normal' | 'system' | 'important' | 'hazard' | 'alert' | 'debug' | 'combat';
   tick: number;
 }
 
@@ -371,7 +381,7 @@ export const CLUSTER_WIDTH = 50;
 export const CLUSTER_HEIGHT = 30;
 
 // Alert tier thresholds
-export const ALERT_SUSPICIOUS = 100;  // firewall triggers, antivirus pursues player
+export const ALERT_SUSPICIOUS = 100;  // firewall triggers, antivirus can pursue player
 export const ALERT_ENEMY = 200;       // player is primary threat target
 
 export const COLORS = {

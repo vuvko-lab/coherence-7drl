@@ -1,0 +1,44 @@
+{
+  "timestamp": "2026-03-05T18:37:43.704Z",
+  "params": {
+    "seeds": 5,
+    "ticks": 10
+  },
+  "failingSeeds": [
+    {
+      "seed": 1,
+      "url": "#seed=1",
+      "issues": [
+        "key terminal unreachable @100"
+      ]
+    },
+    {
+      "seed": 2,
+      "url": "#seed=2",
+      "issues": [
+        "key terminal unreachable @100"
+      ]
+    },
+    {
+      "seed": 3,
+      "url": "#seed=3",
+      "issues": [
+        "key terminal unreachable @100"
+      ]
+    },
+    {
+      "seed": 4,
+      "url": "#seed=4",
+      "issues": [
+        "key terminal unreachable @100"
+      ]
+    },
+    {
+      "seed": 5,
+      "url": "#seed=5",
+      "issues": [
+        "key terminal unreachable @100"
+      ]
+    }
+  ]
+}
