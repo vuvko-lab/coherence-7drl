@@ -11,7 +11,7 @@
  */
 
 import { writeFileSync } from 'fs';
-import { createGame, processAction } from './game';
+import { createGame, processAction, sampleEntitySpawn, adminTeleportToCluster } from './game';
 import { findPath } from './pathfinding';
 import { Cluster, Position, TileType, HazardOverlayType, RoomType } from './types';
 import type { GameState } from './types';
@@ -31,7 +31,8 @@ const getArg = (flag: string, def: number) => {
 const SEED_COUNT = getArg('--seeds', 50);
 const TOTAL_TICKS = getArg('--ticks', 100);
 const SNAPSHOT_INTERVAL = 10;
-const CLUSTER_ID = 0;
+const CLUSTER_ID = getArg('--cluster', 0); // used for per-seed table
+const ALL_CLUSTER_IDS = [0, 1, 2, 3, 4, 5];
 
 // ── Types ──
 
@@ -399,9 +400,20 @@ function snapshotCluster(
 function simulateCluster(seed: number, ticks: number, clusterId: number): { snapshots: SimSnapshot[]; genTimeMs: number } {
   const t0 = performance.now();
   const state = createGame(seed);
+
+  // For non-zero cluster IDs, teleport directly — simulates that cluster's generation rules
+  // (bypasses cluster 0's tutorial intro so each depth is tested in isolation)
+  if (clusterId > 0) {
+    adminTeleportToCluster(state, clusterId);
+    // Spawn entities for the teleported cluster (adminTeleport skips this)
+    const newCluster = state.clusters.get(clusterId)!;
+    const mockSpawns = sampleEntitySpawn(clusterId, seed);
+    for (const e of mockSpawns) state.entities.push(e);
+    state.player.clusterId = clusterId;
+    newCluster; // used above
+  }
   const genTimeMs = performance.now() - t0;
 
-  // Move to the target cluster if needed (currently only cluster 0 is pre-generated)
   if (!state.clusters.has(clusterId)) {
     return { snapshots: [], genTimeMs };
   }
@@ -477,22 +489,86 @@ function critical(msg: string) { console.log(`${BOLD}${RED}[CRITICAL] ${msg}${RE
 
 async function main() {
   console.log(`\n${BOLD}=== Coherence Balancing Test Suite ===${RESET}`);
-  console.log(`Seeds: 1–${SEED_COUNT} | Ticks: ${TOTAL_TICKS} | Cluster: ${CLUSTER_ID}\n`);
+  console.log(`Seeds: 1–${SEED_COUNT} | Ticks: ${TOTAL_TICKS} | Detail cluster: ${CLUSTER_ID}\n`);
 
   const seeds = Array.from({ length: SEED_COUNT }, (_, i) => i + 1);
-  const results: SeedResult[] = [];
 
-  // ── Run simulations ──
-  process.stdout.write('Simulating');
-  for (const seed of seeds) {
-    const { snapshots, genTimeMs } = simulateCluster(seed, TOTAL_TICKS, CLUSTER_ID);
-    const deterministic = checkDeterminism(seed);
-    results.push({ seed, snapshots, genTimeMs, deterministic });
-    if (seed % 10 === 0) process.stdout.write('.');
+  // ── Per-cluster aggregate table ──
+  console.log(`${BOLD}=== Per-Cluster Aggregate (avg across ${SEED_COUNT} seeds) ===${RESET}`);
+  const pcColW = 8;
+  const pcHeader = [
+    'cluster'.padEnd(10),
+    'exit%'.padEnd(pcColW),
+    'key%'.padEnd(pcColW),
+    'pathLen'.padEnd(pcColW),
+    'dmg@50'.padEnd(pcColW),
+    'iso@0'.padEnd(pcColW),
+    'ent@0'.padEnd(pcColW),
+    'ent@100'.padEnd(pcColW),
+    'genMs'.padEnd(pcColW),
+  ].join(' ');
+  console.log(pcHeader);
+  console.log('-'.repeat(pcHeader.length));
+
+  const getSnap = (r: SeedResult, tick: number) => {
+    const exact = r.snapshots.find(s => s.tick === tick);
+    if (exact) return exact;
+    const target = Math.round(tick / SNAPSHOT_INTERVAL) * SNAPSHOT_INTERVAL;
+    return r.snapshots.find(s => s.tick === target) ?? r.snapshots[r.snapshots.length - 1];
+  };
+
+  const allClusterResults: Map<number, SeedResult[]> = new Map();
+
+  for (const cid of ALL_CLUSTER_IDS) {
+    const cidResults: SeedResult[] = [];
+    const origLog2 = console.log;
+    console.log = () => {};  // suppress cluster-gen logs during simulation runs
+    for (const seed of seeds) {
+      const { snapshots, genTimeMs } = simulateCluster(seed, TOTAL_TICKS, cid);
+      const deterministic = checkDeterminism(seed);
+      cidResults.push({ seed, snapshots, genTimeMs, deterministic });
+    }
+    console.log = origLog2;
+    allClusterResults.set(cid, cidResults);
+
+    const valid = cidResults.filter(r => r.snapshots.length > 0);
+    const N = valid.length;
+    if (N === 0) { console.log(`  cluster ${cid}: no data`); continue; }
+
+    const exitPct = valid.filter(r => getSnap(r, 100)?.exitReachable).length / N * 100;
+    const keyPct  = valid.filter(r => getSnap(r, 100)?.keyTerminalReachable).length / N * 100;
+    const avgPath = mean(valid.map(r => {
+      const pl = getSnap(r, 0)?.entryExitPathLength ?? Infinity;
+      return pl === Infinity ? 0 : pl;
+    }));
+    const avgDmg50 = mean(valid.map(r => getSnap(r, 50)?.projectedPathDamage ?? 0));
+    const isoCount = valid.filter(r => (getSnap(r, 0)?.isolatedRooms.length ?? 0) > 0).length;
+    const avgEnt0   = mean(valid.map(r => getSnap(r, 0)?.totalEntities ?? 0));
+    const avgEnt100 = mean(valid.map(r => getSnap(r, 100)?.totalEntities ?? 0));
+    const avgGen    = mean(valid.map(r => r.genTimeMs));
+
+    const exitColor = exitPct >= 95 ? GREEN : RED;
+    const isoColor  = isoCount === 0 ? GREEN : RED;
+    const entColor  = avgEnt0 > 20 ? YELLOW : avgEnt0 > 35 ? RED : GREEN;
+    const row = [
+      `cluster ${cid}`.padEnd(10),
+      `${exitColor}${exitPct.toFixed(0)}%${RESET}`.padEnd(pcColW + exitColor.length + RESET.length),
+      `${keyPct.toFixed(0)}%`.padEnd(pcColW),
+      avgPath.toFixed(0).padEnd(pcColW),
+      avgDmg50.toFixed(1).padEnd(pcColW),
+      `${isoColor}${isoCount}${RESET}`.padEnd(pcColW + isoColor.length + RESET.length),
+      `${entColor}${avgEnt0.toFixed(1)}${RESET}`.padEnd(pcColW + entColor.length + RESET.length),
+      avgEnt100.toFixed(1).padEnd(pcColW),
+      avgGen.toFixed(1).padEnd(pcColW),
+    ].join(' ');
+    console.log(row);
+    process.stdout.write('');
   }
-  console.log(' done\n');
+  console.log();
 
-  // ── Per-seed table ──
+  // ── Per-seed table for CLUSTER_ID ──
+  const results = allClusterResults.get(CLUSTER_ID) ?? [];
+  console.log(`\n${BOLD}=== Per-Seed Detail: Cluster ${CLUSTER_ID} ===${RESET}`);
   const snapshotAt = (result: SeedResult, tick: number) =>
     result.snapshots.find(s => s.tick === tick) ?? result.snapshots[result.snapshots.length - 1];
 
@@ -548,19 +624,11 @@ async function main() {
     }
   }
 
-  // ── Aggregate metrics ──
-  console.log(`\n${BOLD}=== Aggregate Metrics ===${RESET}\n`);
+  // ── Aggregate metrics for CLUSTER_ID ──
+  console.log(`\n${BOLD}=== Aggregate Metrics: Cluster ${CLUSTER_ID} ===${RESET}\n`);
 
   const validResults = results.filter(r => r.snapshots.length > 0);
   const N = validResults.length;
-
-  const getSnap = (r: SeedResult, tick: number) => {
-    const exact = r.snapshots.find(s => s.tick === tick);
-    if (exact) return exact;
-    // Closest tick (snapshots are at 0, 10, 20, ..., TOTAL_TICKS)
-    const target = Math.round(tick / SNAPSHOT_INTERVAL) * SNAPSHOT_INTERVAL;
-    return r.snapshots.find(s => s.tick === target) ?? r.snapshots[r.snapshots.length - 1];
-  };
 
   // Exit reachability @100
   const exitAt100 = validResults.filter(r => getSnap(r, 100)?.exitReachable).length;
@@ -601,8 +669,9 @@ async function main() {
   const allPathsDE2at100 = validResults.filter(r => (getSnap(r, 100)?.minDERoomsOnAnyPath ?? 0) >= 2).length;
   const hvIsolated100 = validResults.filter(r => (getSnap(r, 100)?.isolatedHighValueRooms.length ?? 0) > 0).length;
 
-  // Entity counts
-  const allDeadBy40 = validResults.filter(r => {
+  // Entity counts — only count seeds that actually started with entities
+  const resultsWithEntities = validResults.filter(r => (getSnap(r, 0)?.totalEntities ?? 0) > 0);
+  const allDeadBy40 = resultsWithEntities.filter(r => {
     const s = getSnap(r, 40);
     return (s?.totalEntities ?? 1) === 0;
   }).length;
@@ -649,7 +718,8 @@ async function main() {
   printMetric('All paths need ≥2 D-E rooms @100', `${allPathsDE2at100}/${N} seeds`, allPathsDE2at100 === 0, 'high');
 
   console.log('\nEntities:');
-  printMetric('All entities dead before tick 40', `${allDeadBy40}/${N} seeds`, allDeadBy40 / N <= 0.10, 'medium');
+  const NE = resultsWithEntities.length;
+  printMetric('All entities dead before tick 40', `${allDeadBy40}/${NE} seeds with initial entities`, NE === 0 || allDeadBy40 / NE <= 0.10, 'medium');
 
   console.log('\nSeed variance:');
   printMetric('CV path damage @50', cvDamage.toFixed(3), cvDamage <= 0.4, 'medium');
@@ -718,6 +788,60 @@ async function main() {
     writeFileSync('sim-results.json', out, 'utf8');
     console.log(`\nFailing seeds written to sim-results.json (${failingSeeds.length} seeds).`);
   }
+
+  // ── Entity Spawn Analysis ──
+  console.log(`\n${BOLD}=== Entity Spawn Analysis (t=0, ${SEED_COUNT} seeds each cluster) ===${RESET}`);
+
+  const SPAWN_CLUSTER_IDS = [0, 1, 2, 3, 4, 5];
+  const ENTITY_KINDS = ['bit_mite', 'logic_leech', 'chronicler', 'white_hat', 'gate_keeper', 'prop'];
+
+  // Header row
+  const colW = 8;
+  const spawnHeader = [
+    'cluster'.padEnd(9),
+    'total'.padEnd(colW),
+    ...ENTITY_KINDS.map(k => k.slice(0, colW - 1).padEnd(colW)),
+    'max'.padEnd(colW),
+    'min'.padEnd(colW),
+  ].join(' ');
+  console.log('  ' + spawnHeader);
+  console.log('  ' + '-'.repeat(spawnHeader.length));
+
+  for (const cid of SPAWN_CLUSTER_IDS) {
+    const counts: number[] = [];
+    const kindTotals: Record<string, number> = {};
+    for (const k of ENTITY_KINDS) kindTotals[k] = 0;
+
+    const origLog = console.log;
+    console.log = () => {};  // suppress cluster-gen logs during batch spawn sampling
+    for (const seed of seeds) {
+      const entities = sampleEntitySpawn(cid, seed);
+      counts.push(entities.length);
+      for (const e of entities) {
+        const kind = e.ai?.kind ?? 'prop';
+        if (kind in kindTotals) kindTotals[kind] += 1;
+      }
+    }
+    console.log = origLog;
+
+    const avg = mean(counts);
+    const maxC = Math.max(...counts);
+    const minC = Math.min(...counts);
+    const N2 = counts.length;
+
+    const avgTotal = avg.toFixed(1);
+    const row = [
+      `cluster ${cid}`.padEnd(9),
+      avgTotal.padEnd(colW),
+      ...ENTITY_KINDS.map(k => (kindTotals[k] / N2).toFixed(1).padEnd(colW)),
+      String(maxC).padEnd(colW),
+      String(minC).padEnd(colW),
+    ].join(' ');
+
+    const hilight = avg > 20 ? YELLOW : avg > 35 ? RED : GREEN;
+    console.log(`  ${hilight}${row}${RESET}`);
+  }
+  console.log('  (values = avg count spawned per cluster; 0 expected for clusters 0 and 1)\n');
 
   // ── Critical failure summary ──
   if (criticalFailures.length > 0) {

@@ -588,6 +588,11 @@ const GLITCH_COLORS = ['#cc4422', '#aa2244', '#cc6600', '#886622', '#aa4400'];
 let _nextSpawnId = 10000; // avoid collisions with game.ts entity IDs
 
 function spawnEntityInRoom(state: GameState, cluster: Cluster, room: Room, kind: 'white_hat' | 'bit_mite' | 'gate_keeper') {
+  // Soft cap: don't flood the cluster beyond a depth-scaled limit
+  const entityCap = 15 + cluster.id * 5; // cluster 2→25, cluster 5→40
+  const currentCount = state.entities.filter(e => e.clusterId === cluster.id).length;
+  if (currentCount >= entityCap) return;
+
   const { x1, y1, x2, y2 } = roomInterior(room);
   const candidates: { x: number; y: number }[] = [];
   for (let y = y1; y <= y2; y++) {
@@ -652,14 +657,15 @@ function updateCollapseEffects(state: GameState, cluster: Cluster) {
     }
 
     // collapse > 0.4: periodic enemy spawning; Gate-Keeper appears in very high-collapse rooms
-    if (room.collapse > 0.4 && tick > 0) {
-      // Bit-Mite: every 30 ticks; more frequent in higher collapse
-      const miteInterval = room.collapse > 0.7 ? 20 : 30;
+    // Skip entity spawning in starter clusters (0 and 1 are enemy-free)
+    if (room.collapse > 0.4 && tick > 0 && cluster.id >= 2) {
+      // Bit-Mite: every 60-80 ticks (down from 20-30 — spawning was too aggressive)
+      const miteInterval = room.collapse > 0.7 ? 60 : 80;
       if (tick % miteInterval === (room.id % miteInterval)) spawnEntityInRoom(state, cluster, room, 'bit_mite');
-      // White-Hat sentry: every 50 ticks
-      if (tick % 50 === (room.id % 50)) spawnEntityInRoom(state, cluster, room, 'white_hat');
-      // Gate-Keeper: every 80 ticks in high-collapse rooms; at most one per room
-      if (room.collapse > 0.6 && tick % 80 === (room.id % 80)) {
+      // White-Hat sentry: every 100 ticks
+      if (tick % 100 === (room.id % 100)) spawnEntityInRoom(state, cluster, room, 'white_hat');
+      // Gate-Keeper: every 120 ticks in very high-collapse rooms; at most one per room
+      if (room.collapse > 0.7 && tick % 120 === (room.id % 120)) {
         const alreadyHasKeeper = state.entities.some(
           e => e.clusterId === cluster.id && e.ai?.kind === 'gate_keeper' &&
           e.position.x >= room.x && e.position.x < room.x + room.w &&

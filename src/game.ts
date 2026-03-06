@@ -10,7 +10,7 @@ import { findPath } from './pathfinding';
 import { updateHazards, onPlayerEnterRoom, getPlayerRoom, applyTileHazardToPlayer, updateAlertModule } from './hazards';
 import { seed as seedRng, generateSeed, randInt } from './rng';
 import {
-  updateEntityAI, makeChronicler, makeBitMite, makeLogicLeech, makeWhiteHat, makePropEntity,
+  updateEntityAI, makeChronicler, makeBitMite, makeLogicLeech, makeWhiteHat, makePropEntity, makeGateKeeper,
 } from './ai';
 export { makeDamagedBitMite } from './ai';
 import { shootingAnimation } from './combat_animations';
@@ -129,7 +129,7 @@ export function createGame(initialSeed?: number): GameState {
   };
 
   addMessage(state, 'System boot... ego-fragment loaded from backup.', 'system');
-  addMessage(state, 'Navigate to the interface exit [] to transfer between clusters.', 'system');
+  addMessage(state, 'Navigate to the interface exit [⇨] to transfer between clusters.', 'system');
   addMessage(state, 'Use WASD/arrows to move. Click to pathfind. Enter to transfer.', 'system');
 
   computeFOV(cluster, player.position);
@@ -152,14 +152,31 @@ export function addMessage(state: GameState, text: string, type: GameMessage['ty
  */
 function spawnClusterEntities(state: GameState, cluster: Cluster) {
   const id = cluster.id;
-  const rooms = cluster.rooms.filter(r => !r.tags.geometric.has('hall'));
-  if (rooms.length === 0) return;
+
+  // Clusters 0 and 1 are enemy-free (tutorial / early intro zone)
+  if (id <= 1) {
+    // Still spawn scenario prop entities
+    for (const room of cluster.rooms) {
+      const props = room.scenarioState?.pendingProps;
+      if (!props || props.length === 0) continue;
+      for (const p of props) {
+        const e = makePropEntity(p.position, id, p.glyph, p.fg, p.name, p.propTag);
+        const ppKey = `${state.player.position.x},${state.player.position.y}`;
+        if (`${e.position.x},${e.position.y}` !== ppKey) state.entities.push(e);
+      }
+      room.scenarioState!.pendingProps = [];
+    }
+    return;
+  }
+
+  const allRooms = cluster.rooms.filter(r => !r.tags.geometric.has('hall'));
+  if (allRooms.length === 0) return;
 
   const depth = id + 1; // 1-indexed depth for scaling
 
   const spawned: Entity[] = [];
 
-  function pickWalkableTile(room: typeof rooms[number]): Position | null {
+  function pickWalkableTile(room: typeof allRooms[number]): Position | null {
     for (let attempt = 0; attempt < 30; attempt++) {
       const x = room.x + 1 + Math.floor(Math.random() * (room.w - 2));
       const y = room.y + 1 + Math.floor(Math.random() * (room.h - 2));
@@ -168,15 +185,9 @@ function spawnClusterEntities(state: GameState, cluster: Cluster) {
     return null;
   }
 
-  function pickRoom(exclude?: Set<number>): typeof rooms[number] | undefined {
-    const pool = exclude ? rooms.filter(r => !exclude.has(r.id)) : rooms;
-    return pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : undefined;
-  }
-
   // Mite guard: cluster 2+ always spawns a Bit-Mite near each interface exit tile
   if (id >= 2) {
     for (const iface of cluster.interfaces) {
-      // Find walkable tiles adjacent to the exit interface
       const { x: ix, y: iy } = iface.position;
       const adj: Position[] = [];
       for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]] as const) {
@@ -188,50 +199,61 @@ function spawnClusterEntities(state: GameState, cluster: Cluster) {
     }
   }
 
-  // Per-room probabilistic spawning — scale probabilities by depth and collapse
-  for (const room of rooms) {
-    const collapse = room.collapse; // [0, 1]
-    const collapseBonus = collapse * 2; // high collapse → more enemies
+  // ── Shuffle-and-cooldown spawn loop ──
+  // Shuffles all eligible rooms, iterates in random order.
+  // Each room gets one spawn roll; after a successful spawn, the next 5 rooms are skipped.
+  // Spawn chance scales with room collapse + cluster depth.
+  // Entity kind is weighted by room geometry; functional tag modifies entity stats.
 
-    // Bit-Mite: base prob scales with depth; high-collapse rooms more likely
-    const bitMiteProb = Math.min(0.9, 0.2 * depth + collapseBonus * 0.4);
-    if (Math.random() < bitMiteProb) {
-      const pos = pickWalkableTile(room);
-      if (pos) spawned.push(makeBitMite(pos, id));
-    }
-    // Extra mite in very high-collapse rooms
-    if (collapse > 0.6 && Math.random() < 0.5) {
-      const pos = pickWalkableTile(room);
-      if (pos) spawned.push(makeBitMite(pos, id));
-    }
+  const shuffled = [...allRooms].sort(() => Math.random() - 0.5);
+  const baseChance = 0.08 + depth * 0.04; // 0.16 at depth 2, 0.28 at depth 4, 0.32 at depth 5
+  let cooldown = 0;
 
-    // Logic Leech: prefer peripheral/dead-end; lower base probability
+  for (const room of shuffled) {
+    if (cooldown > 0) { cooldown--; continue; }
+
+    const spawnChance = Math.min(0.75, baseChance + room.collapse * 0.35);
+    if (Math.random() >= spawnChance) continue;
+
+    const pos = pickWalkableTile(room);
+    if (!pos) continue;
+
+    // Pick entity kind: weighted by geometry and room type
     const isPeripheral = room.tags.geometric.has('peripheral') || room.tags.geometric.has('dead_end');
-    const leechProb = Math.min(0.7, (isPeripheral ? 0.25 : 0.1) * depth + collapseBonus * 0.2);
-    if (Math.random() < leechProb) {
-      const pos = pickWalkableTile(room);
-      if (pos) spawned.push(makeLogicLeech(pos, id));
+    const inSafeRoom = room.roomType === 'normal';
+
+    // Weights: [bit_mite, logic_leech, chronicler, white_hat, gate_keeper]
+    // GateKeeper: only appears at depth 4+ (cluster 3+), prefers high-collapse rooms
+    const gkWeight = Math.max(0, (depth - 3) * 0.8) * (room.collapse > 0.5 ? 2 : 1);
+    const w = [
+      4 + depth,                              // bit_mite: always common, scales with depth
+      isPeripheral ? 2 + depth * 0.5 : 1,    // logic_leech: prefers edges
+      1.5,                                    // chronicler: constant neutral presence
+      inSafeRoom ? 1 : 0,                     // white_hat: only in normal rooms
+      gkWeight,                               // gate_keeper: rare, depth-4+ only
+    ];
+    const total = w[0] + w[1] + w[2] + w[3] + w[4];
+    const roll = Math.random() * total;
+
+    let entity: Entity;
+    if (roll < w[0]) {
+      entity = makeBitMite(pos, id);
+    } else if (roll < w[0] + w[1]) {
+      entity = makeLogicLeech(pos, id);
+    } else if (roll < w[0] + w[1] + w[2]) {
+      entity = makeChronicler(pos, id);
+    } else if (roll < w[0] + w[1] + w[2] + w[3]) {
+      entity = makeWhiteHat(pos, id);
+    } else {
+      entity = makeGateKeeper(pos, id);
     }
 
-    // Chronicler: neutral, lower probability
-    const chroniclerProb = Math.min(0.5, 0.12 * depth);
-    if (Math.random() < chroniclerProb) {
-      const pos = pickWalkableTile(room);
-      if (pos) spawned.push(makeChronicler(pos, id));
-    }
+    // Apply functional tag modifiers to entity stats
+    applyFunctionalTagModifiers(entity, room.tags.functional);
 
-    // White-Hat: only in safe rooms; probability independent of collapse
-    if (room.roomType === 'normal') {
-      const whiteHatProb = Math.min(0.4, 0.08 * depth);
-      if (Math.random() < whiteHatProb) {
-        const pos = pickWalkableTile(room);
-        if (pos) spawned.push(makeWhiteHat(pos, id));
-      }
-    }
+    spawned.push(entity);
+    cooldown = 5; // skip next 5 rooms before rolling again
   }
-
-  // Prevent unused variable warning — pickRoom still used below for prop spawning guard
-  void pickRoom;
 
   // Spawn scenario prop entities from rooms that have pendingProps
   for (const room of cluster.rooms) {
@@ -250,6 +272,55 @@ function spawnClusterEntities(state: GameState, cluster: Cluster) {
       state.entities.push(e);
     }
   }
+}
+
+/**
+ * Apply functional room tag modifiers to an entity's base stats.
+ * Tag influences HP, damage, speed, and starting state — not entity kind.
+ */
+function applyFunctionalTagModifiers(entity: Entity, tag: import('./types').FunctionalTag | null) {
+  if (!tag || entity.coherence == null) return;
+  const scale = (entity: Entity, hpMult: number, dmgMult: number, alreadyDamaged = false) => {
+    entity.coherence    = Math.max(1, Math.ceil(entity.coherence!    * hpMult));
+    entity.maxCoherence = Math.max(1, Math.ceil((entity.maxCoherence ?? entity.coherence!) * hpMult));
+    entity.attackValue  = Math.max(0, Math.ceil(entity.attackValue   * dmgMult));
+    if (alreadyDamaged) {
+      // Start at 40-70% HP to simulate a battle-worn entity
+      const frac = 0.4 + Math.random() * 0.3;
+      entity.coherence = Math.max(1, Math.ceil(entity.maxCoherence! * frac));
+    }
+  };
+  switch (tag) {
+    case 'reactor':       scale(entity, 0.7, 1.6); break;        // fragile but hits hard
+    case 'armory':        scale(entity, 1.0, 1.5); break;        // fully armed
+    case 'barracks':      scale(entity, 1.2, 1.3); break;        // combat-ready, tougher
+    case 'bridge':        scale(entity, 1.3, 1.3); break;        // elite unit
+    case 'engine_room':   scale(entity, 1.4, 1.0); break;        // reinforced systems
+    case 'lab':           scale(entity, 1.5, 0.8); break;        // experimental: high HP, low damage
+    case 'server_rack':   scale(entity, 1.2, 0.9); break;        // process-heavy, slightly tougher
+    case 'sensor_matrix': scale(entity, 0.8, 1.0, true); break;  // already damaged
+    case 'medbay':        scale(entity, 1.0, 0.7, true); break;  // wounded but in care
+    case 'archive':       scale(entity, 0.9, 0.8, true); break;  // degraded, low-threat
+    case 'cargo':         scale(entity, 0.7, 0.9); break;        // fragile
+    case 'hangar':        scale(entity, 0.75, 1.0); break;       // exposed, fragile
+    case 'comms':         scale(entity, 1.0, 0.6); break;        // comm-focused, low damage
+    case 'maintenance':   break;                                   // no modifier
+  }
+}
+
+/**
+ * Simulation helper: generate a cluster at a given depth, spawn entities, and return them.
+ * Used by sim-test.ts to measure expected entity counts per cluster depth.
+ */
+export function sampleEntitySpawn(clusterId: number, rngSeed: number): Entity[] {
+  seedRng(rngSeed);
+  const cluster = generateCluster(clusterId);
+  const mockState = {
+    entities: [] as Entity[],
+    player: { id: -1, clusterId: -1, position: { x: -999, y: -999 } },
+  } as unknown as GameState;
+  spawnClusterEntities(mockState, cluster);
+  return mockState.entities;
 }
 
 function getCurrentCluster(state: GameState): Cluster {
