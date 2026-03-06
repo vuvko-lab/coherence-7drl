@@ -1,5 +1,5 @@
 import * as ROT from 'rot-js';
-import { Cluster, Entity, Position, COLORS, Room, TileType, HazardOverlayType, RevealEffect, ShootingEffect, SmokeEffect } from './types';
+import { Cluster, Entity, Position, COLORS, Room, TileType, HazardOverlayType, RevealEffect, ShootingEffect, SmokeEffect, ROOT_PRIVILEGES } from './types';
 import type { FunctionalTag } from './types';
 
 const HAZARD_FOG_COLORS: Partial<Record<HazardOverlayType, string>> = {
@@ -548,7 +548,7 @@ export class Renderer {
 
 // ── SELF panel renderer ──
 
-export function renderSelfPanel(el: HTMLElement, player: Entity, debugMode = false, mapReveal = false, godMode = false, invisibleMode = false, gameSeed = 0, moduleMenuOpen = false, selectedModuleIdx = -1) {
+export function renderSelfPanel(el: HTMLElement, player: Entity, debugMode = false, mapReveal = false, godMode = false, invisibleMode = false, gameSeed = 0, moduleMenuOpen = false, selectedModuleIdx = -1, rootPrivileges: string[] = []) {
   const hexId = '0x' + player.id.toString(16).toUpperCase().padStart(4, '0');
   const coherence = player.coherence ?? 100;
   const maxCoherence = player.maxCoherence ?? 100;
@@ -585,10 +585,18 @@ export function renderSelfPanel(el: HTMLElement, player: Entity, debugMode = fal
 <div class="stat-row"><span class="stat-label">Coherence:</span><span class="stat-value">${coherencePct}%</span></div>
 <div class="coherence-bar ${barClass}"><span class="bar-fill">${barFill}</span><span class="bar-empty">${barEmpty}</span></div>
 <div class="stat-row"><span class="stat-label">Position:</span><span class="stat-value">(${player.position.x}, ${player.position.y})</span></div>
-<div class="panel-sep"><span class="fill"></span><span class="label">modules</span><span class="fill"></span></div>
+<div class="panel-sep"><span class="fill"></span><span class="label">meshware</span><span class="fill"></span></div>
 ${moduleRows}
 <div class="panel-sep"><span class="fill"></span><span class="label">perms</span><span class="fill"></span></div>
 <div class="stat-row"><span class="stat-label">engineer / r+w+x</span></div>
+${rootPrivileges.length > 0 ? `<div class="panel-sep"><span class="fill"></span><span class="label">root</span><span class="fill"></span></div>
+${ROOT_PRIVILEGES.map(p => {
+  const granted = rootPrivileges.includes(p);
+  return `<div class="stat-row root-priv-row${granted ? ' root-granted' : ' root-locked'}">` +
+    `<span class="root-priv-name">${p}</span>` +
+    `<span class="root-priv-status">[${granted ? 'granted' : 'locked'}]</span>` +
+    `</div>`;
+}).join('\n')}` : ''}
 ${debugMode ? `<div class="panel-sep"><span class="fill"></span></div>
 <div class="stat-row"><span class="stat-value debug-indicator">[DEBUG MODE]</span></div>
 <div class="stat-row"><span class="stat-label">Seed:</span><span class="stat-value debug-indicator">${gameSeed}</span></div>

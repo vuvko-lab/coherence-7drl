@@ -172,6 +172,22 @@ body {
   flex-shrink: 0;
 }
 
+#panel-self .root-priv-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1ch;
+}
+
+#panel-self .root-priv-row.root-granted .root-priv-name,
+#panel-self .root-priv-row.root-granted .root-priv-status {
+  color: #44cc88;
+}
+
+#panel-self .root-priv-row.root-locked .root-priv-name,
+#panel-self .root-priv-row.root-locked .root-priv-status {
+  color: #445544;
+}
+
 #panel-self .coherence-bar {
   display: flex;
   gap: 1ch;

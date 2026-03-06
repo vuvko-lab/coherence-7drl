@@ -2,7 +2,7 @@ import {
   GameState, Entity, Cluster, Position, PlayerAction, Tile,
   TileType, DIR_DELTA, GameMessage, Direction,
   Interactable, DialogChoice,
-  ALERT_SUSPICIOUS, ALERT_ENEMY,
+  ALERT_SUSPICIOUS, ALERT_ENEMY, ROOT_PRIVILEGES,
 } from './types';
 import { generateCluster, placeEntryPoint } from './cluster';
 import { computeFOV, floodFillReveal, hasLOS } from './fov';
@@ -76,7 +76,7 @@ export function createGame(initialSeed?: number): GameState {
 
   const player: Entity = {
     id: 0x3A7F,
-    name: 'ego-fragment',
+    name: 'mesh id',
     glyph: '@',
     fg: '#00ff88',
     position: { ...entryPos },
@@ -120,7 +120,7 @@ export function createGame(initialSeed?: number): GameState {
     hazardFogMarks: new Map(),
     alertLevel: 0,
     markedEntities: new Set(),
-    rootPartsCollected: 0,
+    rootPrivileges: [],
     killedEntities: [],
     finalClusterId: 5,
     collapseGlitchTiles: new Map(),
@@ -759,13 +759,14 @@ export function grantExitAccess(state: GameState, terminalId: string, clusterId:
       state.openTerminal = undefined;
       return;
     }
-    const needed = state.finalClusterId; // need (finalClusterId - 1) root parts for final exit, but track vs cluster id
-    if (state.rootPartsCollected >= needed) {
+    const needed = ROOT_PRIVILEGES.length;
+    if (state.rootPrivileges.length >= needed) {
       terminal.activated = true;
       cluster.exitLocked = false;
-      addMessage(state, `Root parts verified [${state.rootPartsCollected}/${needed}]. Egress unlocked.`, 'important');
+      addMessage(state, `Privilege chain verified [${state.rootPrivileges.join(' · ')}]. Egress unlocked.`, 'important');
     } else {
-      addMessage(state, `ROOT PARTS REQUIRED: ${state.rootPartsCollected}/${needed}. Use HACK to force access.`, 'hazard');
+      const missing = ROOT_PRIVILEGES.filter(p => !state.rootPrivileges.includes(p));
+      addMessage(state, `PRIVILEGE CHAIN INCOMPLETE. Missing: ${missing.join(', ')}. Use HACK to override.`, 'hazard');
     }
     state.openTerminal = undefined;
     return;
@@ -782,7 +783,7 @@ export function grantExitAccess(state: GameState, terminalId: string, clusterId:
   state.openTerminal = undefined;
 }
 
-/** Hack the final terminal: costs coherence, spawns an enemy, locks terminal temporarily. */
+/** Hack the final terminal once per missing privilege. Each hack spawns more mites and costs coherence. */
 export function hackFinalTerminal(state: GameState, terminalId: string, clusterId: number) {
   const cluster = state.clusters.get(clusterId);
   if (!cluster) return;
@@ -793,35 +794,62 @@ export function hackFinalTerminal(state: GameState, terminalId: string, clusterI
     return;
   }
 
-  // Drain 5 coherence
-  if (state.player.coherence != null && !state.godMode) {
-    state.player.coherence = Math.max(0, state.player.coherence - 5);
-    addMessage(state, `Hack initiated — coherence drain: −5 (${state.player.coherence}/${state.player.maxCoherence}).`, 'hazard');
+  const missing = ROOT_PRIVILEGES.filter(p => !state.rootPrivileges.includes(p));
+  const hacksDone = terminal.hackCount ?? 0;
+
+  if (hacksDone >= missing.length) {
+    // All missing privs already hacked — unlock
+    terminal.activated = true;
+    cluster.exitLocked = false;
+    addMessage(state, 'Override chain complete. Egress unlocked.', 'important');
+    state.openTerminal = undefined;
+    return;
   }
 
-  // Spawn an enemy near the terminal
+  // Each successive hack costs more coherence and spawns more mites
+  const hackNum = hacksDone + 1;
+  const cohCost = 5 * hackNum;
+  if (state.player.coherence != null && !state.godMode) {
+    state.player.coherence = Math.max(0, state.player.coherence - cohCost);
+    addMessage(state, `Override ${hackNum}/${missing.length}: ${missing[hacksDone]} bypassed. Coherence drain: −${cohCost}.`, 'hazard');
+  }
+
+  // Spawn hackNum mites near the terminal
   const { x, y } = terminal.position;
-  const dirs = [{ x: 0, y: -1 }, { x: 0, y: 1 }, { x: -1, y: 0 }, { x: 1, y: 0 }];
-  for (const d of dirs) {
-    const nx = x + d.x; const ny = y + d.y;
-    if (nx < 0 || nx >= cluster.width || ny < 0 || ny >= cluster.height) continue;
-    const tile = cluster.tiles[ny]?.[nx];
-    if (!tile?.walkable) continue;
-    const occupied = state.entities.some(e => e.clusterId === clusterId && e.position.x === nx && e.position.y === ny);
-    if (!occupied) {
-      const enemy = makeBitMite({ x: nx, y: ny }, clusterId);
-      enemy.id = Date.now() % 100000 + Math.floor(Math.random() * 1000);
-      state.entities.push(enemy);
-      addMessage(state, 'Intrusion countermeasure deployed!', 'hazard');
-      break;
+  let spawned = 0;
+  const candidates: { x: number; y: number }[] = [];
+  for (let dy = -4; dy <= 4; dy++) {
+    for (let dx = -4; dx <= 4; dx++) {
+      const nx = x + dx; const ny2 = y + dy;
+      if (nx < 0 || nx >= cluster.width || ny2 < 0 || ny2 >= cluster.height) continue;
+      const tile = cluster.tiles[ny2]?.[nx];
+      if (!tile?.walkable) continue;
+      if (state.entities.some(e => e.clusterId === clusterId && e.position.x === nx && e.position.y === ny2)) continue;
+      candidates.push({ x: nx, y: ny2 });
     }
   }
+  for (let i = 0; i < hackNum && i < candidates.length; i++) {
+    const pos = candidates[i];
+    const enemy = makeBitMite(pos, clusterId);
+    enemy.id = Date.now() % 100000 + Math.floor(Math.random() * 1000) + i;
+    state.entities.push(enemy);
+    spawned++;
+  }
+  if (spawned > 0) addMessage(state, `${spawned} intrusion countermeasure${spawned > 1 ? 's' : ''} deployed.`, 'hazard');
 
-  // Lock terminal for 10-20 ticks, then unlock exit
-  terminal.lockModeUntilTick = state.tick + randInt(10, 20);
-  terminal.activated = true;
-  // Schedule unlock: we check lockModeUntilTick in processAction each tick
-  addMessage(state, `Terminal entering lockdown. Egress will unlock in ${terminal.lockModeUntilTick - state.tick} ticks.`, 'hazard');
+  terminal.hackCount = hackNum;
+  const remaining = missing.length - hackNum;
+
+  if (remaining <= 0) {
+    // All missing privs hacked — unlock now
+    terminal.activated = true;
+    cluster.exitLocked = false;
+    addMessage(state, 'Override chain complete. Egress unlocked.', 'important');
+  } else {
+    // Lock terminal briefly between hacks
+    terminal.lockModeUntilTick = state.tick + randInt(8, 15);
+    addMessage(state, `${remaining} privilege override${remaining > 1 ? 's' : ''} remaining. Terminal in lockdown for ${terminal.lockModeUntilTick - state.tick} ticks.`, 'hazard');
+  }
   state.openTerminal = undefined;
 }
 
@@ -934,8 +962,9 @@ export function executeInteractableAction(
     case 'extract_root_part': {
       if (item.rootPartTaken) break;
       item.rootPartTaken = true;
-      state.rootPartsCollected++;
-      addMessage(state, `Root part extracted. [${state.rootPartsCollected}] collected.`, 'important');
+      const privName = ROOT_PRIVILEGES[clusterId - 1] ?? `ROOT ${clusterId}`;
+      if (!state.rootPrivileges.includes(privName)) state.rootPrivileges.push(privName);
+      addMessage(state, `Privilege fragment bound: ${privName} [${state.rootPrivileges.length}/${ROOT_PRIVILEGES.length}].`, 'important');
       return true; // close dialog
     }
     case 'deactivate_hazard': {

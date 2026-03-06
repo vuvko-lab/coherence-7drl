@@ -195,6 +195,7 @@ export interface TerminalDef {
   hasKey: boolean;       // true for the one terminal per cluster that holds the exit key
   isFinalTerminal?: boolean;    // cluster-N narrative terminal requiring root parts
   lockModeUntilTick?: number;   // if > tick, terminal is temporarily locked after hack
+  hackCount?: number;           // number of successful hacks (final terminal escalation)
 }
 
 // ── Interactables ──
@@ -250,6 +251,9 @@ export interface RevealEffect {
 }
 
 export const SMOKE_DURATION_MS = 480; // total smoke animation time in ms (3 phases × 160ms)
+
+/** Ordered root privilege names granted by collecting root fragments */
+export const ROOT_PRIVILEGES = ['ROOT READ', 'ROOT WRITE', 'ROOT EXEC', 'ROOT ID', 'ROOT PASS'] as const;
 
 export interface SmokeEffect {
   x: number;
@@ -395,7 +399,7 @@ export interface GameState {
   alertLevel: number;  // 0–300+ antivirus threat level: 0–99 friendly, 100–199 suspicious, 200+ enemy
   markedEntities: Set<number>;  // entity ids marked by Chronicler/White-Hat
   // Narrative & progression
-  rootPartsCollected: number;          // root parts extracted from interactables
+  rootPrivileges: string[];            // named privileges collected (ROOT READ, WRITE, EXEC, ID, PASS)
   killedEntities: { name: string; kind: EntityKind }[];  // for victory stats
   finalClusterId: number;              // cluster ID where victory condition is checked (default 5)
   gameOver?: boolean;                  // true when player exits the final cluster

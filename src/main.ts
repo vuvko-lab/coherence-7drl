@@ -688,7 +688,7 @@ function triggerSelfReveal() {
 
   // Render real content into the (now visible) panel so we have DOM to work with
   panelEl.style.display = '';
-  renderSelfPanel(panelEl, state.player, state.debugMode, state.mapReveal, state.godMode, state.invisibleMode, state.seed, moduleMenuOpen, selectedModuleIdx);
+  renderSelfPanel(panelEl, state.player, state.debugMode, state.mapReveal, state.godMode, state.invisibleMode, state.seed, moduleMenuOpen, selectedModuleIdx, state.rootPrivileges);
   renderLogs(logGeneralEl, logAlertEl, state.messages);
 
   const lines = Array.from(panelEl.querySelectorAll<HTMLElement>(':scope > .panel-edge, .panel-body > *'));
@@ -800,7 +800,7 @@ function showVictoryOverlay() {
   victoryStats.innerHTML =
     `<div>Coherence: ${coherencePct}%</div>` +
     `<div>Turns: ${state.tick}</div>` +
-    `<div>Root parts collected: ${state.rootPartsCollected}</div>` +
+    `<div>Privileges bound: ${state.rootPrivileges.length > 0 ? state.rootPrivileges.join(' · ') : 'none'}</div>` +
     `<div>Entities destroyed: ${killCount}</div>`;
 
   victoryKills.innerHTML = killCount > 0
@@ -935,7 +935,7 @@ function renderAll() {
     panelEl.style.display = '';
     targetPanelEl.style.display = '';
     if (!selfRevealAnimating) {
-      renderSelfPanel(panelEl, state.player, state.debugMode, state.mapReveal, state.godMode, state.invisibleMode, state.seed, moduleMenuOpen, selectedModuleIdx);
+      renderSelfPanel(panelEl, state.player, state.debugMode, state.mapReveal, state.godMode, state.invisibleMode, state.seed, moduleMenuOpen, selectedModuleIdx, state.rootPrivileges);
     }
     renderTargetPanel(hoveredPos);
     scrambleReveal(Array.from(targetPanelEl.querySelectorAll<HTMLElement>(':scope > .panel-edge, .panel-body > *')), () => {}, 40, 3, 40);

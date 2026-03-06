@@ -421,7 +421,7 @@ function buildSimState(): GameState {
     hazardFogMarks: new Map(),
     alertLevel: 0,
     markedEntities: new Set(),
-    rootPartsCollected: 0,
+    rootPrivileges: [],
     killedEntities: [],
     finalClusterId: 5,
     collapseGlitchTiles: new Map(),

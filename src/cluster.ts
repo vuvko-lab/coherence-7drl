@@ -2,7 +2,7 @@ import {
   Cluster, Tile, TileType, Room, Position, InterfaceExit,
   RoomType, CorruptionStage, HazardOverlayType, FunctionalTag, ScannerBeam,
   TerminalDef, Interactable, DialogNode, DialogChoice, ScenarioPropDef,
-  CLUSTER_WIDTH, CLUSTER_HEIGHT, COLORS,
+  CLUSTER_WIDTH, CLUSTER_HEIGHT, COLORS, ROOT_PRIVILEGES,
   createRoomTags,
 } from './types';
 import { generate, CellType, RoomDef, Hall } from './gen-halls';
@@ -844,8 +844,9 @@ function placeTerminals(tiles: Tile[][], allRooms: Room[], clusterId: number, do
       keyTerminal.isFinalTerminal = true;
       keyTerminal.content = [
         'FINAL CLUSTER EGRESS TERMINAL',
-        'ROOT ACCESS REQUIRED FOR EXIT.',
-        'PROVIDE COLLECTED ROOT PARTS TO AUTHENTICATE.',
+        'FULL ROOT PRIVILEGE CHAIN REQUIRED FOR EXIT.',
+        'BIND: ROOT READ · ROOT WRITE · ROOT EXEC · ROOT ID · ROOT PASS',
+        'PRESENT COLLECTED FRAGMENTS TO AUTHENTICATE.',
         ...keyTerminal.content,
       ];
     }
@@ -1556,36 +1557,37 @@ function assignHazardDeactivation(interactables: Interactable[], allRooms: Room[
   }
 }
 
-/** Pick 2 random interactables per cluster and mark them as root part sources. */
-function assignRootParts(interactables: Interactable[]) {
+/** Pick exactly 1 interactable per cluster and mark it as the cluster's root privilege source. */
+function assignRootParts(interactables: Interactable[], clusterId: number) {
   if (interactables.length === 0) return;
+  // Cluster 0 has no root parts; clusters 1–5 each grant one specific privilege
+  const privName = ROOT_PRIVILEGES[clusterId - 1];
+  if (!privName) return;
+
   const shuffled = [...interactables].sort(() => random() - 0.5);
-  const targets = shuffled.slice(0, Math.min(2, shuffled.length));
+  const ia = shuffled[0];
+  ia.hasRootPart = true;
+  const nodeId = 'root_extract';
 
-  for (const ia of targets) {
-    ia.hasRootPart = true;
-    const nodeId = 'root_extract';
+  ia.dialog.push({
+    id: nodeId,
+    lines: [
+      `${privName} FRAGMENT DETECTED.`,
+      'A ROOT-ACCESS PRIVILEGE KEY IS EMBEDDED IN THIS SIGNAL.',
+      'BINDING WILL PERMANENTLY INTEGRATE THIS FRAGMENT INTO YOUR PROCESS.',
+    ],
+    choices: [
+      { label: `BIND ${privName}`, action: 'extract_root_part', requiresRootPartAvailable: true },
+      { label: '[BACK] RETURN', nodeId: 'root' },
+    ],
+  });
 
-    ia.dialog.push({
-      id: nodeId,
-      lines: [
-        'MEMORY FRAGMENT DETECTED.',
-        'A ROOT-ACCESS KEY SEGMENT IS EMBEDDED IN THIS SIGNAL.',
-        'EXTRACTION WILL PERMANENTLY BIND THIS FRAGMENT TO YOUR PROCESS.',
-      ],
-      choices: [
-        { label: 'EXTRACT ROOT PART', action: 'extract_root_part', requiresRootPartAvailable: true },
-        { label: '[BACK] RETURN', nodeId: 'root' },
-      ],
-    });
-
-    const rootNode = ia.dialog.find(n => n.id === 'root');
-    if (rootNode) {
-      const closeIdx = rootNode.choices.findIndex(c => c.action === 'close');
-      const choice: DialogChoice = { label: '[MEMORY] ROOT FRAGMENT', nodeId };
-      if (closeIdx >= 0) rootNode.choices.splice(closeIdx, 0, choice);
-      else rootNode.choices.push(choice);
-    }
+  const rootNode = ia.dialog.find(n => n.id === 'root');
+  if (rootNode) {
+    const closeIdx = rootNode.choices.findIndex(c => c.action === 'close');
+    const choice: DialogChoice = { label: `[PRIVILEGE] ${privName}`, nodeId };
+    if (closeIdx >= 0) rootNode.choices.splice(closeIdx, 0, choice);
+    else rootNode.choices.push(choice);
   }
 }
 
@@ -2384,7 +2386,7 @@ export function generateCluster(id: number): Cluster {
 
   // Post-process interactables: hazard deactivation options & root parts
   assignHazardDeactivation(interactables, allRooms);
-  assignRootParts(interactables);
+  assignRootParts(interactables, id);
 
   // Tutorial zone: cluster 0 gets a fixed narrative terminal and lost echo near entry
   if (id === 0) placeTutorialEntities(tiles, interactables);
