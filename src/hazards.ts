@@ -1,10 +1,11 @@
 import {
   GameState, Cluster, Room, Position, TileType,
   CorruptionStage, CLUSTER_WIDTH, CLUSTER_HEIGHT, COLORS,
-  HazardOverlayType, ALERT_SUSPICIOUS, ALERT_ENEMY,
+  HazardOverlayType, ALERT_SUSPICIOUS,
 } from './types';
 import { addMessage } from './game';
 import { random, randInt } from './rng';
+import { makeWhiteHat, makeBitMite } from './ai';
 
 function roomInterior(room: Room): { x1: number; y1: number; x2: number; y2: number } {
   return { x1: room.x + 1, y1: room.y + 1, x2: room.x + room.w - 2, y2: room.y + room.h - 2 };
@@ -427,17 +428,29 @@ function updateFirewall(state: GameState, cluster: Cluster, room: Room) {
   clearBeamOverlays(cluster, x1, y1, x2, y2);
   markBeam(cluster, active);
 
-  // Player detection — only triggers alarm when flagged suspicious or worse
-  if (!hz.alarmTriggered && !state.invisibleMode &&
-      state.alertLevel >= ALERT_SUSPICIOUS && posInRoom(state.player.position, room)) {
-    const pp = state.player.position;
-    if (active.some(c => c.x === pp.x && c.y === pp.y)) {
-      hz.alarmTriggered = true;
-      const prev = state.alertLevel;
-      state.alertLevel += 20;
-      addMessage(state, 'SCAN DETECTED! Firewall alarm triggered!', 'hazard');
-      if (prev < ALERT_ENEMY && state.alertLevel >= ALERT_ENEMY)
-        addMessage(state, 'CRITICAL: Designated hostile entity. Antivirus hunting.', 'alert');
+  // Charge accumulation: beam detects aggressive entity OR player with alert >= suspicious
+  hz.firewallCharge ??= 0;
+  hz.firewallMaxCharge ??= 3;
+  const beamSet = new Set(active.map(c => `${c.x},${c.y}`));
+  let detected = false;
+  if (!state.invisibleMode && posInRoom(state.player.position, room)) {
+    if (beamSet.has(`${state.player.position.x},${state.player.position.y}`)) {
+      if (state.alertLevel >= ALERT_SUSPICIOUS) detected = true;
+    }
+  }
+  for (const e of state.entities) {
+    if (e.clusterId !== state.currentClusterId) continue;
+    if (e.ai?.faction !== 'aggressive') continue;
+    if (beamSet.has(`${e.position.x},${e.position.y}`)) { detected = true; break; }
+  }
+  if (detected) {
+    hz.firewallCharge++;
+    addMessage(state, `Firewall scanner charge: ${hz.firewallCharge}/${hz.firewallMaxCharge}`, 'alert');
+    if (hz.firewallCharge >= hz.firewallMaxCharge) {
+      hz.firewallCharge = 0;
+      hz.firewallLastSpawnTick = state.tick;
+      spawnEntityInRoom(state, cluster, room, 'white_hat');
+      addMessage(state, 'FIREWALL: Defensive sentry deployed.', 'alert');
     }
   }
 
@@ -567,11 +580,90 @@ function updateGravityWell(state: GameState, cluster: Cluster, room: Room) {
   }
 }
 
+// ── Entity spawning helpers ──
+
+const GLITCH_FLOOR_CHARS = '░▒▓▄▀◌◍◎';
+const GLITCH_WALL_CHARS = '╬╫╪▣▤▥▦▧▨▩';
+const GLITCH_COLORS = ['#cc4422', '#aa2244', '#cc6600', '#886622', '#aa4400'];
+let _nextSpawnId = 10000; // avoid collisions with game.ts entity IDs
+
+function spawnEntityInRoom(state: GameState, cluster: Cluster, room: Room, kind: 'white_hat' | 'bit_mite') {
+  const { x1, y1, x2, y2 } = roomInterior(room);
+  const candidates: { x: number; y: number }[] = [];
+  for (let y = y1; y <= y2; y++) {
+    for (let x = x1; x <= x2; x++) {
+      const t = cluster.tiles[y]?.[x];
+      if (!t || !t.walkable) continue;
+      const occupied = state.player.position.x === x && state.player.position.y === y && state.player.clusterId === cluster.id;
+      const hasEntity = state.entities.some(e => e.clusterId === cluster.id && e.position.x === x && e.position.y === y);
+      if (!occupied && !hasEntity) candidates.push({ x, y });
+    }
+  }
+  if (candidates.length === 0) return;
+  const pos = candidates[Math.floor(random() * candidates.length)];
+  const entity = kind === 'white_hat'
+    ? makeWhiteHat(pos, cluster.id)
+    : makeBitMite(pos, cluster.id);
+  entity.id = _nextSpawnId++;
+  state.entities.push(entity);
+}
+
+/** Collapse-driven ambient visual glitch and entity spawning. */
+function updateCollapseEffects(state: GameState, cluster: Cluster) {
+  const tick = state.tick;
+  for (const room of cluster.rooms) {
+    if (room.collapse <= 0) continue;
+
+    // collapse > 0: periodically glitch a random visible floor tile (visual artifact)
+    if (tick % 8 === (room.id % 8) && random() < 0.3 * room.collapse) {
+      const { x1, y1, x2, y2 } = roomInterior(room);
+      const floorTiles: { x: number; y: number }[] = [];
+      for (let y = y1; y <= y2; y++) {
+        for (let x = x1; x <= x2; x++) {
+          const t = cluster.tiles[y]?.[x];
+          if (t?.type === TileType.Floor && t.visible) floorTiles.push({ x, y });
+        }
+      }
+      if (floorTiles.length > 0) {
+        const { x, y } = floorTiles[Math.floor(random() * floorTiles.length)];
+        const glyph = GLITCH_FLOOR_CHARS[Math.floor(random() * GLITCH_FLOOR_CHARS.length)];
+        const fg = GLITCH_COLORS[Math.floor(random() * GLITCH_COLORS.length)];
+        state.collapseGlitchTiles.set(`${x},${y}`, { glyph, fg, expireTick: tick + 2 });
+      }
+    }
+
+    // collapse > 0.2: periodically glitch a visible wall tile
+    if (room.collapse > 0.2 && tick % 12 === (room.id % 12) && random() < 0.2) {
+      const wallTiles: { x: number; y: number }[] = [];
+      for (let y = room.y; y < room.y + room.h; y++) {
+        for (let x = room.x; x < room.x + room.w; x++) {
+          const t = cluster.tiles[y]?.[x];
+          if (t?.type === TileType.Wall && t.visible) wallTiles.push({ x, y });
+        }
+      }
+      if (wallTiles.length > 0) {
+        const { x, y } = wallTiles[Math.floor(random() * wallTiles.length)];
+        const glyph = GLITCH_WALL_CHARS[Math.floor(random() * GLITCH_WALL_CHARS.length)];
+        const fg = GLITCH_COLORS[Math.floor(random() * GLITCH_COLORS.length)];
+        state.collapseGlitchTiles.set(`${x},${y}`, { glyph, fg, expireTick: tick + randInt(3, 5) });
+      }
+    }
+
+    // collapse > 0.4: spawn Bit-Mite every 30 ticks, White-Hat sentry every 50 ticks
+    if (room.collapse > 0.4) {
+      if (tick > 0 && tick % 30 === 0) spawnEntityInRoom(state, cluster, room, 'bit_mite');
+      if (tick > 0 && tick % 50 === 0) spawnEntityInRoom(state, cluster, room, 'white_hat');
+    }
+  }
+}
+
 // ── Main update ──
 
 export function updateHazards(state: GameState) {
   const cluster = state.clusters.get(state.currentClusterId);
   if (!cluster) return;
+
+  updateCollapseEffects(state, cluster);
 
   for (const room of cluster.rooms) {
     if (room.roomType === 'normal' || !room.hazardState) continue;

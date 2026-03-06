@@ -91,6 +91,9 @@ export interface RoomHazardState {
   firewallAxis?: 'horizontal' | 'vertical';  // wipe sweep direction
   firewallStep?: number;                      // generic tick counter
   firewallPath?: Position[];                  // pre-computed spiral path
+  firewallCharge?: number;                    // accumulated beam-detection charge
+  firewallMaxCharge?: number;                 // charge needed to spawn sentry (default 3)
+  firewallLastSpawnTick?: number;             // tick when last sentry was spawned
 
   // Unstable process
   corePos?: Position;
@@ -168,6 +171,8 @@ export interface TerminalDef {
   activated: boolean;    // has the player used it?
   content: string[];     // narrative/lore lines displayed in the overlay
   hasKey: boolean;       // true for the one terminal per cluster that holds the exit key
+  isFinalTerminal?: boolean;    // cluster-N narrative terminal requiring root parts
+  lockModeUntilTick?: number;   // if > tick, terminal is temporarily locked after hack
 }
 
 // ── Interactables ──
@@ -177,9 +182,11 @@ export type InteractableKind = 'info_terminal' | 'lost_echo' | 'archive_echo';
 export interface DialogChoice {
   label: string;
   nodeId?: string;                   // navigate to node; undefined = close
-  action?: 'close' | 'extract_reward' | 'reveal_terminals' | 'reveal_exits';
+  action?: 'close' | 'extract_reward' | 'reveal_terminals' | 'reveal_exits'
+         | 'extract_root_part' | 'deactivate_hazard' | 'hack_terminal';
   requiresRewardAvailable?: boolean; // hide choice if rewardTaken
   requiresExitLocked?: boolean;      // show choice only if cluster.exitLocked
+  requiresRootPartAvailable?: boolean; // hide choice if root part already taken
 }
 
 export interface DialogNode {
@@ -205,6 +212,9 @@ export interface Interactable {
   hasExitCode?: boolean;
   alertCost?: number;
   spawnHazardOnExtract?: boolean;
+  hasRootPart?: boolean;              // can extract a root part from this entity
+  rootPartTaken?: boolean;            // root part already extracted
+  deactivatesHazardRoomId?: number;   // hazard room this interactable can deactivate
 }
 
 export interface RevealEffect {
@@ -344,6 +354,13 @@ export interface GameState {
   hazardFogMarks: Map<string, HazardOverlayType>;
   alertLevel: number;  // 0–300+ antivirus threat level: 0–99 friendly, 100–199 suspicious, 200+ enemy
   markedEntities: Set<number>;  // entity ids marked by Chronicler/White-Hat
+  // Narrative & progression
+  rootPartsCollected: number;          // root parts extracted from interactables
+  killedEntities: { name: string; kind: EntityKind }[];  // for victory stats
+  finalClusterId: number;              // cluster ID where victory condition is checked (default 5)
+  gameOver?: boolean;                  // true when player exits the final cluster
+  // Collapse ambient glitch tiles (temporary visual artifacts)
+  collapseGlitchTiles: Map<string, { glyph: string; fg: string; expireTick: number }>;
 }
 
 export interface GameMessage {

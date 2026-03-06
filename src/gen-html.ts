@@ -147,6 +147,10 @@ function createStateForCluster(seed: number, clusterId: number): GameState {
     hazardFogMarks: new Map(),
     alertLevel: 0,
     markedEntities: new Set(),
+    rootPartsCollected: 0,
+    killedEntities: [],
+    finalClusterId: 5,
+    collapseGlitchTiles: new Map(),
   };
 
   computeFOV(cluster, entryPos);

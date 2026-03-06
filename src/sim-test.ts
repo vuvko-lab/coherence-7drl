@@ -272,10 +272,11 @@ function snapshotCluster(
     }
   }
 
-  // Key terminal reachability
+  // Key terminal reachability — terminal tile itself is non-walkable, so check adjacency
   const keyTerminal = cluster.terminals.find(t => t.hasKey);
   const keyTerminalReachable = keyTerminal
-    ? reachable.has(`${keyTerminal.position.x},${keyTerminal.position.y}`)
+    ? [[0,-1],[0,1],[-1,0],[1,0]].some(([dx,dy]) =>
+        reachable.has(`${keyTerminal.position.x+dx},${keyTerminal.position.y+dy}`))
     : true; // no key terminal in this cluster
 
   // Isolated rooms: rooms with no tile reachable from entry

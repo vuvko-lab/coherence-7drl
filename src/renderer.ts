@@ -49,6 +49,23 @@ const ROOM_TYPE_COLOR: Record<string, string> = {
   quarantine: '#cc44cc', echo_chamber: '#557744', gravity_well: '#aa44ff',
 };
 
+const ROOM_LIGHTING: Partial<Record<FunctionalTag, { bg: string; fg: string }>> = {
+  engine_room:   { bg: '#1a1508', fg: '#2e2a10' },
+  server_rack:   { bg: '#081a1e', fg: '#0e2428' },
+  reactor:       { bg: '#0a1e0a', fg: '#102810' },
+  medbay:        { bg: '#081e1e', fg: '#0c2828' },
+  bridge:        { bg: '#08081e', fg: '#0c0c28' },
+  cargo:         { bg: '#1a1008', fg: '#281a0c' },
+  barracks:      { bg: '#1a0808', fg: '#280c0c' },
+  lab:           { bg: '#12081e', fg: '#1e0c28' },
+  armory:        { bg: '#1e0808', fg: '#280c0c' },
+  comms:         { bg: '#081e1a', fg: '#0c2824' },
+  maintenance:   { bg: '#121212', fg: '#1e1e1e' },
+  hangar:        { bg: '#0e0e18', fg: '#141422' },
+  archive:       { bg: '#1a1408', fg: '#2a200c' },
+  sensor_matrix: { bg: '#081818', fg: '#0c2424' },
+};
+
 function debugRoomLabel(room: Room): string {
   const typeChar = ROOM_TYPE_SHORT[room.roomType] ?? '?';
   let label = `${room.id}${typeChar}`;
@@ -182,12 +199,17 @@ export class Renderer {
       aimOverlay?: { origin: Position; radius: number; target?: Position };
       enemyVision?: Set<string>; // "x,y" keys of tiles visible to hovered entity
       enemyVisionColor?: string; // tint color for the vision overlay
+      collapseGlitchTiles?: Map<string, { glyph: string; fg: string; expireTick: number }>;
     },
   ) {
     if (!this.display) return;
 
     const tick = extras?.tick ?? 0;
     const hazardFogMarks = extras?.hazardFogMarks;
+
+    // Build room functional tag map for lighting
+    const roomFuncTag = new Map<number, FunctionalTag | null>();
+    for (const r of cluster.rooms) roomFuncTag.set(r.id, r.tags.functional);
 
     // Pre-compute revealed tile keys from active reveal effects
     const revealedKeys = new Set<string>();
@@ -211,6 +233,15 @@ export class Renderer {
         let glyph = tile.glyph;
         let fg = tile.fg;
         let bg: string = COLORS.bg;
+
+        // Room lighting by functional tag (visible floor/door tiles only)
+        if (isVisible && (tile.type === TileType.Floor || tile.type === TileType.Door) && tile.roomId >= 0) {
+          const funcTag = roomFuncTag.get(tile.roomId);
+          if (funcTag) {
+            const lighting = ROOM_LIGHTING[funcTag];
+            if (lighting) { bg = lighting.bg; fg = lighting.fg; }
+          }
+        }
 
         // Hazard overlay (only when visible)
         if (isVisible && tile.hazardOverlay) {
@@ -324,6 +355,13 @@ export class Renderer {
             const i = (c - 0.6) / 0.4;
             bg = `rgb(${Math.round(30 + i * 40)},10,10)`;
           }
+        }
+
+        // Collapse glitch tile overlay
+        if (isVisible && extras?.collapseGlitchTiles?.has(tileKey)) {
+          const gt = extras.collapseGlitchTiles.get(tileKey)!;
+          glyph = gt.glyph;
+          fg = gt.fg;
         }
 
         // Enemy vision overlay

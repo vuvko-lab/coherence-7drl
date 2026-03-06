@@ -719,7 +719,7 @@ function generateTerminalContent(functionalTag: string | null): string[] {
   return shuffled.slice(0, randInt(2, 3));
 }
 
-function placeTerminals(tiles: Tile[][], allRooms: Room[], clusterId: number): TerminalDef[] {
+function placeTerminals(tiles: Tile[][], allRooms: Room[], clusterId: number, doorAdjacency: Map<number, number[]>): TerminalDef[] {
   const terminals: TerminalDef[] = [];
 
   // Eligible: non-hall rooms with matching functional tag, not entry/exit
@@ -796,21 +796,35 @@ function placeTerminals(tiles: Tile[][], allRooms: Room[], clusterId: number): T
     }
   }
 
-  // Assign key to one terminal — prefer bridge/comms, else random
+  // Assign key to one terminal — prefer single-door rooms, then bridge/comms, else random
+  const FINAL_CLUSTER_ID = 5;
   if (terminals.length > 0) {
-    const cluster = state_findKeyTerminal(terminals, allRooms);
-    cluster.hasKey = true;
-    cluster.content = [...KEY_CONTENT_LINES, ...cluster.content];
+    const keyTerminal = state_findKeyTerminal(terminals, allRooms, doorAdjacency);
+    keyTerminal.hasKey = true;
+    keyTerminal.content = [...KEY_CONTENT_LINES, ...keyTerminal.content];
+    // Mark as final terminal in the final cluster
+    if (clusterId === FINAL_CLUSTER_ID) {
+      keyTerminal.isFinalTerminal = true;
+      keyTerminal.content = [
+        'FINAL CLUSTER EGRESS TERMINAL',
+        'ROOT ACCESS REQUIRED FOR EXIT.',
+        'PROVIDE COLLECTED ROOT PARTS TO AUTHENTICATE.',
+        ...keyTerminal.content,
+      ];
+    }
     // Give key terminal a distinct color
-    const tile = tiles[cluster.position.y][cluster.position.x];
+    const tile = tiles[keyTerminal.position.y][keyTerminal.position.x];
     tile.fg = '#ffaa00';
   }
 
   return terminals;
 }
 
-function state_findKeyTerminal(terminals: TerminalDef[], allRooms: Room[]): TerminalDef {
-  // Prefer a bridge or comms terminal if available
+function state_findKeyTerminal(terminals: TerminalDef[], allRooms: Room[], doorAdjacency: Map<number, number[]>): TerminalDef {
+  // Prefer single-door (dead-end) rooms — harder to reach, more rewarding
+  const singleDoor = terminals.find(t => (doorAdjacency.get(t.roomId)?.length ?? 0) <= 1);
+  if (singleDoor) return singleDoor;
+  // Prefer bridge or comms terminals
   const preferred = terminals.find(t => {
     const room = allRooms.find(r => r.id === t.roomId);
     return room?.tags.functional === 'bridge' || room?.tags.functional === 'comms';
@@ -1242,6 +1256,57 @@ function computeSpiralPath(x1: number, y1: number, x2: number, y2: number): Posi
   return path;
 }
 
+function initFirewallRoom(room: Room, tiles: Tile[][]) {
+  const innerX1 = room.x + 1;
+  const innerY1 = room.y + 1;
+  const innerX2 = room.x + room.w - 2;
+  const innerY2 = room.y + room.h - 2;
+
+  const FW_PATTERNS = ['pingpong', 'wipe', 'inward', 'cross', 'spiral'] as const;
+  type FWPat = typeof FW_PATTERNS[number];
+  const pattern: FWPat = pick([...FW_PATTERNS]);
+
+  const beams: ScannerBeam[] = [];
+
+  if (pattern === 'pingpong') {
+    const beamCount = randInt(1, 2);
+    for (let b = 0; b < beamCount; b++) {
+      const axis = random() < 0.5 ? 'horizontal' as const : 'vertical' as const;
+      if (axis === 'horizontal') {
+        beams.push({ axis, position: randInt(innerY1, innerY2), direction: 1, min: innerY1, max: innerY2 });
+      } else {
+        beams.push({ axis, position: randInt(innerX1, innerX2), direction: 1, min: innerX1, max: innerX2 });
+      }
+    }
+  } else if (pattern === 'cross') {
+    beams.push({ axis: 'horizontal', position: randInt(innerY1, innerY2), direction: 1, min: innerY1, max: innerY2 });
+    beams.push({ axis: 'vertical',   position: randInt(innerX1, innerX2), direction: 1, min: innerX1, max: innerX2 });
+  }
+
+  const firewallPath = pattern === 'spiral'
+    ? computeSpiralPath(innerX1, innerY1, innerX2, innerY2)
+    : undefined;
+
+  room.hazardState = {
+    beams,
+    alarmTriggered: false,
+    firewallPattern: pattern,
+    firewallAxis: random() < 0.5 ? 'horizontal' : 'vertical',
+    firewallStep: 0,
+    firewallPath,
+    firewallCharge: 0,
+    firewallMaxCharge: 3,
+  };
+
+  // Place scanner terminal marker on inner floor tile
+  const tx = innerX2;
+  const ty = Math.max(innerY1, Math.min(innerY2, Math.floor(room.y + room.h / 2)));
+  if (tiles[ty]?.[tx]) {
+    tiles[ty][tx].glyph = '▣';
+    tiles[ty][tx].fg = '#ffcc00';
+  }
+}
+
 function initRoomHazards(tiles: Tile[][], rooms: Room[]) {
   for (const room of rooms) {
     if (room.roomType === 'normal') continue;
@@ -1296,47 +1361,7 @@ function initRoomHazards(tiles: Tile[][], rooms: Room[]) {
       }
 
       case 'firewall': {
-        const FW_PATTERNS = ['pingpong', 'wipe', 'inward', 'cross', 'spiral'] as const;
-        type FWPat = typeof FW_PATTERNS[number];
-        const pattern: FWPat = pick([...FW_PATTERNS]);
-
-        let beams: ScannerBeam[] = [];
-
-        if (pattern === 'pingpong') {
-          const beamCount = randInt(1, 2);
-          for (let b = 0; b < beamCount; b++) {
-            const axis = random() < 0.5 ? 'horizontal' as const : 'vertical' as const;
-            if (axis === 'horizontal') {
-              beams.push({ axis, position: randInt(innerY1, innerY2), direction: 1, min: innerY1, max: innerY2 });
-            } else {
-              beams.push({ axis, position: randInt(innerX1, innerX2), direction: 1, min: innerX1, max: innerX2 });
-            }
-          }
-        } else if (pattern === 'cross') {
-          beams.push({ axis: 'horizontal', position: randInt(innerY1, innerY2), direction: 1, min: innerY1, max: innerY2 });
-          beams.push({ axis: 'vertical',   position: randInt(innerX1, innerX2), direction: 1, min: innerX1, max: innerX2 });
-        }
-
-        const firewallPath = pattern === 'spiral'
-          ? computeSpiralPath(innerX1, innerY1, innerX2, innerY2)
-          : undefined;
-
-        room.hazardState = {
-          beams,
-          alarmTriggered: false,
-          firewallPattern: pattern,
-          firewallAxis: random() < 0.5 ? 'horizontal' : 'vertical', // used by wipe
-          firewallStep: 0,
-          firewallPath,
-        };
-
-        // Place terminal on inner floor tile (rightmost interior column, mid-height)
-        const tx = innerX2;
-        const ty = Math.max(innerY1, Math.min(innerY2, Math.floor(room.y + room.h / 2)));
-        if (tiles[ty]?.[tx]) {
-          tiles[ty][tx].glyph = '▣';
-          tiles[ty][tx].fg = '#ffcc00';
-        }
+        initFirewallRoom(room, tiles);
         break;
       }
 
@@ -1402,6 +1427,114 @@ function initRoomHazards(tiles: Tile[][], rooms: Room[]) {
         break;
       }
 
+    }
+  }
+}
+
+// ── Chokepoint firewall assignment ──
+
+/** Assign firewall hazard to chokepoint rooms (cluster id >= 1, additive). */
+function assignFirewallToChokepoints(allRooms: Room[], tiles: Tile[][]) {
+  for (const room of allRooms) {
+    if (!room.tags.geometric.has('chokepoint') && !room.tags.geometric.has('secondary_choke')) continue;
+    if (room.roomType !== 'normal') continue; // already has a hazard
+    const isHall = room.tags.geometric.has('hall');
+    if (isHall) {
+      if (Math.max(room.w, room.h) < 4) continue;
+    } else {
+      if ((room.w - 2) < 3 || (room.h - 2) < 3) continue;
+    }
+    room.roomType = 'firewall';
+    initFirewallRoom(room, tiles);
+  }
+}
+
+// ── Hazard deactivation & root part dialog injection ──
+
+const HAZARD_DISPLAY_NAMES: Partial<Record<RoomType, string>> = {
+  corrupted: 'CORRUPTION ZONE',
+  trigger_trap: 'TRIGGER TRAP',
+  memory_leak: 'MEMORY LEAK',
+  firewall: 'FIREWALL',
+  unstable: 'UNSTABLE PROCESS',
+  quarantine: 'QUARANTINE',
+  echo_chamber: 'ECHO CHAMBER',
+  gravity_well: 'GRAVITY WELL',
+};
+
+/** For each hazard room, assign 1-3 non-room interactables that can deactivate it. */
+function assignHazardDeactivation(interactables: Interactable[], allRooms: Room[]) {
+  const hazardRooms = allRooms.filter(r => r.roomType !== 'normal');
+  for (const hazardRoom of hazardRooms) {
+    const candidates = [...interactables].filter(i => i.roomId !== hazardRoom.id)
+      .sort(() => random() - 0.5);
+    if (candidates.length === 0) continue;
+
+    const selected: Interactable[] = [candidates[0]];
+    if (candidates.length > 1 && random() < 0.5) selected.push(candidates[1]);
+    if (candidates.length > 2 && random() < 0.05) selected.push(candidates[2]);
+
+    const hazardName = HAZARD_DISPLAY_NAMES[hazardRoom.roomType] ?? hazardRoom.roomType.toUpperCase().replace(/_/g, ' ');
+
+    for (const ia of selected) {
+      // Avoid assigning the same hazard room twice to an interactable
+      if (ia.deactivatesHazardRoomId != null) continue;
+      ia.deactivatesHazardRoomId = hazardRoom.id;
+
+      const nodeId = `deactivate_${hazardRoom.id}`;
+      ia.dialog.push({
+        id: nodeId,
+        lines: [
+          'UNAUTHORIZED SUBSYSTEM ACCESS DETECTED.',
+          `OVERRIDE CODE LOCATED: ${hazardName} NEUTRALIZATION AVAILABLE.`,
+          'WARNING: DEACTIVATION IS PERMANENT.',
+        ],
+        choices: [
+          { label: `OVERRIDE ${hazardName}`, action: 'deactivate_hazard' },
+          { label: '[BACK] RETURN', nodeId: 'root' },
+        ],
+      });
+
+      const rootNode = ia.dialog.find(n => n.id === 'root');
+      if (rootNode) {
+        const closeIdx = rootNode.choices.findIndex(c => c.action === 'close');
+        const choice: DialogChoice = { label: `[OVERRIDE] ${hazardName}`, nodeId };
+        if (closeIdx >= 0) rootNode.choices.splice(closeIdx, 0, choice);
+        else rootNode.choices.push(choice);
+      }
+    }
+  }
+}
+
+/** Pick 2 random interactables per cluster and mark them as root part sources. */
+function assignRootParts(interactables: Interactable[]) {
+  if (interactables.length === 0) return;
+  const shuffled = [...interactables].sort(() => random() - 0.5);
+  const targets = shuffled.slice(0, Math.min(2, shuffled.length));
+
+  for (const ia of targets) {
+    ia.hasRootPart = true;
+    const nodeId = 'root_extract';
+
+    ia.dialog.push({
+      id: nodeId,
+      lines: [
+        'MEMORY FRAGMENT DETECTED.',
+        'A ROOT-ACCESS KEY SEGMENT IS EMBEDDED IN THIS SIGNAL.',
+        'EXTRACTION WILL PERMANENTLY BIND THIS FRAGMENT TO YOUR PROCESS.',
+      ],
+      choices: [
+        { label: 'EXTRACT ROOT PART', action: 'extract_root_part', requiresRootPartAvailable: true },
+        { label: '[BACK] RETURN', nodeId: 'root' },
+      ],
+    });
+
+    const rootNode = ia.dialog.find(n => n.id === 'root');
+    if (rootNode) {
+      const closeIdx = rootNode.choices.findIndex(c => c.action === 'close');
+      const choice: DialogChoice = { label: '[MEMORY] ROOT FRAGMENT', nodeId };
+      if (closeIdx >= 0) rootNode.choices.splice(closeIdx, 0, choice);
+      else rootNode.choices.push(choice);
     }
   }
 }
@@ -1651,6 +1784,9 @@ export function generateCluster(id: number): Cluster {
   // Compute structural tags
   assignStructuralTags(allRooms, wallAdjacency, doorAdjacency, grid.cells);
 
+  // Assign firewall hazard to chokepoint rooms (cluster 1+, additive)
+  if (id >= 1) assignFirewallToChokepoints(allRooms, tiles);
+
   // Assign functional tags (three-pass: anchors → propagation → fill)
   assignFunctionalTags(allRooms, wallAdjacency, doorAdjacency, id);
 
@@ -1658,10 +1794,14 @@ export function generateCluster(id: number): Cluster {
   const interfaces = extractInterfaces(grid.cells);
 
   // Place terminals in eligible rooms (must happen after functional tag assignment)
-  const terminals = placeTerminals(tiles, allRooms, id);
+  const terminals = placeTerminals(tiles, allRooms, id, doorAdjacency);
 
   // Place interactable elements (info terminals, lost echos, archive echos)
   const interactables = placeInteractables(tiles, allRooms, id, terminals);
+
+  // Post-process interactables: hazard deactivation options & root parts
+  assignHazardDeactivation(interactables, allRooms);
+  assignRootParts(interactables);
 
   const cluster: Cluster = { id, width: CLUSTER_WIDTH, height: CLUSTER_HEIGHT, tiles, rooms: allRooms, interfaces, wallAdjacency, doorAdjacency, collapseMap, terminals, interactables, exitLocked: true };
 

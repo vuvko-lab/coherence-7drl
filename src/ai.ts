@@ -4,6 +4,7 @@ import {
 import { shootingAnimation } from './combat_animations';
 import { findPath } from './pathfinding';
 import { floodFillReveal } from './fov';
+import { tryPushEntity } from './game';
 
 // ── Helpers ──
 
@@ -73,7 +74,7 @@ function wallWalkStep(cluster: Cluster, pos: Position): Position | null {
   return randomWalkStep(cluster, pos);
 }
 
-function move(entity: Entity, cluster: Cluster, target: Position): boolean {
+function move(entity: Entity, cluster: Cluster, target: Position, state?: GameState): boolean {
   const tile = cluster.tiles[target.y]?.[target.x];
   if (!tile) return false;
   if (!tile.walkable) {
@@ -87,6 +88,22 @@ function move(entity: Entity, cluster: Cluster, target: Position): boolean {
       return true; // used turn to open door, don't move yet
     }
     return false;
+  }
+  // Check for entity at target position
+  if (state) {
+    const occupant = state.entities.find(
+      e => e.id !== entity.id && e.clusterId === cluster.id
+        && e.position.x === target.x && e.position.y === target.y,
+    );
+    if (occupant) {
+      // Same faction: try to push aside
+      if (occupant.ai?.faction === entity.ai?.faction) {
+        tryPushEntity(state, cluster, occupant, entity.position);
+        // Continue to move entity even if push failed (occupant absorbs the bump)
+      } else {
+        return false; // Different faction: blocked
+      }
+    }
   }
   entity.position = { ...target };
   return true;
@@ -117,7 +134,7 @@ function updateChronicler(state: GameState, entity: Entity, cluster: Cluster) {
       }
       // Wander
       const step = randomWalkStep(cluster, entity.position);
-      if (step) move(entity, cluster, step);
+      if (step) move(entity, cluster, step, state);
       break;
     }
 
@@ -204,7 +221,7 @@ function updateBitMite(state: GameState, entity: Entity, cluster: Cluster) {
         }
       }
       const step = randomWalkStep(cluster, entity.position);
-      if (step) move(entity, cluster, step);
+      if (step) move(entity, cluster, step, state);
       break;
     }
 
@@ -241,7 +258,7 @@ function updateBitMite(state: GameState, entity: Entity, cluster: Cluster) {
 
       const dest = visible ? chaseTarget.position : ai.lastTargetPos!;
       const step = stepToward(cluster, entity.position, dest);
-      if (step) move(entity, cluster, step);
+      if (step) move(entity, cluster, step, state);
       else ai.aiState = 'wander';
       break;
     }
@@ -295,7 +312,7 @@ function updateLogicLeech(state: GameState, entity: Entity, cluster: Cluster) {
         return;
       }
       const step = wallWalkStep(cluster, entity.position);
-      if (step) move(entity, cluster, step);
+      if (step) move(entity, cluster, step, state);
       break;
     }
 
@@ -411,7 +428,7 @@ function updateWhiteHat(state: GameState, entity: Entity, cluster: Cluster) {
       }
       if (ai.patrolWaypoint) {
         const step = stepToward(cluster, entity.position, ai.patrolWaypoint);
-        if (step) move(entity, cluster, step);
+        if (step) move(entity, cluster, step, state);
       }
       break;
     }
@@ -446,7 +463,7 @@ function updateWhiteHat(state: GameState, entity: Entity, cluster: Cluster) {
 
       const dest = ai.lastTargetPos ?? target.position;
       const step = stepToward(cluster, entity.position, dest);
-      if (step) move(entity, cluster, step);
+      if (step) move(entity, cluster, step, state);
       break;
     }
 

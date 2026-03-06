@@ -18,6 +18,30 @@ const DOOR_CLOSE_DELAY = 5; // ticks before an unoccupied open door auto-closes
 export const CORRUPT_M_RANGE = 8;
 const MELEE_DAMAGE = 3; // weak unarmed strike (no module)
 
+/** Try to push an entity one tile away from pusher. Returns true if successful. */
+export function tryPushEntity(
+  state: GameState,
+  cluster: Cluster,
+  entity: Entity,
+  pusherPos: Position,
+): boolean {
+  const dirs = [{ x: 0, y: -1 }, { x: 0, y: 1 }, { x: -1, y: 0 }, { x: 1, y: 0 }];
+  for (const d of dirs) {
+    const nx = entity.position.x + d.x;
+    const ny = entity.position.y + d.y;
+    if (nx === pusherPos.x && ny === pusherPos.y) continue; // that's where pusher is
+    if (nx < 0 || nx >= cluster.width || ny < 0 || ny >= cluster.height) continue;
+    const tile = cluster.tiles[ny]?.[nx];
+    if (!tile?.walkable) continue;
+    const occupied = (state.player.position.x === nx && state.player.position.y === ny && state.player.clusterId === cluster.id)
+      || state.entities.some(e => e.clusterId === cluster.id && e.position.x === nx && e.position.y === ny);
+    if (occupied) continue;
+    entity.position = { x: nx, y: ny };
+    return true;
+  }
+  return false;
+}
+
 function openDoor(tile: Tile) {
   tile.doorOpen = true;
   tile.walkable = true;
@@ -95,6 +119,10 @@ export function createGame(initialSeed?: number): GameState {
     hazardFogMarks: new Map(),
     alertLevel: 0,
     markedEntities: new Set(),
+    rootPartsCollected: 0,
+    killedEntities: [],
+    finalClusterId: 5,
+    collapseGlitchTiles: new Map(),
   };
 
   addMessage(state, 'System boot... ego-fragment loaded from backup.', 'system');
@@ -300,7 +328,7 @@ function tryMove(state: GameState, dx: number, dy: number): boolean {
     return false;
   }
 
-  // Bump-into-entity → melee (hostile) or examine (non-hostile)
+  // Bump-into-entity → melee (hostile), push (friendly), or examine (neutral)
   const bumpedEntity = getEntityAt(state, cluster, nx, ny);
   if (bumpedEntity && bumpedEntity.id !== state.player.id) {
     if (bumpedEntity.ai?.faction === 'aggressive') {
@@ -309,8 +337,22 @@ function tryMove(state: GameState, dx: number, dy: number): boolean {
         addMessage(state,
           `You strike ${bumpedEntity.name} for ${MELEE_DAMAGE}. (${bumpedEntity.coherence}/${bumpedEntity.maxCoherence})`,
           'important');
+        if (bumpedEntity.coherence <= 0) {
+          if (bumpedEntity.ai) state.killedEntities.push({ name: bumpedEntity.name, kind: bumpedEntity.ai.kind });
+          state.entities = state.entities.filter(e => e.id !== bumpedEntity.id);
+          state.markedEntities.delete(bumpedEntity.id);
+        }
       }
       return true; // costs a turn
+    } else if (bumpedEntity.ai?.faction === 'friendly') {
+      // Try to push the friendly entity aside
+      const pushed = tryPushEntity(state, cluster, bumpedEntity, state.player.position);
+      if (pushed) {
+        state.player.position = { x: nx, y: ny };
+        return true;
+      }
+      addMessage(state, `${bumpedEntity.name} blocks the way.`, 'normal');
+      return false;
     } else {
       addMessage(state, `You observe ${bumpedEntity.name}. It does not react.`, 'normal');
       return false;
@@ -348,6 +390,19 @@ function tryTransfer(state: GameState): boolean {
     i => i.position.x === x && i.position.y === y
   );
   if (!iface) return false;
+
+  // Block backtracking through entry interface (x=0 in all clusters except the first)
+  if (iface.position.x === 0 && cluster.id > 0) {
+    addMessage(state, '[ERROR] Interface blocked — no way back.', 'important');
+    return false;
+  }
+
+  // Victory: exiting the final cluster triggers the end screen
+  if (cluster.id === state.finalClusterId && x > 0) {
+    state.gameOver = true;
+    addMessage(state, 'COHERENCE RESTORED. System integration complete.', 'important');
+    return false;
+  }
 
   // Forward exits (x > 0; x=0 is always the back-entry) require authorization
   if (x > 0 && cluster.exitLocked) {
@@ -498,6 +553,9 @@ export function processAction(state: GameState, action: PlayerAction): boolean {
     applyTileHazardToPlayer(state);
     updateAlertModule(state);
 
+    // Check if final terminal lockdown expired — unlock exit
+    checkFinalTerminalLockExpiry(state, cluster);
+
     // Update alert fog marks from newly visible hazard tiles
     updateHazardFogMarks(state, cluster);
 
@@ -544,6 +602,26 @@ export function grantExitAccess(state: GameState, terminalId: string, clusterId:
   if (!cluster) return;
   const terminal = cluster.terminals.find(t => t.id === terminalId);
   if (!terminal) return;
+
+  // Final terminal: requires root parts or hacking
+  if (terminal.isFinalTerminal) {
+    if (terminal.lockModeUntilTick != null && terminal.lockModeUntilTick > state.tick) {
+      addMessage(state, `[TERMINAL LOCKED] Access suspended. Wait ${terminal.lockModeUntilTick - state.tick} ticks.`, 'hazard');
+      state.openTerminal = undefined;
+      return;
+    }
+    const needed = state.finalClusterId; // need (finalClusterId - 1) root parts for final exit, but track vs cluster id
+    if (state.rootPartsCollected >= needed) {
+      terminal.activated = true;
+      cluster.exitLocked = false;
+      addMessage(state, `Root parts verified [${state.rootPartsCollected}/${needed}]. Egress unlocked.`, 'important');
+    } else {
+      addMessage(state, `ROOT PARTS REQUIRED: ${state.rootPartsCollected}/${needed}. Use HACK to force access.`, 'hazard');
+    }
+    state.openTerminal = undefined;
+    return;
+  }
+
   terminal.activated = true;
   if (!terminal.hasKey) {
     addMessage(state, 'No exit key found on this terminal.', 'normal');
@@ -552,6 +630,49 @@ export function grantExitAccess(state: GameState, terminalId: string, clusterId:
   }
   cluster.exitLocked = false;
   addMessage(state, 'Exit authorization granted. Cluster egress unlocked.', 'important');
+  state.openTerminal = undefined;
+}
+
+/** Hack the final terminal: costs coherence, spawns an enemy, locks terminal temporarily. */
+export function hackFinalTerminal(state: GameState, terminalId: string, clusterId: number) {
+  const cluster = state.clusters.get(clusterId);
+  if (!cluster) return;
+  const terminal = cluster.terminals.find(t => t.id === terminalId);
+  if (!terminal?.isFinalTerminal) return;
+  if (terminal.lockModeUntilTick != null && terminal.lockModeUntilTick > state.tick) {
+    addMessage(state, '[TERMINAL LOCKED] Cannot hack — still in lockdown.', 'hazard');
+    return;
+  }
+
+  // Drain 5 coherence
+  if (state.player.coherence != null && !state.godMode) {
+    state.player.coherence = Math.max(0, state.player.coherence - 5);
+    addMessage(state, `Hack initiated — coherence drain: −5 (${state.player.coherence}/${state.player.maxCoherence}).`, 'hazard');
+  }
+
+  // Spawn an enemy near the terminal
+  const { x, y } = terminal.position;
+  const dirs = [{ x: 0, y: -1 }, { x: 0, y: 1 }, { x: -1, y: 0 }, { x: 1, y: 0 }];
+  for (const d of dirs) {
+    const nx = x + d.x; const ny = y + d.y;
+    if (nx < 0 || nx >= cluster.width || ny < 0 || ny >= cluster.height) continue;
+    const tile = cluster.tiles[ny]?.[nx];
+    if (!tile?.walkable) continue;
+    const occupied = state.entities.some(e => e.clusterId === clusterId && e.position.x === nx && e.position.y === ny);
+    if (!occupied) {
+      const enemy = makeBitMite({ x: nx, y: ny }, clusterId);
+      enemy.id = Date.now() % 100000 + Math.floor(Math.random() * 1000);
+      state.entities.push(enemy);
+      addMessage(state, 'Intrusion countermeasure deployed!', 'hazard');
+      break;
+    }
+  }
+
+  // Lock terminal for 10-20 ticks, then unlock exit
+  terminal.lockModeUntilTick = state.tick + randInt(10, 20);
+  terminal.activated = true;
+  // Schedule unlock: we check lockModeUntilTick in processAction each tick
+  addMessage(state, `Terminal entering lockdown. Egress will unlock in ${terminal.lockModeUntilTick - state.tick} ticks.`, 'hazard');
   state.openTerminal = undefined;
 }
 
@@ -615,7 +736,7 @@ export function executeInteractableAction(
         count++;
       }
       addMessage(state, `Network scan: ${count} terminal${count !== 1 ? 's' : ''} located.`, 'system');
-      break;
+      return true; // close dialog to show scan result
     }
     case 'reveal_exits': {
       let count = 0;
@@ -624,7 +745,7 @@ export function executeInteractableAction(
         count++;
       }
       addMessage(state, `Network scan: ${count} exit node${count !== 1 ? 's' : ''} located.`, 'system');
-      break;
+      return true; // close dialog to show scan result
     }
     case 'extract_reward': {
       if (item.rewardTaken) break;
@@ -656,8 +777,46 @@ export function executeInteractableAction(
       }
       break;
     }
+    case 'extract_root_part': {
+      if (item.rootPartTaken) break;
+      item.rootPartTaken = true;
+      state.rootPartsCollected++;
+      addMessage(state, `Root part extracted. [${state.rootPartsCollected}] collected.`, 'important');
+      return true; // close dialog
+    }
+    case 'deactivate_hazard': {
+      const hazardRoomId = item.deactivatesHazardRoomId;
+      if (hazardRoomId == null) break;
+      const hazardRoom = cluster.rooms.find(r => r.id === hazardRoomId);
+      if (!hazardRoom) break;
+      hazardRoom.roomType = 'normal';
+      hazardRoom.hazardState = undefined;
+      for (let ry = hazardRoom.y; ry < hazardRoom.y + hazardRoom.h; ry++) {
+        for (let rx = hazardRoom.x; rx < hazardRoom.x + hazardRoom.w; rx++) {
+          if (cluster.tiles[ry]?.[rx]) cluster.tiles[ry][rx].hazardOverlay = undefined;
+        }
+      }
+      addMessage(state, '[OVERRIDE] Hazard subsystem neutralized.', 'important');
+      return true; // close dialog
+    }
+    case 'hack_terminal': {
+      // Handled separately via hackFinalTerminal() — should not reach here
+      break;
+    }
   }
   return false; // keep overlay open so player sees updated state
+}
+
+function checkFinalTerminalLockExpiry(state: GameState, cluster: Cluster) {
+  if (cluster.id !== state.finalClusterId) return;
+  for (const terminal of cluster.terminals) {
+    if (!terminal.isFinalTerminal) continue;
+    if (terminal.lockModeUntilTick != null && terminal.lockModeUntilTick <= state.tick) {
+      terminal.lockModeUntilTick = undefined;
+      cluster.exitLocked = false;
+      addMessage(state, 'Terminal lockdown expired. Cluster egress unlocked.', 'important');
+    }
+  }
 }
 
 function updateHazardFogMarks(state: GameState, cluster: Cluster) {

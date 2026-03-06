@@ -1,10 +1,10 @@
-import { createGame, processAction, handleMapClick, stepAutoPath, addMessage, exportSave, loadSave, adminRegenCluster, adminTeleportToCluster, grantExitAccess, activateTerminal, executeInteractableAction, getEntityAt, CORRUPT_M_RANGE } from './game';
+import { createGame, processAction, handleMapClick, stepAutoPath, addMessage, exportSave, loadSave, adminRegenCluster, adminTeleportToCluster, grantExitAccess, activateTerminal, executeInteractableAction, getEntityAt, CORRUPT_M_RANGE, hackFinalTerminal } from './game';
 import { setDamageParams, getDamageParams, setGenSizeOverride, clearGenSizeOverride, getGenSizeOverride, clusterScaleForId } from './cluster';
 import { Renderer, renderSelfPanel, renderLogs, renderOverviewPanel, renderMapStatusBar } from './renderer';
 import { InputHandler } from './input';
 import { PlayerAction, Position, TileType } from './types';
 import { generateSeed } from './rng';
-import { GLITCH_EFFECTS, initGlitch } from './glitch';
+import { GLITCH_EFFECTS, initGlitch, glitchShake, glitchChromatic, glitchBarSweep, glitchStaticBurst, glitchHorizontalTear, glitchDataBleed } from './glitch';
 import { hasLOS } from './fov';
 import { canSee } from './ai';
 
@@ -441,6 +441,28 @@ function openTerminalOverlay() {
     terminalOptions.appendChild(grantBtn);
   }
 
+  // Final terminal: hack option
+  if (terminal.isFinalTerminal && exitLocked) {
+    const hackBtn = document.createElement('button');
+    hackBtn.className = 'terminal-opt-btn opt-warn';
+    const lockTick = terminal.lockModeUntilTick;
+    if (lockTick && lockTick > state.tick) {
+      hackBtn.textContent = `> [LOCKED] terminal locked (${lockTick - state.tick} turns)`;
+      hackBtn.disabled = true;
+    } else {
+      hackBtn.textContent = '> [HACK] force egress — costs 5 coherence';
+      hackBtn.addEventListener('click', () => {
+        hackFinalTerminal(state, openTerminal.terminalId, openTerminal.clusterId);
+        closeTerminalOverlay();
+        glitchShake();
+        glitchChromatic();
+        setTimeout(() => glitchBarSweep(), 200);
+        renderAll();
+      });
+    }
+    terminalOptions.appendChild(hackBtn);
+  }
+
   const closeBtn = document.createElement('button');
   closeBtn.className = 'terminal-opt-btn opt-close';
   closeBtn.textContent = '> [ESC] disconnect';
@@ -479,6 +501,11 @@ function openInteractableOverlay() {
   const node = item.dialog.find(n => n.id === item.currentNodeId);
   if (!node) return;
 
+  // Glitch on Lost Echo or corrupted terminal open
+  if (item.kind === 'lost_echo' || item.corrupted) {
+    glitchHorizontalTear().then(() => glitchBarSweep());
+  }
+
   iaKindBadge.textContent = IA_KIND_LABELS[item.kind] ?? '[ UNKNOWN ]';
 
   iaContent.innerHTML = node.lines
@@ -489,6 +516,7 @@ function openInteractableOverlay() {
   for (const choice of node.choices) {
     if (choice.requiresRewardAvailable && item.rewardTaken) continue;
     if (choice.requiresExitLocked && !cluster.exitLocked) continue;
+    if (choice.requiresRootPartAvailable && item.rootPartTaken) continue;
 
     const btn = document.createElement('button');
     btn.className = 'ia-choice-btn';
@@ -498,15 +526,21 @@ function openInteractableOverlay() {
         item.currentNodeId = choice.nodeId;
         openInteractableOverlay();
       } else if (choice.action) {
+        const isScanAction = choice.action === 'reveal_terminals' || choice.action === 'reveal_exits';
         const shouldClose = executeInteractableAction(
           state, item.id, openInteractable.clusterId, choice.action,
         );
         if (shouldClose) {
           closeInteractableOverlay();
+          if (isScanAction) {
+            glitchBarSweep().then(() => glitchChromatic()).then(() => renderAll());
+          } else {
+            renderAll();
+          }
         } else {
           openInteractableOverlay(); // re-render updated node
+          renderAll();
         }
-        renderAll();
       }
     });
     iaChoices.appendChild(btn);
@@ -594,6 +628,37 @@ function renderTargetPanel(pos: Position | null) {
   targetPanelEl.innerHTML = html;
 }
 
+// ── Victory overlay ──
+
+const victoryOverlay = document.getElementById('victory-overlay')!;
+const victoryStats = document.getElementById('victory-stats')!;
+const victoryKills = document.getElementById('victory-kills')!;
+const victoryRestartBtn = document.getElementById('victory-restart')!;
+
+victoryRestartBtn.addEventListener('click', () => location.reload());
+
+function showVictoryOverlay() {
+  const coherencePct = Math.round(((state.player.coherence ?? 0) / (state.player.maxCoherence ?? 100)) * 100);
+  const killCount = state.killedEntities.length;
+
+  const killCounts: Record<string, number> = {};
+  for (const k of state.killedEntities) {
+    killCounts[k.kind] = (killCounts[k.kind] ?? 0) + 1;
+  }
+
+  victoryStats.innerHTML =
+    `<div>Coherence: ${coherencePct}%</div>` +
+    `<div>Turns: ${state.tick}</div>` +
+    `<div>Root parts collected: ${state.rootPartsCollected}</div>` +
+    `<div>Entities destroyed: ${killCount}</div>`;
+
+  victoryKills.innerHTML = killCount > 0
+    ? Object.entries(killCounts).map(([k, n]) => `<div>&gt; ${k}: ${n}</div>`).join('')
+    : '<div>&gt; none destroyed</div>';
+
+  victoryOverlay.classList.add('open');
+}
+
 // ── Aim mode ──
 
 function toggleAim() {
@@ -624,11 +689,22 @@ function exitAim() {
 }
 
 function renderAll() {
+  // Victory overlay
+  if (state.gameOver) {
+    showVictoryOverlay();
+    return;
+  }
+
   const currentCluster = state.clusters.get(state.currentClusterId)!;
 
   // Re-init grid if cluster size changed (e.g. after transfer)
   if (renderer.displayWidth !== currentCluster.width || renderer.displayHeight !== currentCluster.height) {
     renderer.initGrid(currentCluster.width, currentCluster.height);
+  }
+
+  // Expire collapse glitch tiles
+  for (const [key, gt] of state.collapseGlitchTiles) {
+    if (gt.expireTick <= state.tick) state.collapseGlitchTiles.delete(key);
   }
 
   const alertOverlay = state.showAlertOverlay && state.alertFill
@@ -682,6 +758,7 @@ function renderAll() {
     aimOverlay,
     enemyVision,
     enemyVisionColor,
+    collapseGlitchTiles: state.collapseGlitchTiles,
   });
   renderSelfPanel(panelEl, state.player, state.debugMode, state.mapReveal, state.godMode, state.invisibleMode, state.seed);
   const cm = currentCluster.collapseMap;
@@ -734,7 +811,27 @@ function onAction(action: PlayerAction) {
   state.autoPath = [];
   renderer.setPathHighlight([]);
 
+  const prevCoherence = state.player.coherence ?? 100;
+  const prevPos = { ...state.player.position };
   processAction(state, action);
+
+  // Damage glitch
+  if ((state.player.coherence ?? 100) < prevCoherence) {
+    glitchShake();
+    glitchChromatic();
+    setTimeout(() => glitchBarSweep(), 200);
+  }
+
+  // Hazard tile entry glitch
+  if (action.kind === 'move') {
+    const movedPos = state.player.position;
+    if (movedPos.x !== prevPos.x || movedPos.y !== prevPos.y) {
+      const cluster = state.clusters.get(state.currentClusterId)!;
+      const tile = cluster.tiles[movedPos.y]?.[movedPos.x];
+      if (tile?.hazardOverlay?.type === 'flood') glitchDataBleed();
+      else if (tile?.hazardOverlay?.type === 'corruption') glitchStaticBurst();
+    }
+  }
 
   // If animation was set up, run the animation loop
   if (state.animation?.isAnimating) {

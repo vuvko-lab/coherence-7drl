@@ -1135,3 +1135,64 @@ body {
   60%  { transform: translateX(-2px) skewX(-1deg); filter: hue-rotate(0deg); }
   100% { transform: translateX(0) skewX(0deg); filter: none; }
 }
+
+/* --- Victory overlay --- */
+#victory-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.92);
+  justify-content: center;
+  align-items: center;
+}
+
+#victory-overlay.open {
+  display: flex;
+}
+
+#victory-panel {
+  background: var(--theme-bg);
+  border: 1px solid var(--theme-accent);
+  padding: 2rem 3rem;
+  min-width: 360px;
+  text-align: center;
+  font-family: inherit;
+}
+
+#victory-header {
+  font-size: 1.4em;
+  color: var(--theme-accent);
+  letter-spacing: 0.15em;
+  margin-bottom: 1.5rem;
+}
+
+#victory-stats, #victory-kills {
+  color: var(--theme-fg);
+  margin-bottom: 0.8rem;
+  line-height: 1.8;
+  text-align: left;
+}
+
+#victory-kills {
+  border-top: 1px solid var(--theme-dim);
+  padding-top: 0.5rem;
+  margin-top: 0.3rem;
+}
+
+#victory-restart {
+  margin-top: 1.5rem;
+  background: transparent;
+  border: 1px solid var(--theme-accent);
+  color: var(--theme-accent);
+  font-family: inherit;
+  font-size: 1em;
+  padding: 0.4rem 1.2rem;
+  cursor: pointer;
+  letter-spacing: 0.1em;
+}
+
+#victory-restart:hover {
+  background: var(--theme-accent);
+  color: var(--theme-bg);
+}
