@@ -469,7 +469,6 @@ function updateWhiteHat(state: GameState, entity: Entity, cluster: Cluster) {
 
     case 'attack': {
       const target = getEntityById(state, ai.targetId);
-      // addAiMessage(state, `Sentry targets ${JSON.stringify(target)}`);
       if (!target || target.clusterId !== entity.clusterId) {
         ai.aiState = 'patrol';
         return;
@@ -477,6 +476,11 @@ function updateWhiteHat(state: GameState, entity: Entity, cluster: Cluster) {
       const dx = Math.abs(entity.position.x - target.position.x);
       const dy = Math.abs(entity.position.y - target.position.y);
       if (dx * dx + dy * dy > entity.attackDistance * entity.attackDistance) {
+        ai.aiState = 'chase';
+        return;
+      }
+      // Require clear LOS (wallPen=0) to fire — cannot shoot through walls or closed doors
+      if (!canSee(cluster, entity.position, target.position, entity.attackDistance, 0)) {
         ai.aiState = 'chase';
         return;
       }
@@ -725,21 +729,30 @@ function updateGateKeeper(state: GameState, entity: Entity, cluster: Cluster) {
     }
   }
 
-  // Attack adjacent enemies
+  // Beam attack: fire at nearest visible non-friendly target in range with clear LOS
+  ai.actionCooldown = (ai.actionCooldown ?? 0) - 1;
+  if (ai.actionCooldown > 0) return;
+
   for (const target of all) {
     if (target.id === entity.id) continue;
     if (target.ai?.faction === 'neutral' || target.ai?.faction === 'friendly') continue;
     const dx = Math.abs(entity.position.x - target.position.x);
     const dy = Math.abs(entity.position.y - target.position.y);
-    if (dx + dy > 1) continue;
+    const distSq = dx * dx + dy * dy;
+    if (distSq > entity.attackDistance * entity.attackDistance) continue;
+    // Require clear line of sight — no shooting through walls or closed doors
+    if (!canSee(cluster, entity.position, target.position, entity.attackDistance, 0)) continue;
     if (target.coherence === undefined) continue;
+
     target.coherence = Math.max(0, target.coherence - entity.attackValue);
-    addAiMessage(state, `Gate-Keeper crushes ${target.name}! −${entity.attackValue}. (${target.coherence} left)`, 'combat');
+    addAiMessage(state, `Gate-Keeper fires containment beam at ${target.name}! −${entity.attackValue}. (${target.coherence} left)`, 'combat');
+    shootingAnimation(state, entity.position, target.position, 'beam');
     if (target.coherence <= 0) {
       addAiMessage(state, `Gate-Keeper destroys ${target.name}!`, 'combat');
       removeEntity(state, target);
     }
-    return; // one attack per turn
+    ai.actionCooldown = 3; // beam fires every 3 ticks
+    return; // one beam per turn
   }
 }
 
@@ -897,7 +910,7 @@ export function makeGateKeeper(pos: Position, clusterId: number): Entity {
     energy: 0,
     coherence: 150,
     maxCoherence: 150,
-    attackDistance: 2,
+    attackDistance: 6,  // beam range
     attackValue: 20,
     ai: {
       kind: 'gate_keeper',

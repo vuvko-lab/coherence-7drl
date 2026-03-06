@@ -2,7 +2,7 @@ import { generateCluster, placeEntryPoint } from '../cluster';
 import { computeFOV } from '../fov';
 import { processAction } from '../game';
 import { seed as seedRng } from '../rng';
-import { makeChronicler, makeBitMite, makeLogicLeech, makeWhiteHat, makeGateKeeper } from '../ai';
+import { makeChronicler, makeBitMite, makeLogicLeech, makeWhiteHat, makeGateKeeper, makeRepairScrapper } from '../ai';
 import { TileType, COLORS, CLUSTER_WIDTH, CLUSTER_HEIGHT } from '../types';
 import type {
   Cluster, Entity, GameState, Position, Room,
@@ -343,6 +343,7 @@ const entityFactories: Record<EntityKind, (pos: Position, clusterId: number) => 
   logic_leech: makeLogicLeech,
   white_hat: makeWhiteHat,
   gate_keeper: makeGateKeeper,
+  repair_scrapper: makeRepairScrapper,
 };
 
 function placeEntity(kind: EntityKind, pos: Position) {

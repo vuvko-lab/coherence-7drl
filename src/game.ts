@@ -205,7 +205,7 @@ function spawnClusterEntities(state: GameState, cluster: Cluster) {
   // Entity kind is weighted by room geometry; functional tag modifies entity stats.
 
   const shuffled = [...allRooms].sort(() => Math.random() - 0.5);
-  const baseChance = 0.08 + depth * 0.04; // 0.16 at depth 2, 0.28 at depth 4, 0.32 at depth 5
+  const baseChance = 0.05 + depth * 0.025; // 0.10 at depth 2, 0.175 at depth 5
   let cooldown = 0;
 
   for (const room of shuffled) {
@@ -257,7 +257,7 @@ function spawnClusterEntities(state: GameState, cluster: Cluster) {
     applyFunctionalTagModifiers(entity, room.tags.functional);
 
     spawned.push(entity);
-    cooldown = 5; // skip next 5 rooms before rolling again
+    cooldown = 8; // skip next 8 rooms before rolling again
   }
 
   // Spawn scenario prop entities from rooms that have pendingProps

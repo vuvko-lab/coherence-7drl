@@ -308,8 +308,8 @@ export function placeEntryPoint(tiles: Tile[][], _rooms: Room[]): Position {
  * Multiplying the raw noise by this keeps early clusters at low collapse values
  * while later clusters unlock higher-tier hazards.
  */
-let _damageBase = 0.40;
-let _damageIncrement = 0.20;
+let _damageBase = 0.40;      // ← tune cluster-0 collapse intensity (0.0–1.0)
+let _damageIncrement = 0.20; // ← tune per-cluster damage growth (reaches 1.0 at cluster 3)
 
 export function setDamageParams(base: number, inc: number): void {
   _damageBase = Math.max(0.05, Math.min(1.0, base));
@@ -324,6 +324,26 @@ function clusterDamageScale(clusterId: number): number {
   return Math.min(1.0, _damageBase + clusterId * _damageIncrement);
 }
 
+// ── Collapse noise tuning ──────────────────────────────────────────────────
+//
+//  NOISE SHAPE (controls where hotspots form):
+//    NOISE_SCALE       – feature size; larger = fewer big blobs per cluster
+//                        0.08 = smooth, 0.15 = 2-3 blobs, 0.20 = 1-2 blobs
+//    NOISE_OCTAVES     – detail layers; more = spikier within each blob
+//    NOISE_PERSISTENCE – how much each extra octave contributes (0.5–0.75)
+//    NOISE_CONTRAST    – power curve exponent applied after normalization
+//                        1.0 = linear, 2.0 = pushes most rooms to low collapse
+//                        and keeps only the true peaks highly damaged
+//
+//  CLUSTER SCALING (how damage intensity grows with cluster depth):
+//    _damageBase       – collapse scale at cluster 0 (0.0–1.0)
+//    _damageIncrement  – added per cluster ID; reaches 1.0 at cluster ≥ 3
+//
+const NOISE_SCALE       = 0.13;  // ← tune feature size here
+const NOISE_OCTAVES     = 3;     // ← tune spikiness here
+const NOISE_PERSISTENCE = 0.65;  // ← tune octave weight here
+const NOISE_CONTRAST    = 2.0;   // ← tune peak sharpness here (1.0 = off)
+
 function generateCollapseMap(clusterId: number): number[][] {
   initNoise();
   const offsetX = clusterId * CLUSTER_WIDTH;
@@ -332,7 +352,9 @@ function generateCollapseMap(clusterId: number): number[][] {
   for (let y = 0; y < _activeH; y++) {
     map[y] = [];
     for (let x = 0; x < _activeW; x++) {
-      map[y][x] = Math.min(1.0, collapseNoise(x + offsetX, y, 0.08, 2, 0.5) * scale);
+      const raw = collapseNoise(x + offsetX, y, NOISE_SCALE, NOISE_OCTAVES, NOISE_PERSISTENCE);
+      // Apply contrast curve to create sharp peaks, then scale by cluster damage level
+      map[y][x] = Math.min(1.0, Math.pow(raw, NOISE_CONTRAST) * scale);
     }
   }
   return map;
