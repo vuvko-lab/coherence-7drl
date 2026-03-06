@@ -548,7 +548,7 @@ export class Renderer {
 
 // ── SELF panel renderer ──
 
-export function renderSelfPanel(el: HTMLElement, player: Entity, debugMode = false, mapReveal = false, godMode = false, invisibleMode = false, gameSeed = 0) {
+export function renderSelfPanel(el: HTMLElement, player: Entity, debugMode = false, mapReveal = false, godMode = false, invisibleMode = false, gameSeed = 0, moduleMenuOpen = false, selectedModuleIdx = -1) {
   const hexId = '0x' + player.id.toString(16).toUpperCase().padStart(4, '0');
   const coherence = player.coherence ?? 100;
   const maxCoherence = player.maxCoherence ?? 100;
@@ -559,16 +559,21 @@ export function renderSelfPanel(el: HTMLElement, player: Entity, debugMode = fal
   const barFill = '█'.repeat(filled);
   const barEmpty = '─'.repeat(barLen - filled);
 
+  const ACTIVATABLE_MODULES = new Set(['overclock.m', 'cloak.m']);
   const modules = player.modules ?? [];
-  const moduleRows = modules.map(mod => {
+  const moduleRows = modules.map((mod, idx) => {
     const isAlertActive = mod.id === 'alert.m' && mod.alertActive;
-    const activeClass = isAlertActive ? ' module-alert-active' : '';
+    const isToggleActive = ACTIVATABLE_MODULES.has(mod.id) && mod.active;
+    const isSelected = moduleMenuOpen && idx === selectedModuleIdx;
+    const activeClass = (isAlertActive ? ' module-alert-active' : '') + (isSelected ? ' module-row-selected' : '');
     const indicator = isAlertActive ? '<span class="module-indicator"> ▲ </span>' : '';
     const statusClass = mod.status === 'damaged' ? ' status-damaged' : mod.status === 'offline' ? ' status-offline' : '';
+    const statusText = isToggleActive ? 'active' : mod.status;
+    const menuCursor = isSelected ? '<span class="module-cursor">›</span>' : '';
     return `<div class="module-row${activeClass}" data-module="${mod.id}">` +
-      `<span class="module-name stat-label">&gt; ${mod.id}</span>` +
+      `${menuCursor}<span class="module-name stat-label">&gt; ${mod.id}</span>` +
       `${indicator}` +
-      `<span class="module-status stat-value${statusClass}">[${mod.status}]</span>` +
+      `<span class="module-status stat-value${statusClass}${isToggleActive ? ' status-active' : ''}">[${statusText}]</span>` +
       `</div>`;
   }).join('\n');
 

@@ -49,6 +49,8 @@ const overviewEl = document.getElementById('panel-overview')!;
 let hoveredPos: Position | null = null;
 let aimMode = false;
 let showRangePreview = false; // corrupt.m module hover
+let moduleMenuOpen = false;
+let selectedModuleIdx = 0;
 
 // ── Auto-walk timer ──
 
@@ -686,7 +688,7 @@ function triggerSelfReveal() {
 
   // Render real content into the (now visible) panel so we have DOM to work with
   panelEl.style.display = '';
-  renderSelfPanel(panelEl, state.player, state.debugMode, state.mapReveal, state.godMode, state.invisibleMode, state.seed);
+  renderSelfPanel(panelEl, state.player, state.debugMode, state.mapReveal, state.godMode, state.invisibleMode, state.seed, moduleMenuOpen, selectedModuleIdx);
   renderLogs(logGeneralEl, logAlertEl, state.messages);
 
   const lines = Array.from(panelEl.querySelectorAll<HTMLElement>(':scope > .panel-edge, .panel-body > *'));
@@ -713,33 +715,39 @@ function renderTargetPanel(pos: Position | null) {
   html += `<div class="panel-body">`;
 
   if (entity && !isPlayer && tile.visible) {
-    const ai = entity.ai;
-    const faction = ai?.faction ?? 'neutral';
-    const factionLabel = faction === 'aggressive' ? 'HOSTILE' : faction === 'friendly' ? 'ALLIED' : 'NEUTRAL';
-    const maxCoh = entity.maxCoherence ?? 1;
-    const coh = entity.coherence ?? maxCoh;
-    const barLen = 12;
-    const filled = Math.round((coh / maxCoh) * barLen);
-    const pct = coh / maxCoh;
-    const barClass = pct < 0.25 ? 'bar-crit' : pct < 0.5 ? 'bar-low' : 'bar-fill';
-    const bar = `<span class="${barClass}">${'█'.repeat(filled)}</span><span class="bar-empty">${'░'.repeat(barLen - filled)}</span>`;
-
+    const isProp = !entity.ai && entity.coherence === undefined;
     const dx = pos.x - state.player.position.x;
     const dy = pos.y - state.player.position.y;
     const dist = Math.sqrt(dx * dx + dy * dy).toFixed(1);
-    const inRange = parseFloat(dist) <= CORRUPT_M_RANGE && tile.visible && hasLOS(cluster, state.player.position, pos);
-    const hasCorrM = state.player.modules?.some(m => m.id === 'corrupt.m' && m.status === 'loaded');
 
     html += `<div class="target-name">${entity.glyph} ${entity.name}</div>`;
-    html += `<div class="stat-row"><span class="stat-label">faction:</span><span class="stat-value target-faction-${faction}">${factionLabel}</span></div>`;
     html += `<div class="stat-row"><span class="stat-label">dist:</span><span class="stat-value">${dist}</span></div>`;
-    if (ai?.aiState) html += `<div class="stat-row"><span class="stat-label">state:</span><span class="stat-value">${ai.aiState}</span></div>`;
-    html += `<div class="target-bar">${bar} ${coh}/${maxCoh}</div>`;
-    if (faction === 'aggressive') {
-      const hint = hasCorrM
-        ? (inRange ? (aimMode ? '[F] shoot · [RMB] shoot' : '[F] aim · [RMB] shoot') : `out of range (${CORRUPT_M_RANGE}t)`)
-        : 'no corrupt.m loaded';
-      html += `<div class="target-aim-hint${aimMode ? ' aim-active' : ''}">${hint}</div>`;
+
+    if (isProp) {
+      html += `<div class="stat-row"><span class="stat-label">type:</span><span class="stat-value">object</span></div>`;
+    } else {
+      const ai = entity.ai;
+      const faction = ai?.faction ?? 'neutral';
+      const factionLabel = faction === 'aggressive' ? 'HOSTILE' : faction === 'friendly' ? 'ALLIED' : 'NEUTRAL';
+      const maxCoh = entity.maxCoherence ?? 1;
+      const coh = entity.coherence ?? maxCoh;
+      const barLen = 12;
+      const filled = Math.round((coh / maxCoh) * barLen);
+      const pct = coh / maxCoh;
+      const barClass = pct < 0.25 ? 'bar-crit' : pct < 0.5 ? 'bar-low' : 'bar-fill';
+      const bar = `<span class="${barClass}">${'█'.repeat(filled)}</span><span class="bar-empty">${'░'.repeat(barLen - filled)}</span>`;
+      const inRange = parseFloat(dist) <= CORRUPT_M_RANGE && tile.visible && hasLOS(cluster, state.player.position, pos);
+      const hasCorrM = state.player.modules?.some(m => m.id === 'corrupt.m' && m.status === 'loaded');
+
+      html += `<div class="stat-row"><span class="stat-label">faction:</span><span class="stat-value target-faction-${faction}">${factionLabel}</span></div>`;
+      if (ai?.aiState) html += `<div class="stat-row"><span class="stat-label">state:</span><span class="stat-value">${ai.aiState}</span></div>`;
+      html += `<div class="target-bar">${bar} ${coh}/${maxCoh}</div>`;
+      if (faction === 'aggressive') {
+        const hint = hasCorrM
+          ? (inRange ? (aimMode ? '[F] shoot · [RMB] shoot' : '[F] aim · [RMB] shoot') : `out of range (${CORRUPT_M_RANGE}t)`)
+          : 'no corrupt.m loaded';
+        html += `<div class="target-aim-hint${aimMode ? ' aim-active' : ''}">${hint}</div>`;
+      }
     }
   } else if (entity && isPlayer) {
     html += `<div class="target-name">@ ${entity.name}</div>`;
@@ -927,7 +935,7 @@ function renderAll() {
     panelEl.style.display = '';
     targetPanelEl.style.display = '';
     if (!selfRevealAnimating) {
-      renderSelfPanel(panelEl, state.player, state.debugMode, state.mapReveal, state.godMode, state.invisibleMode, state.seed);
+      renderSelfPanel(panelEl, state.player, state.debugMode, state.mapReveal, state.godMode, state.invisibleMode, state.seed, moduleMenuOpen, selectedModuleIdx);
     }
     renderTargetPanel(hoveredPos);
     scrambleReveal(Array.from(targetPanelEl.querySelectorAll<HTMLElement>(':scope > .panel-edge, .panel-body > *')), () => {}, 40, 3, 40);
@@ -1084,7 +1092,54 @@ function onMapClick(pos: Position) {
   }
 }
 
-const input = new InputHandler(onAction, onMapClick, toggleAim);
+function onModuleNav(dir: import('./input').ModuleNavDir) {
+  const modules = state.player.modules ?? [];
+  if (dir === 'toggle') {
+    moduleMenuOpen = !moduleMenuOpen;
+    if (moduleMenuOpen) selectedModuleIdx = 0;
+    input.moduleMenuOpen = moduleMenuOpen;
+    renderAll();
+    return;
+  }
+  if (dir === 'close') {
+    moduleMenuOpen = false;
+    input.moduleMenuOpen = false;
+    renderAll();
+    return;
+  }
+  if (dir === 'up') {
+    selectedModuleIdx = (selectedModuleIdx - 1 + modules.length) % modules.length;
+    renderAll();
+    return;
+  }
+  if (dir === 'down') {
+    selectedModuleIdx = (selectedModuleIdx + 1) % modules.length;
+    renderAll();
+    return;
+  }
+  if (dir === 'activate') {
+    const mod = modules[selectedModuleIdx];
+    if (!mod || mod.status !== 'loaded') { renderAll(); return; }
+    if (mod.id === 'corrupt.m') {
+      moduleMenuOpen = false;
+      input.moduleMenuOpen = false;
+      toggleAim();
+    } else if (mod.id === 'overclock.m' || mod.id === 'cloak.m') {
+      mod.active = !mod.active;
+      moduleMenuOpen = false;
+      input.moduleMenuOpen = false;
+      renderAll();
+    } else {
+      // passive modules (alert.m, spoof.m): no toggle
+      moduleMenuOpen = false;
+      input.moduleMenuOpen = false;
+      renderAll();
+    }
+    return;
+  }
+}
+
+const input = new InputHandler(onAction, onMapClick, toggleAim, onModuleNav);
 input.bind();
 
 // Wire up renderer click events
@@ -1399,14 +1454,15 @@ cfgRebootBtn?.addEventListener('click', () => {
 // Wire corrupt.m module hover for range preview
 panelEl.addEventListener('mouseover', (e) => {
   const row = (e.target as HTMLElement).closest('.module-row') as HTMLElement | null;
-  if (row?.dataset.module === 'corrupt.m') {
+  if (row?.dataset.module === 'corrupt.m' && !showRangePreview) {
     showRangePreview = true;
     renderAll();
   }
 });
 panelEl.addEventListener('mouseout', (e) => {
-  const row = (e.target as HTMLElement).closest('.module-row') as HTMLElement | null;
-  if (row?.dataset.module === 'corrupt.m') {
+  if (!showRangePreview) return;
+  const row = (e.target as HTMLElement).closest('.module-row[data-module="corrupt.m"]') as HTMLElement | null;
+  if (row && !row.contains(e.relatedTarget as Node)) {
     showRangePreview = false;
     renderAll();
   }

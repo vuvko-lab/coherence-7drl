@@ -337,6 +337,7 @@ export type ModuleId = 'alert.m' | 'overclock.m' | 'corrupt.m' | 'cloak.m' | 'sp
 export interface PlayerModule {
   id: ModuleId;
   status: ModuleStatus;
+  active?: boolean; // overclock.m, cloak.m: toggled on/off
   alertActive?: boolean; // alert.m only: currently detecting a threat?
   lastAlertTicks?: Map<string, number>; // alert.m: throttle per threat source
 }

@@ -153,6 +153,25 @@ body {
   color: #ff2222;
 }
 
+#panel-self .module-row .module-status.status-active {
+  color: #44cc88;
+}
+
+#panel-self .module-row.module-row-selected {
+  background: rgba(100, 180, 255, 0.08);
+  outline: 1px solid rgba(100, 180, 255, 0.3);
+}
+
+#panel-self .module-row.module-row-selected .module-name,
+#panel-self .module-row.module-row-selected .module-status {
+  color: #88ccff;
+}
+
+#panel-self .module-row .module-cursor {
+  color: #88ccff;
+  flex-shrink: 0;
+}
+
 #panel-self .coherence-bar {
   display: flex;
   gap: 1ch;
