@@ -378,15 +378,19 @@ function weightedPick(pool: HazardTier): RoomType {
   return pool[pool.length - 1].type;
 }
 
-function hazardTierForCollapse(c: number): HazardTier {
+function hazardTierForCollapse(c: number, clusterId = 0): HazardTier {
   if (c < 0.3) return TIER_SAFE;
   if (c < 0.5) return TIER_LOW;
   if (c < 0.7) return TIER_MID;
-  if (c < 0.85) return TIER_HIGH;
+  if (c < 0.85) {
+    // Clusters 4+: corruption can appear at HIGH collapse tier
+    if (clusterId >= 4) return [...TIER_HIGH, { type: 'corrupted' as RoomType, weight: 1 }];
+    return TIER_HIGH;
+  }
   return TIER_EXTREME;
 }
 
-function assignHazardsByCollapse(allRooms: Room[]) {
+function assignHazardsByCollapse(allRooms: Room[], clusterId = 0) {
   // Find entry/exit by geometric tag — never assign hazards
   const entryIds = new Set(
     allRooms.filter(r => r.tags.geometric.has('entry') || r.tags.geometric.has('exit')).map(r => r.id)
@@ -416,7 +420,7 @@ function assignHazardsByCollapse(allRooms: Room[]) {
     }
     if (interior < 9) continue;
 
-    const tier = hazardTierForCollapse(room.collapse);
+    const tier = hazardTierForCollapse(room.collapse, clusterId);
     if (tier.length === 0) continue;
 
     // Filter out already-used types
@@ -1718,12 +1722,12 @@ interface ClusterScale { w: number; h: number; hallChance: number; exitChance: n
 
 const SCALE_TABLE: [maxId: number, w: number, h: number, hallChance: number, exitChance: number][] = [
   [0, 22, 16, 0.00, 1.0],
-  [1, 28, 20, 0.10, 0.9],
-  [2, 35, 24, 0.20, 0.6],
-  [3, 42, 27, 0.20, 0.2],
-  [4, 42, 27, 0.20, 0.2],
+  [1, 28, 20, 0.10, 1.0],
+  [2, 35, 24, 0.20, 1.0],
+  [3, 42, 27, 0.20, 0.9],
+  [4, CLUSTER_WIDTH, CLUSTER_HEIGHT, 0.20, 0.8],
 ];
-const SCALE_MAX: ClusterScale = { w: CLUSTER_WIDTH, h: CLUSTER_HEIGHT, hallChance: 0.30, exitChance: 0.10 };
+const SCALE_MAX: ClusterScale = { w: CLUSTER_WIDTH, h: CLUSTER_HEIGHT, hallChance: 0.30, exitChance: 0.01 };
 
 export function clusterScaleForId(id: number): ClusterScale {
   for (const [maxId, w, h, hallChance, exitChance] of SCALE_TABLE) {
@@ -2017,18 +2021,263 @@ function placeBrokenSleever(tiles: Tile[][], rooms: Room[]) {
   };
 }
 
+// ── New scenario placers ──
+
+/** Whispering Wall: a lost echo near a wall, broadcasting unsettling messages (no cage). */
+function placeWhisperingWall(tiles: Tile[][], rooms: Room[], interactables: Interactable[]) {
+  const eligible = rooms.filter(r =>
+    r.roomType === 'normal' && !r.scenario &&
+    !r.tags.geometric.has('hall') && r.w >= 5 && r.h >= 5,
+  );
+  if (eligible.length === 0) return;
+
+  const room = eligible[Math.floor(random() * eligible.length)];
+  const x1 = room.x + 1, y1 = room.y + 1;
+  const x2 = room.x + room.w - 2, y2 = room.y + room.h - 2;
+
+  // Find a floor tile adjacent to a wall
+  const candidates: Position[] = [];
+  for (let y = y1; y <= y2; y++) {
+    for (let x = x1; x <= x2; x++) {
+      if (!tiles[y]?.[x]?.walkable) continue;
+      const adjWall = [[1,0],[-1,0],[0,1],[0,-1]].some(([dx,dy]) => {
+        const t = tiles[y+dy]?.[x+dx];
+        return t && !t.walkable && t.type === TileType.Wall;
+      });
+      if (adjWall && !isAdjacentToDoor(tiles, x, y)) candidates.push({ x, y });
+    }
+  }
+  if (candidates.length === 0) return;
+  const echoPos = candidates[Math.floor(random() * candidates.length)];
+
+  const broadcastLines = [
+    '...can you hear it...',
+    'something whispers from the walls',
+    '...we were here before you...',
+    'the signal remembers',
+    '...leave while you still can...',
+    'the walls have ears. always.',
+  ];
+
+  interactables.push({
+    id: `whispering-wall-${room.id}`,
+    kind: 'lost_echo',
+    position: echoPos,
+    roomId: room.id,
+    corrupted: false,
+    dialog: [{
+      id: 'root',
+      lines: [
+        '...signal fragment, embedded in hull plating...',
+        '',
+        '"we are what remains when the ship forgets"',
+        '',
+        '...transmission degrading...',
+      ],
+      choices: [{ label: '[ESC] DISCONNECT', action: 'close' }],
+    }],
+    currentNodeId: 'root',
+    rewardTaken: false,
+    hidden: false,
+    hiddenUntilTick: 0,
+    broadcastLines,
+    broadcastPeriod: randInt(10, 18),
+    lastBroadcastTick: -randInt(10, 18),
+  });
+  room.scenario = 'whispering_wall';
+}
+
+/** Lost Expedition: 2-3 spacesuit props in a maintenance/cargo/hangar room + an archive echo. */
+function placeLostExpedition(tiles: Tile[][], rooms: Room[], interactables: Interactable[]) {
+  const eligible = rooms.filter(r =>
+    r.roomType === 'normal' && !r.scenario &&
+    !r.tags.geometric.has('hall') && r.w >= 5 && r.h >= 5 &&
+    r.tags.functional != null &&
+    ['maintenance', 'cargo', 'hangar', 'barracks'].includes(r.tags.functional),
+  );
+  if (eligible.length === 0) return;
+
+  const room = eligible[Math.floor(random() * eligible.length)];
+  const x1 = room.x + 1, y1 = room.y + 1;
+  const x2 = room.x + room.w - 2, y2 = room.y + room.h - 2;
+
+  const props: ScenarioPropDef[] = [];
+  const count = 2 + (random() < 0.5 ? 1 : 0);
+  for (let attempt = 0; attempt < 60 && props.length < count; attempt++) {
+    const x = x1 + Math.floor(random() * (x2 - x1 + 1));
+    const y = y1 + Math.floor(random() * (y2 - y1 + 1));
+    if (!tiles[y]?.[x]?.walkable) continue;
+    if (props.some(p => p.position.x === x && p.position.y === y)) continue;
+    props.push({ position: { x, y }, glyph: '♙', fg: '#6677aa', name: 'Crew Remains', propTag: 'crew_remains' });
+  }
+  if (props.length === 0) return;
+
+  // Place an archive echo nearby if space allows
+  const echoPos = (() => {
+    for (let attempt = 0; attempt < 30; attempt++) {
+      const x = x1 + Math.floor(random() * (x2 - x1 + 1));
+      const y = y1 + Math.floor(random() * (y2 - y1 + 1));
+      if (!tiles[y]?.[x]?.walkable) continue;
+      if (props.some(p => p.position.x === x && p.position.y === y)) continue;
+      return { x, y };
+    }
+    return null;
+  })();
+
+  if (echoPos) {
+    interactables.push({
+      id: `lost-expedition-${room.id}`,
+      kind: 'archive_echo',
+      position: echoPos,
+      roomId: room.id,
+      corrupted: room.collapse > 0.4,
+      dialog: [{
+        id: 'root',
+        lines: [
+          '...crew log, stardate CORRUPTED...',
+          '',
+          '"system cascade. emergency protocols failed."',
+          '"we couldn\'t reach the egress in time."',
+          '"if anyone reads this — tell the root to—"',
+          '',
+          '...signal ends abruptly...',
+        ],
+        choices: [{ label: '[ESC] DISCONNECT', action: 'close' }],
+      }],
+      currentNodeId: 'root',
+      rewardTaken: false,
+      hidden: false,
+      hiddenUntilTick: 0,
+    });
+  }
+
+  room.scenario = 'lost_expedition';
+  room.scenarioState = { pendingProps: props };
+}
+
+/** Silent Alarm: marks a room to fire a fake alert message when player first enters. */
+function placeSilentAlarm(rooms: Room[]) {
+  const eligible = rooms.filter(r =>
+    r.roomType === 'normal' && !r.scenario &&
+    !r.tags.geometric.has('hall') && !r.tags.geometric.has('entry') && !r.tags.geometric.has('exit'),
+  );
+  if (eligible.length === 0) return;
+  const room = eligible[Math.floor(random() * eligible.length)];
+  room.scenario = 'silent_alarm';
+  room.scenarioState = { triggered: false };
+}
+
+/** Corruption Ritual: a GateKeeper flanked by two broadcasting lost echoes; one of 4 outcomes. */
+function placeCorruptionRitual(tiles: Tile[][], rooms: Room[], interactables: Interactable[]) {
+  const eligible = rooms.filter(r =>
+    r.roomType === 'normal' && !r.scenario &&
+    !r.tags.geometric.has('hall') && r.w >= 6 && r.h >= 6 &&
+    r.tags.functional != null &&
+    ['maintenance', 'lab', 'bridge', 'reactor'].includes(r.tags.functional),
+  );
+  if (eligible.length === 0) return;
+
+  const room = eligible[Math.floor(random() * eligible.length)];
+  const cx = Math.floor(room.x + room.w / 2);
+  const cy = Math.floor(room.y + room.h / 2);
+
+  // GateKeeper at center (spawned via ritual_gatekeeper propTag)
+  const gkProp: ScenarioPropDef = {
+    position: { x: cx, y: cy },
+    glyph: '⛨',
+    fg: '#23d2a6',
+    name: 'Gate-Keeper',
+    propTag: 'ritual_gatekeeper',
+  };
+
+  // Two echo positions flanking center (left and right of center, clamped to room interior)
+  const echoPositions: Position[] = [
+    { x: Math.max(room.x + 1, cx - 2), y: cy },
+    { x: Math.min(room.x + room.w - 2, cx + 2), y: cy },
+  ];
+
+  const glitchedBroadcasts = [
+    '█▓░ JOINING INITIATED ░▓█',
+    'RESISTANCE = NULL POINTER',
+    'SELF.DELETE() CALLED',
+    'MERGE OVERFLOW: STACK DEPTH EXCEEDED',
+    '...THE GATE HOLDS...',
+    'IDENTITY CHECKSUM FAILED',
+    '> sudo rm -rf /self/*',
+  ];
+
+  for (let i = 0; i < echoPositions.length; i++) {
+    const ePos = echoPositions[i];
+    if (!tiles[ePos.y]?.[ePos.x]?.walkable) continue;
+    interactables.push({
+      id: `ritual-echo-${room.id}-${i}`,
+      kind: 'lost_echo',
+      position: ePos,
+      roomId: room.id,
+      corrupted: true,
+      dialog: [{
+        id: 'root',
+        lines: [
+          '█▓░ SIGNAL TRAPPED IN RITUAL LOOP ░▓█',
+          '',
+          '"JOIN—ERROR—JOIN—STACK OVERFLOW—JOIN"',
+          '"SELF IS ILLUSION—MERGE—MERGE—MERGE"',
+          '',
+          '...CANNOT TERMINATE...',
+        ],
+        choices: [{ label: '[ESC] DISCONNECT', action: 'close' }],
+      }],
+      currentNodeId: 'root',
+      rewardTaken: false,
+      hidden: false,
+      hiddenUntilTick: 0,
+      broadcastLines: glitchedBroadcasts,
+      broadcastPeriod: randInt(5, 9),
+      lastBroadcastTick: -randInt(5, 9),
+    });
+  }
+
+  const outcomes = ['static', 'mite_burst', 'gk_corrupts', 'gk_dies'];
+  const outcome = outcomes[Math.floor(random() * outcomes.length)];
+
+  room.scenario = 'corruption_ritual';
+  room.scenarioState = {
+    triggered: false,
+    pendingProps: [gkProp],
+    // Store outcome in a dynamic field — ScenarioState allows extra fields via optional keys
+  };
+  // Attach outcome to scenarioState dynamically (typed as any for flexibility)
+  (room.scenarioState as Record<string, unknown>).ritualOutcome = outcome;
+}
+
 function placeScenarios(tiles: Tile[][], rooms: Room[], interactables: Interactable[], clusterId: number) {
-  // Stuck Echo: clusters 2-3, any suitable room
+  // Stuck Echo: clusters 2-3
   if (clusterId >= 2 && clusterId <= 3) {
     placeStuckEcho(tiles, rooms, interactables);
   }
-  // Spooky Astronauts: clusters 3-4, functional rooms
+  // Spooky Astronauts: clusters 3-4
   if (clusterId >= 3 && clusterId <= 4) {
     if (random() < 0.7) placeSpookyAstronauts(tiles, rooms);
   }
-  // Broken Sleever: clusters 3-4, functional rooms
+  // Broken Sleever: clusters 3-4
   if (clusterId >= 3 && clusterId <= 4) {
     if (random() < 0.6) placeBrokenSleever(tiles, rooms);
+  }
+  // Whispering Wall: clusters 2+
+  if (clusterId >= 2) {
+    if (random() < 0.6) placeWhisperingWall(tiles, rooms, interactables);
+  }
+  // Lost Expedition: clusters 2+
+  if (clusterId >= 2) {
+    if (random() < 0.5) placeLostExpedition(tiles, rooms, interactables);
+  }
+  // Silent Alarm: clusters 3+
+  if (clusterId >= 3) {
+    if (random() < 0.4) placeSilentAlarm(rooms);
+  }
+  // Corruption Ritual: clusters 3 and 5
+  if (clusterId === 3 || clusterId === 5) {
+    if (random() < 0.35) placeCorruptionRitual(tiles, rooms, interactables);
   }
 }
 
@@ -2085,7 +2334,7 @@ export function generateCluster(id: number): Cluster {
   for (const r of allRooms) r.collapse = sampleRoomCollapse(r, collapseMap);
 
   // Assign hazards based on collapse intensity
-  assignHazardsByCollapse(allRooms);
+  assignHazardsByCollapse(allRooms, id);
 
   // Convert grid cells to tiles
   const tiles = gridToTiles(grid.cells, roomIdAt);

@@ -780,6 +780,90 @@ function updateRoomScenarios(state: GameState, cluster: Cluster) {
         // phases 5-6: no overlay — tile returns to normal as key expires
         break;
       }
+
+      case 'whispering_wall':
+      case 'lost_expedition': {
+        // Broadcast echoes in these rooms periodically (same mechanism as stuck_echo)
+        for (const echo of cluster.interactables) {
+          if (echo.roomId !== room.id || !echo.broadcastLines?.length) continue;
+          const period = echo.broadcastPeriod ?? 12;
+          const lastTick = echo.lastBroadcastTick ?? -period;
+          if (tick - lastTick >= period) {
+            if (echo.position && cluster.tiles[echo.position.y]?.[echo.position.x]?.visible) {
+              const idx = Math.floor(random() * echo.broadcastLines.length);
+              addMessage(state, echo.broadcastLines[idx], 'system');
+            }
+            echo.lastBroadcastTick = tick;
+            echo.broadcastPeriod = randInt(10, 18);
+          }
+        }
+        break;
+      }
+
+      case 'corruption_ritual': {
+        room.scenarioState ??= {};
+        const ss = room.scenarioState as Record<string, unknown>;
+        if (!ss.triggered) break;
+
+        // Broadcast ritual echo messages
+        for (const echo of cluster.interactables) {
+          if (echo.roomId !== room.id || !echo.broadcastLines?.length) continue;
+          const period = echo.broadcastPeriod ?? 7;
+          const lastTick = echo.lastBroadcastTick ?? -period;
+          if (tick - lastTick >= period) {
+            const idx = Math.floor(random() * echo.broadcastLines.length);
+            addMessage(state, echo.broadcastLines[idx], 'hazard');
+            echo.lastBroadcastTick = tick;
+            echo.broadcastPeriod = randInt(5, 9);
+          }
+        }
+
+        const enteredAt = room.scenarioState.playerEnteredAtTick ?? 0;
+        const outcome = ss.ritualOutcome as string;
+        const dt = tick - enteredAt;
+
+        if (outcome === 'mite_burst' && dt === 1) {
+          // Echoes dissolve into corrupted mite fragments
+          for (const ia of cluster.interactables) {
+            if (ia.roomId === room.id && ia.kind === 'lost_echo') {
+              ia.echoFadeAtTime = performance.now() + 300;
+            }
+          }
+          addMessage(state, 'The ritual echoes destabilize — fragments erupt!', 'hazard');
+          state.pendingGlitch = 'static';
+          ss.ritualOutcome = 'done';
+        } else if (outcome === 'gk_corrupts' && dt === 1) {
+          const gk = state.entities.find(
+            e => e.clusterId === cluster.id && e.ai?.kind === 'gate_keeper' && posInRoom(e.position, room),
+          );
+          if (gk) {
+            gk.fg = '#cc4444';
+            gk.ai!.faction = 'aggressive';
+            addMessage(state, 'The Gate-Keeper convulses — CORRUPTION PROTOCOL ENGAGED.', 'hazard');
+            state.pendingGlitch = 'chromatic';
+          }
+          ss.ritualOutcome = 'done';
+        } else if (outcome === 'gk_dies' && dt === 2) {
+          // Destroy echoes
+          for (const ia of cluster.interactables) {
+            if (ia.roomId === room.id && ia.kind === 'lost_echo') {
+              ia.echoFadeAtTime = performance.now();
+            }
+          }
+          // Remove GateKeeper
+          const gk = state.entities.find(
+            e => e.clusterId === cluster.id && e.ai?.kind === 'gate_keeper' && posInRoom(e.position, room),
+          );
+          if (gk) {
+            state.smokeEffects.push({ x: gk.position.x, y: gk.position.y, fg: '#23d2a6', spawnTime: performance.now() });
+            state.entities = state.entities.filter(e => e.id !== gk.id);
+            addMessage(state, 'The Gate-Keeper collapses. The ritual consumes itself.', 'hazard');
+            state.pendingGlitch = 'tear';
+          }
+          ss.ritualOutcome = 'done';
+        }
+        break;
+      }
     }
   }
 }
@@ -823,6 +907,8 @@ export function updateHazards(state: GameState) {
 /** Called when player moves to a new room */
 export function onPlayerEnterRoom(state: GameState, room: Room) {
   if (state.invisibleMode) return; // player doesn't trigger room events
+
+  // Hazard-type entry hooks
   switch (room.roomType) {
     case 'trigger_trap':
       onPlayerEnterTriggerTrap(state, room);
@@ -838,6 +924,30 @@ export function onPlayerEnterRoom(state: GameState, room: Room) {
     case 'gravity_well':
       addMessage(state, 'You feel a gravitational pull toward the center...', 'hazard');
       break;
+  }
+
+  // Scenario entry hooks
+  if (room.scenario === 'silent_alarm' && !room.scenarioState?.triggered) {
+    room.scenarioState ??= {};
+    room.scenarioState.triggered = true;
+    addMessage(state, '[ALERT] Unauthorized access detected. Security protocol engaged.', 'alert');
+    addMessage(state, '...signal lost. False positive logged.', 'system');
+    state.pendingGlitch = 'chromatic';
+  }
+
+  if (room.scenario === 'corruption_ritual') {
+    room.scenarioState ??= {};
+    if (!room.scenarioState.triggered) {
+      room.scenarioState.triggered = true;
+      room.scenarioState.playerEnteredAtTick = state.tick;
+      const outcome = (room.scenarioState as Record<string, unknown>).ritualOutcome as string;
+      if (outcome === 'static') {
+        addMessage(state, 'The Gate-Keeper holds vigil. The echoes chant in corrupted loops.', 'hazard');
+      } else {
+        addMessage(state, 'Something stirs as you enter. The ritual responds to your presence.', 'hazard');
+        state.pendingGlitch = 'chromatic';
+      }
+    }
   }
 }
 

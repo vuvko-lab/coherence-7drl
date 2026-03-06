@@ -10,7 +10,7 @@ import { findPath } from './pathfinding';
 import { updateHazards, onPlayerEnterRoom, getPlayerRoom, applyTileHazardToPlayer, updateAlertModule } from './hazards';
 import { seed as seedRng, generateSeed, randInt } from './rng';
 import {
-  updateEntityAI, makeChronicler, makeBitMite, makeLogicLeech, makeWhiteHat, makePropEntity, makeGateKeeper,
+  updateEntityAI, makeChronicler, makeBitMite, makeLogicLeech, makeWhiteHat, makePropEntity, makeGateKeeper, makeRepairScrapper,
 } from './ai';
 export { makeDamagedBitMite } from './ai';
 import { shootingAnimation } from './combat_animations';
@@ -153,9 +153,8 @@ export function addMessage(state: GameState, text: string, type: GameMessage['ty
 function spawnClusterEntities(state: GameState, cluster: Cluster) {
   const id = cluster.id;
 
-  // Clusters 0 and 1 are enemy-free (tutorial / early intro zone)
-  if (id <= 1) {
-    // Still spawn scenario prop entities
+  // Cluster 0 is fully enemy-free (tutorial zone) — only spawn scenario props
+  if (id === 0) {
     for (const room of cluster.rooms) {
       const props = room.scenarioState?.pendingProps;
       if (!props || props.length === 0) continue;
@@ -221,18 +220,22 @@ function spawnClusterEntities(state: GameState, cluster: Cluster) {
     // Pick entity kind: weighted by geometry and room type
     const isPeripheral = room.tags.geometric.has('peripheral') || room.tags.geometric.has('dead_end');
     const inSafeRoom = room.roomType === 'normal';
+    const hasEnemies = id >= 2; // enemies only in cluster 2+
 
-    // Weights: [bit_mite, logic_leech, chronicler, white_hat, gate_keeper]
+    // Weights: [bit_mite, logic_leech, chronicler, white_hat, gate_keeper, repair_scrapper]
     // GateKeeper: only appears at depth 4+ (cluster 3+), prefers high-collapse rooms
-    const gkWeight = Math.max(0, (depth - 3) * 0.8) * (room.collapse > 0.5 ? 2 : 1);
+    const gkWeight = hasEnemies ? Math.max(0, (depth - 3) * 0.8) * (room.collapse > 0.5 ? 2 : 1) : 0;
+    // Repair scrapper: low weight in cluster 1, higher in clusters 4-5
+    const rsWeight = id >= 4 ? 2 : id >= 2 ? 0.8 : 0.4;
     const w = [
-      4 + depth,                              // bit_mite: always common, scales with depth
-      isPeripheral ? 2 + depth * 0.5 : 1,    // logic_leech: prefers edges
-      1.5,                                    // chronicler: constant neutral presence
-      inSafeRoom ? 1 : 0,                     // white_hat: only in normal rooms
-      gkWeight,                               // gate_keeper: rare, depth-4+ only
+      hasEnemies ? 4 + depth : 0,                              // bit_mite: cluster 2+
+      hasEnemies ? (isPeripheral ? 2 + depth * 0.5 : 1) : 0,  // logic_leech: prefers edges
+      hasEnemies ? 1.5 : 0,                                    // chronicler: cluster 2+
+      hasEnemies && inSafeRoom ? 1 : 0,                        // white_hat: only in normal rooms
+      gkWeight,                                                 // gate_keeper: rare, depth-4+ only
+      rsWeight,                                                 // repair_scrapper: all clusters 1+
     ];
-    const total = w[0] + w[1] + w[2] + w[3] + w[4];
+    const total = w[0] + w[1] + w[2] + w[3] + w[4] + w[5];
     const roll = Math.random() * total;
 
     let entity: Entity;
@@ -244,8 +247,10 @@ function spawnClusterEntities(state: GameState, cluster: Cluster) {
       entity = makeChronicler(pos, id);
     } else if (roll < w[0] + w[1] + w[2] + w[3]) {
       entity = makeWhiteHat(pos, id);
-    } else {
+    } else if (roll < w[0] + w[1] + w[2] + w[3] + w[4]) {
       entity = makeGateKeeper(pos, id);
+    } else {
+      entity = makeRepairScrapper(pos, id);
     }
 
     // Apply functional tag modifiers to entity stats
@@ -260,7 +265,12 @@ function spawnClusterEntities(state: GameState, cluster: Cluster) {
     const props = room.scenarioState?.pendingProps;
     if (!props || props.length === 0) continue;
     for (const p of props) {
-      spawned.push(makePropEntity(p.position, id, p.glyph, p.fg, p.name, p.propTag));
+      // Special prop tags that resolve to real entities instead of static props
+      if (p.propTag === 'ritual_gatekeeper') {
+        spawned.push(makeGateKeeper(p.position, id));
+      } else {
+        spawned.push(makePropEntity(p.position, id, p.glyph, p.fg, p.name, p.propTag));
+      }
     }
     room.scenarioState!.pendingProps = []; // clear so we don't re-spawn
   }

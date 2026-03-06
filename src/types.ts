@@ -144,7 +144,10 @@ export function createRoomTags(geometric?: GeometricTag[]): RoomTags {
   };
 }
 
-export type RoomScenario = 'stuck_echo' | 'spooky_astronauts' | 'broken_sleever';
+export type RoomScenario =
+  | 'stuck_echo' | 'spooky_astronauts' | 'broken_sleever'
+  | 'whispering_wall' | 'lost_expedition' | 'silent_alarm'
+  | 'corruption_ritual';
 
 export interface ScenarioPropDef {
   position: Position;
@@ -271,12 +274,13 @@ export interface AnimationState {
 
 // ── Entity AI ──
 
-export type EntityKind = 
+export type EntityKind =
   | 'chronicler'
   | 'bit_mite'
   | 'logic_leech'
   | 'white_hat'
   | 'gate_keeper'
+  | 'repair_scrapper'
   ;
 export type Faction = 'neutral' | 'aggressive' | 'friendly';
 export type AIState =
@@ -291,6 +295,7 @@ export type AIState =
   | 'charge'     // logic_leech: straight-line dash
   | 'rest'       // logic_leech: cooldown after charge
   | 'lockdown'   // gatekeeper: stay in place, and pull enemies
+  | 'repair'     // repair_scrapper: moving toward / fixing a corrupted interactable
   ;
 
 export interface EntityAI {

@@ -604,6 +604,74 @@ function getEntityById(state: GameState, id?: number): Entity | undefined {
   return state.entities.find(e => e.id === id);
 }
 
+// ── Repair Scrapper (neutral) ──
+// Speed 25 (moderate). Patrols → seeks corrupted interactables → attempts repair.
+
+function updateRepairScrapper(state: GameState, entity: Entity, cluster: Cluster) {
+  const ai = entity.ai!;
+
+  switch (ai.aiState) {
+    case 'patrol': {
+      // Scan for nearby corrupted interactables
+      let nearestDist = Infinity;
+      let nearestPos: Position | undefined;
+      for (const ia of cluster.interactables) {
+        if (!ia.corrupted || ia.rewardTaken) continue;
+        const dx = ia.position.x - entity.position.x;
+        const dy = ia.position.y - entity.position.y;
+        const dist = Math.abs(dx) + Math.abs(dy);
+        if (dist <= ai.sightRadius && dist < nearestDist) {
+          nearestDist = dist;
+          nearestPos = ia.position;
+        }
+      }
+      if (nearestPos) {
+        ai.lastTargetPos = { ...nearestPos };
+        ai.aiState = 'repair';
+        return;
+      }
+      // Wander if no target
+      const step = randomWalkStep(cluster, entity.position);
+      if (step) move(entity, cluster, step, state);
+      break;
+    }
+
+    case 'repair': {
+      if (!ai.lastTargetPos) { ai.aiState = 'patrol'; return; }
+      // Find the interactable at the stored position
+      const ia = cluster.interactables.find(
+        i => i.position.x === ai.lastTargetPos!.x && i.position.y === ai.lastTargetPos!.y,
+      );
+      if (!ia || !ia.corrupted) {
+        ai.lastTargetPos = undefined;
+        ai.aiState = 'patrol';
+        return;
+      }
+      // Move toward target
+      const dx = Math.abs(entity.position.x - ia.position.x);
+      const dy = Math.abs(entity.position.y - ia.position.y);
+      if (dx + dy > 1) {
+        const step = stepToward(cluster, entity.position, ia.position);
+        if (step) move(entity, cluster, step, state);
+      } else {
+        // Adjacent — attempt repair
+        if (Math.random() < 0.4) {
+          ia.corrupted = false;
+          addAiMessage(state, '[SCRAPPER] Signal fragment stabilized.', 'system');
+        } else {
+          addAiMessage(state, '[SCRAPPER] Repair attempt failed. Resuming patrol.', 'system');
+        }
+        ai.lastTargetPos = undefined;
+        ai.aiState = 'patrol';
+      }
+      break;
+    }
+
+    default:
+      ai.aiState = 'patrol';
+  }
+}
+
 // ── Main dispatch ──
 
 export function updateEntityAI(state: GameState, entity: Entity) {
@@ -613,11 +681,12 @@ export function updateEntityAI(state: GameState, entity: Entity) {
   if (!cluster) return;
 
   switch (ai.kind) {
-    case 'chronicler':  updateChronicler(state, entity, cluster);  break;
-    case 'bit_mite':    updateBitMite(state, entity, cluster);     break;
-    case 'logic_leech': updateLogicLeech(state, entity, cluster);  break;
-    case 'white_hat':   updateWhiteHat(state, entity, cluster);    break;
-    case 'gate_keeper': updateGateKeeper(state, entity, cluster);  break;
+    case 'chronicler':      updateChronicler(state, entity, cluster);      break;
+    case 'bit_mite':        updateBitMite(state, entity, cluster);         break;
+    case 'logic_leech':     updateLogicLeech(state, entity, cluster);      break;
+    case 'white_hat':       updateWhiteHat(state, entity, cluster);        break;
+    case 'gate_keeper':     updateGateKeeper(state, entity, cluster);      break;
+    case 'repair_scrapper': updateRepairScrapper(state, entity, cluster);  break;
   }
 }
 
@@ -835,6 +904,30 @@ export function makeGateKeeper(pos: Position, clusterId: number): Entity {
       faction: 'friendly',
       aiState: 'lockdown',        // pulls targets onto inself
       sightRadius: 6,
+      wallPenetration: 0,
+    },
+  };
+}
+
+export function makeRepairScrapper(pos: Position, clusterId: number): Entity {
+  return {
+    id: _nextEntityId++,
+    name: 'Repair Scrapper',
+    glyph: '⚙',
+    fg: '#7799bb',
+    position: { ...pos },
+    clusterId,
+    speed: 25,
+    energy: 0,
+    coherence: 35,
+    maxCoherence: 35,
+    attackDistance: 0,
+    attackValue: 0,
+    ai: {
+      kind: 'repair_scrapper',
+      faction: 'neutral',
+      aiState: 'patrol',
+      sightRadius: 5,
       wallPenetration: 0,
     },
   };
