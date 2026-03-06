@@ -123,6 +123,8 @@ export function createGame(initialSeed?: number): GameState {
     killedEntities: [],
     finalClusterId: 5,
     collapseGlitchTiles: new Map(),
+    selfPanelRevealed: false,
+    smokeEffects: [],
   };
 
   addMessage(state, 'System boot... ego-fragment loaded from backup.', 'system');
@@ -338,6 +340,12 @@ function tryMove(state: GameState, dx: number, dy: number): boolean {
           `You strike ${bumpedEntity.name} for ${MELEE_DAMAGE}. (${bumpedEntity.coherence}/${bumpedEntity.maxCoherence})`,
           'important');
         if (bumpedEntity.coherence <= 0) {
+          const _sf = bumpedEntity.ai?.faction;
+          state.smokeEffects.push({
+            x: bumpedEntity.position.x, y: bumpedEntity.position.y,
+            fg: _sf === 'aggressive' ? '#cc4444' : _sf === 'friendly' ? '#23d2a6' : '#aaaa66',
+            spawnTick: state.tick,
+          });
           if (bumpedEntity.ai) state.killedEntities.push({ name: bumpedEntity.name, kind: bumpedEntity.ai.kind });
           state.entities = state.entities.filter(e => e.id !== bumpedEntity.id);
           state.markedEntities.delete(bumpedEntity.id);
@@ -369,7 +377,11 @@ function tryMove(state: GameState, dx: number, dy: number): boolean {
   // Check for interface exit
   const tile = cluster.tiles[ny][nx];
   if (tile.type === TileType.InterfaceExit) {
-    addMessage(state, 'Interface exit detected. Press Enter to transfer.', 'important');
+    if (cluster.id === 0 && nx < 1) {
+      addMessage(state, 'Infomorph sleeving facility. Status: [ERROR]', 'important');
+    } else {
+      addMessage(state, 'Interface exit detected. Press Enter to transfer.', 'important');
+    }
   }
 
   return true;
@@ -439,6 +451,9 @@ function tryTransfer(state: GameState): boolean {
     addMessage(state, `Cluster ${newId} generated.`, 'system');
   }
 
+  // Leaving cluster 0 always reveals the SELF panel (for players who skip the tutorial echo)
+  if (cluster.id === 0) state.selfPanelRevealed = true;
+
   // Transfer player
   const targetCluster = state.clusters.get(iface.targetClusterId)!;
   state.currentClusterId = iface.targetClusterId;
@@ -450,7 +465,11 @@ function tryTransfer(state: GameState): boolean {
   state.hazardFogMarks.clear();
   state.revealEffects = [];
 
-  addMessage(state, `Transferred to cluster ${iface.targetClusterId}.`, 'important');
+  if (cluster.id === 0) {
+    addMessage(state, 'Infomorph sleeving facility. Status: [ERROR]', 'important');
+  } else {
+    addMessage(state, `Transferred to cluster ${iface.targetClusterId}.`, 'important');
+  }
 
   computeFOV(targetCluster, state.player.position);
   return true;
@@ -587,8 +606,33 @@ export function processAction(state: GameState, action: PlayerAction): boolean {
         updateEntityAI(state, entity);
       }
     }
-    // Remove dead entities (coherence <= 0)
+    // Remove dead entities (coherence <= 0) — spawn smoke for any not yet handled
+    for (const e of state.entities) {
+      if ((e.coherence ?? 1) <= 0 && e.id !== state.player.id) {
+        if (!state.smokeEffects.some(s => s.spawnTick === state.tick && s.x === e.position.x && s.y === e.position.y)) {
+          const _sf = e.ai?.faction;
+          state.smokeEffects.push({
+            x: e.position.x, y: e.position.y,
+            fg: _sf === 'aggressive' ? '#cc4444' : _sf === 'friendly' ? '#23d2a6' : '#aaaa66',
+            spawnTick: state.tick,
+          });
+        }
+      }
+    }
     state.entities = state.entities.filter(e => (e.coherence ?? 1) > 0);
+
+    // Echo fade: dissolve interactables with echoFadeAtTick <= current tick
+    const currentCluster = getCurrentCluster(state);
+    for (let i = currentCluster.interactables.length - 1; i >= 0; i--) {
+      const item = currentCluster.interactables[i];
+      if (item.echoFadeAtTick != null && state.tick >= item.echoFadeAtTick) {
+        state.smokeEffects.push({ x: item.position.x, y: item.position.y, fg: '#aaaa66', spawnTick: state.tick });
+        const bm = makeBitMite(item.position, currentCluster.id);
+        state.entities.push(bm);
+        addMessage(state, '...signal dissolved.', 'system');
+        currentCluster.interactables.splice(i, 1);
+      }
+    }
   }
 
   return acted;

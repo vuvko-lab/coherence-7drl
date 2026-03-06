@@ -424,6 +424,8 @@ function buildSimState(): GameState {
     killedEntities: [],
     finalClusterId: 5,
     collapseGlitchTiles: new Map(),
+    selfPanelRevealed: true,
+    smokeEffects: [],
   };
 
   computeFOV(clusterClone, entryPos);

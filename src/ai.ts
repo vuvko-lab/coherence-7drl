@@ -486,9 +486,7 @@ function updateWhiteHat(state: GameState, entity: Entity, cluster: Cluster) {
         shootingAnimation(state, entity.position, target.position, 'single');
         if (target.coherence <= 0) {
           addAiMessage(state, `White-Hat Sentry destroys ${target.name}!`, 'combat');
-          // Remove entity
-          state.entities = state.entities.filter(e => e.id !== target.id);
-          state.markedEntities.delete(target.id);
+          removeEntity(state, target);
           ai.aiState = 'patrol';
           ai.targetId = undefined;
           return;
@@ -576,9 +574,21 @@ function findEntityAt(state: GameState, clusterId: number, x: number, y: number)
   return state.entities.find(e => e.clusterId === clusterId && e.position.x === x && e.position.y === y);
 }
 
-/** Remove an entity from the game state. */
+function factionSmokeColor(faction?: string): string {
+  if (faction === 'aggressive') return '#cc4444';
+  if (faction === 'friendly') return '#23d2a6';
+  return '#aaaa66';
+}
+
+/** Remove an entity from the game state, spawning a death-smoke effect. */
 function removeEntity(state: GameState, target: Entity) {
   if (target.id === state.player.id) return; // never remove player
+  state.smokeEffects.push({
+    x: target.position.x, y: target.position.y,
+    fg: factionSmokeColor(target.ai?.faction),
+    spawnTick: state.tick,
+  });
+  if (target.ai) state.killedEntities.push({ name: target.name, kind: target.ai.kind });
   state.entities = state.entities.filter(e => e.id !== target.id);
   state.markedEntities.delete(target.id);
 }

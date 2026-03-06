@@ -151,6 +151,8 @@ function createStateForCluster(seed: number, clusterId: number): GameState {
     killedEntities: [],
     finalClusterId: 5,
     collapseGlitchTiles: new Map(),
+    selfPanelRevealed: true,
+    smokeEffects: [],
   };
 
   computeFOV(cluster, entryPos);

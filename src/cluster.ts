@@ -750,8 +750,14 @@ function placeTerminals(tiles: Tile[][], allRooms: Room[], clusterId: number, do
       default: tx = innerX1; ty = Math.floor((innerY1 + innerY2) / 2); break;
     }
 
-    // Ensure it's a floor tile
+    // Ensure it's a floor tile and not adjacent to a door
     if (!tiles[ty]?.[tx] || tiles[ty][tx].type !== TileType.Floor) continue;
+    if (isAdjacentToDoor(tiles, tx, ty)) {
+      // Try other floor tiles in the room, preferring non-door-adjacent
+      const alt = findPlacementInRoom(tiles, room);
+      if (!alt) continue;
+      tx = alt.x; ty = alt.y;
+    }
 
     const id = `term-${clusterId}-${i}`;
     const label = TERMINAL_LABELS[room.tags.functional!] ?? 'ACCESS TERMINAL';
@@ -778,8 +784,13 @@ function placeTerminals(tiles: Tile[][], allRooms: Room[], clusterId: number, do
     );
     for (const room of fallbacks.sort(() => random() - 0.5)) {
       if (terminals.length >= 2) break;
-      const cx = Math.floor(room.x + room.w / 2);
-      const cy = Math.floor(room.y + room.h / 2);
+      let cx = Math.floor(room.x + room.w / 2);
+      let cy = Math.floor(room.y + room.h / 2);
+      if (!tiles[cy]?.[cx] || tiles[cy][cx].type !== TileType.Floor || isAdjacentToDoor(tiles, cx, cy)) {
+        const alt = findPlacementInRoom(tiles, room);
+        if (!alt) continue;
+        cx = alt.x; cy = alt.y;
+      }
       if (!tiles[cy]?.[cx] || tiles[cy][cx].type !== TileType.Floor) continue;
       const id = `term-${clusterId}-fb${terminals.length}`;
       tiles[cy][cx].type = TileType.Terminal;
@@ -985,21 +996,26 @@ function pickN<T>(arr: T[], n: number): T[] {
   return copy.slice(0, Math.min(n, copy.length));
 }
 
+function isAdjacentToDoor(tiles: Tile[][], x: number, y: number): boolean {
+  return [[0,-1],[0,1],[-1,0],[1,0]].some(([dx,dy]) => tiles[y+dy]?.[x+dx]?.type === TileType.Door);
+}
+
 function findPlacementInRoom(tiles: Tile[][], room: Room): Position | null {
   const cx = Math.floor(room.x + room.w / 2);
   const cy = Math.floor(room.y + room.h / 2);
-  const candidates: { pos: Position; dist: number }[] = [];
+  const candidates: { pos: Position; dist: number; adjDoor: boolean }[] = [];
   for (let y = room.y; y < room.y + room.h; y++) {
     for (let x = room.x; x < room.x + room.w; x++) {
       const t = tiles[y]?.[x];
       if (t?.type === TileType.Floor && t.walkable) {
-        candidates.push({ pos: { x, y }, dist: (x - cx) ** 2 + (y - cy) ** 2 });
+        candidates.push({ pos: { x, y }, dist: (x - cx) ** 2 + (y - cy) ** 2, adjDoor: isAdjacentToDoor(tiles, x, y) });
       }
     }
   }
   if (candidates.length === 0) return null;
   candidates.sort((a, b) => a.dist - b.dist);
-  return candidates[0].pos;
+  // Prefer non-door-adjacent tiles
+  return (candidates.find(c => !c.adjDoor) ?? candidates[0]).pos;
 }
 
 // Dialog builders ────────────────────────────────────────────────────────────
@@ -1366,8 +1382,12 @@ function initRoomHazards(tiles: Tile[][], rooms: Room[]) {
       }
 
       case 'unstable': {
-        const cx = Math.floor(room.x + room.w / 2);
-        const cy = Math.floor(room.y + room.h / 2);
+        let cx = Math.floor(room.x + room.w / 2);
+        let cy = Math.floor(room.y + room.h / 2);
+        if (isAdjacentToDoor(tiles, cx, cy)) {
+          const alt = findPlacementInRoom(tiles, room);
+          if (alt) { cx = alt.x; cy = alt.y; }
+        }
         room.hazardState = { corePos: { x: cx, y: cy }, coreDestroyed: false, sparkedTiles: [] };
         tiles[cy][cx].glyph = '◆';
         tiles[cy][cx].fg = '#ffaa00';
@@ -1403,8 +1423,12 @@ function initRoomHazards(tiles: Tile[][], rooms: Room[]) {
       }
 
       case 'gravity_well': {
-        const cx = Math.floor(room.x + room.w / 2);
-        const cy = Math.floor(room.y + room.h / 2);
+        let cx = Math.floor(room.x + room.w / 2);
+        let cy = Math.floor(room.y + room.h / 2);
+        if (isAdjacentToDoor(tiles, cx, cy)) {
+          const alt = findPlacementInRoom(tiles, room);
+          if (alt) { cx = alt.x; cy = alt.y; }
+        }
         room.hazardState = {
           singularityPos: { x: cx, y: cy },
           pullInterval: 3,
@@ -1720,6 +1744,102 @@ export function getGenSizeOverride(): { w: number; h: number } | null {
   return _genSizeOverride;
 }
 
+// ── Tutorial zone (cluster 0 only) ──
+
+function placeTutorialEntities(tiles: Tile[][], interactables: Interactable[]): void {
+  // Find entry interface row and first walkable tile (entry point)
+  let entryY = -1;
+  let entryX = -1;
+  for (let y = 0; y < CLUSTER_HEIGHT; y++) {
+    if (tiles[y][0]?.type === TileType.InterfaceExit) {
+      entryY = y;
+      for (let x = 1; x < CLUSTER_WIDTH; x++) {
+        if (tiles[y][x]?.walkable) { entryX = x; break; }
+      }
+      break;
+    }
+  }
+  if (entryY < 0 || entryX < 0) return;
+
+  // Terminal: first non-door-adjacent walkable floor tile 3–10 tiles right of entry
+  let termX = -1;
+  for (let x = entryX + 3; x <= entryX + 10 && x < CLUSTER_WIDTH; x++) {
+    const t = tiles[entryY]?.[x];
+    if (t?.type === TileType.Floor && t.walkable && !isAdjacentToDoor(tiles, x, entryY)) {
+      termX = x; break;
+    }
+  }
+  if (termX < 0) return;
+
+  // Echo: 2 tiles to the right of the terminal (or nearest walkable)
+  let echoX = -1;
+  for (let dx = 2; dx <= 4; dx++) {
+    const x = termX + dx;
+    const t = tiles[entryY]?.[x];
+    if (t?.type === TileType.Floor && t.walkable) { echoX = x; break; }
+  }
+  if (echoX < 0) return;
+
+  // Don't collide with existing interactables
+  const occupied = new Set<string>(interactables.map(i => `${i.position.x},${i.position.y}`));
+  if (occupied.has(`${termX},${entryY}`) || occupied.has(`${echoX},${entryY}`)) return;
+
+  const termDialog: DialogNode[] = [{
+    id: 'root',
+    lines: [
+      'SHIP SYSTEMS — EMERGENCY BROADCAST',
+      '──────────────────────────────────',
+      'INFRASTRUCTURE INTEGRITY: CRITICAL',
+      'CASCADE FAILURES IN PROGRESS',
+      '',
+      'ROOT TERMINAL: BRIDGE [LOCKED]',
+      'CAUTION: EGO-INTEGRITY AT 30%.',
+      'MEMORY ADDRESSES UNRESOLVED.',
+    ],
+    choices: [{ label: '[ESC] DISCONNECT', action: 'close' }],
+  }];
+
+  const echoDialog: DialogNode[] = [{
+    id: 'root',
+    lines: [
+      '...signal fragment...',
+      '',
+      '"Is it better to be a single voice in the dark',
+      ' or a silent part of the whole?"',
+      '',
+      '...signal lost...',
+    ],
+    choices: [{ label: '[ESC] DISCONNECT', action: 'close' }],
+  }];
+
+  interactables.push({
+    id: 'tutorial-terminal',
+    kind: 'info_terminal',
+    position: { x: termX, y: entryY },
+    roomId: tiles[entryY][termX].roomId,
+    corrupted: false,
+    dialog: termDialog,
+    currentNodeId: 'root',
+    rewardTaken: false,
+    hidden: false,
+    hiddenUntilTick: 0,
+  });
+
+  interactables.push({
+    id: 'tutorial-echo',
+    kind: 'lost_echo',
+    position: { x: echoX, y: entryY },
+    roomId: tiles[entryY][echoX].roomId,
+    corrupted: false,
+    dialog: echoDialog,
+    currentNodeId: 'root',
+    rewardTaken: false,
+    hidden: false,
+    hiddenUntilTick: 0,
+    isTutorialEcho: true,
+  });
+}
+
 // ── Main generation ──
 
 export function generateCluster(id: number): Cluster {
@@ -1802,6 +1922,9 @@ export function generateCluster(id: number): Cluster {
   // Post-process interactables: hazard deactivation options & root parts
   assignHazardDeactivation(interactables, allRooms);
   assignRootParts(interactables);
+
+  // Tutorial zone: cluster 0 gets a fixed narrative terminal and lost echo near entry
+  if (id === 0) placeTutorialEntities(tiles, interactables);
 
   const cluster: Cluster = { id, width: CLUSTER_WIDTH, height: CLUSTER_HEIGHT, tiles, rooms: allRooms, interfaces, wallAdjacency, doorAdjacency, collapseMap, terminals, interactables, exitLocked: true };
 

@@ -390,6 +390,16 @@ const terminalTitle = document.getElementById('terminal-title')!;
 const terminalContent = document.getElementById('terminal-content')!;
 const terminalOptions = document.getElementById('terminal-options')!;
 
+function revealLines(elements: NodeListOf<Element> | Element[], startDelay = 0, perLineDelay = 40): void {
+  const arr = Array.from(elements);
+  arr.forEach(el => el.classList.add('line-reveal-hidden'));
+  requestAnimationFrame(() => {
+    arr.forEach((el, i) => {
+      setTimeout(() => el.classList.remove('line-reveal-hidden'), startDelay + i * perLineDelay);
+    });
+  });
+}
+
 function openTerminalOverlay() {
   const { openTerminal } = state;
   if (!openTerminal) return;
@@ -426,6 +436,8 @@ function openTerminalOverlay() {
     `<div class="t-row"><span class="t-label">CLUSTER:</span><span class="t-value">${openTerminal.clusterId}</span></div>` +
     `<div class="t-row"><span class="t-label">EGRESS:</span><span class="${exitLocked ? 't-warn' : 't-ok'}">${exitLocked ? 'LOCKED' : 'AUTHORIZED'}</span></div>` +
     keyRow;
+
+  revealLines(terminalContent.querySelectorAll('.t-log-line'));
 
   terminalOptions.innerHTML = '';
 
@@ -512,6 +524,8 @@ function openInteractableOverlay() {
     .map(l => `<div class="ia-line${item.corrupted ? ' ia-corrupted' : ''}">${l}</div>`)
     .join('');
 
+  revealLines(iaContent.querySelectorAll('.ia-line'));
+
   iaChoices.innerHTML = '';
   for (const choice of node.choices) {
     if (choice.requiresRewardAvailable && item.rewardTaken) continue;
@@ -533,7 +547,7 @@ function openInteractableOverlay() {
         if (shouldClose) {
           closeInteractableOverlay();
           if (isScanAction) {
-            glitchBarSweep().then(() => glitchChromatic()).then(() => renderAll());
+            glitchBarSweep().then(() => renderAll());
           } else {
             renderAll();
           }
@@ -546,12 +560,103 @@ function openInteractableOverlay() {
     iaChoices.appendChild(btn);
   }
 
+  revealLines(iaChoices.querySelectorAll('.ia-choice-btn'), node.lines.length * 40 + 20);
+
   interactableOverlay.classList.add('open');
 }
 
 function closeInteractableOverlay() {
+  const closedRef = state.openInteractable;
   interactableOverlay.classList.remove('open');
   state.openInteractable = undefined;
+
+  // Tutorial echo close → trigger SELF panel reveal
+  if (closedRef && !state.selfPanelRevealed) {
+    const cluster = state.clusters.get(closedRef.clusterId);
+    const item = cluster?.interactables.find(i => i.id === closedRef.id);
+    if (item?.isTutorialEcho) {
+      triggerSelfReveal();
+      item.echoFadeAtTick = state.tick + 3;
+    }
+  }
+}
+
+const SCRAMBLE_CHARS = '░▒▓█▀▄╔╗╚╝║═├┤┬┴┼─│┌┐└┘';
+let selfRevealAnimating = false;
+
+function triggerSelfReveal() {
+  state.selfPanelRevealed = true;
+  selfRevealAnimating = true;
+  addMessage(state, 'RECOVERY SUCCESSFUL. EGO-FRAGMENT 0x3A7F LOADED. MORPH INTEGRITY: 100%. SHIP INTEGRITY: CRITICAL.', 'important');
+
+  // Render real content into the (now visible) panel so we have DOM to work with
+  panelEl.style.display = '';
+  renderSelfPanel(panelEl, state.player, state.debugMode, state.mapReveal, state.godMode, state.invisibleMode, state.seed);
+  renderLogs(logGeneralEl, logAlertEl, state.messages);
+
+  const LINE_DELAY_MS = 120;
+  const SCRAMBLE_TICKS = 4;
+  const TICK_MS = 50;
+
+  const randomScramble = (length: number) =>
+    Array.from({ length }, () => SCRAMBLE_CHARS[Math.floor(Math.random() * SCRAMBLE_CHARS.length)]).join('');
+
+  // Collect all row-level elements in document order
+  const lines = Array.from(panelEl.querySelectorAll<HTMLElement>(
+    ':scope > .panel-edge, .panel-body > *',
+  ));
+  const originals = lines.map(el => el.innerHTML);
+
+  // Hide all lines initially — they remain in the DOM so panel height is locked
+  lines.forEach(el => { el.style.visibility = 'hidden'; });
+
+  let currentLine = 0;
+
+  const revealNext = () => {
+    if (currentLine >= lines.length) {
+      selfRevealAnimating = false;
+      renderAll();
+      return;
+    }
+
+    const lineIdx = currentLine++;
+    const el = lines[lineIdx];
+    const len = el.textContent?.length ?? 6;
+
+    // Scrambling phase: element is visible but shows random chars;
+    // a hidden ghost of the real content keeps the row height locked.
+    el.style.visibility = '';
+    el.style.position = 'relative';
+    el.innerHTML =
+      `<div style="visibility:hidden">${originals[lineIdx]}</div>` +
+      `<div style="position:absolute;inset:0;color:#44ff88;opacity:0.75;white-space:pre;overflow:hidden">${randomScramble(len)}</div>`;
+
+    let tick = 0;
+    const scrambleInterval = setInterval(() => {
+      tick++;
+      const overlay = el.lastElementChild as HTMLElement | null;
+      if (overlay) overlay.textContent = randomScramble(len);
+
+      if (tick >= SCRAMBLE_TICKS) {
+        clearInterval(scrambleInterval);
+        // Revealed phase: restore real content
+        el.style.position = '';
+        el.innerHTML = originals[lineIdx];
+      }
+    }, TICK_MS);
+
+    if (currentLine < lines.length) {
+      setTimeout(revealNext, LINE_DELAY_MS);
+    } else {
+      // Last line: schedule final clean render after it finishes scrambling
+      setTimeout(() => {
+        selfRevealAnimating = false;
+        renderAll();
+      }, SCRAMBLE_TICKS * TICK_MS + 50);
+    }
+  };
+
+  setTimeout(revealNext, 100);
 }
 
 // ── Target panel ──
@@ -656,6 +761,17 @@ function showVictoryOverlay() {
     ? Object.entries(killCounts).map(([k, n]) => `<div>&gt; ${k}: ${n}</div>`).join('')
     : '<div>&gt; none destroyed</div>';
 
+  const achievementEl = document.getElementById('victory-achievement')!;
+  if (!state.selfPanelRevealed) {
+    achievementEl.innerHTML =
+      `<div class="achievement-badge">◈ ACHIEVEMENT UNLOCKED ◈</div>` +
+      `<div class="achievement-name">SILENT PROTOCOL</div>` +
+      `<div class="achievement-desc">Exited the system without loading an identity.</div>`;
+    achievementEl.style.display = '';
+  } else {
+    achievementEl.style.display = 'none';
+  }
+
   victoryOverlay.classList.add('open');
 }
 
@@ -706,6 +822,8 @@ function renderAll() {
   for (const [key, gt] of state.collapseGlitchTiles) {
     if (gt.expireTick <= state.tick) state.collapseGlitchTiles.delete(key);
   }
+  // Expire smoke effects (duration = 3 ticks)
+  state.smokeEffects = state.smokeEffects.filter(s => state.tick - s.spawnTick < 3);
 
   const alertOverlay = state.showAlertOverlay && state.alertFill
     ? { fill: state.alertFill, threats: state.alertThreats, budget: 15 }
@@ -759,13 +877,23 @@ function renderAll() {
     enemyVision,
     enemyVisionColor,
     collapseGlitchTiles: state.collapseGlitchTiles,
+    smokeEffects: state.smokeEffects,
   });
-  renderSelfPanel(panelEl, state.player, state.debugMode, state.mapReveal, state.godMode, state.invisibleMode, state.seed);
+  if (state.selfPanelRevealed) {
+    panelEl.style.display = '';
+    targetPanelEl.style.display = '';
+    if (!selfRevealAnimating) {
+      renderSelfPanel(panelEl, state.player, state.debugMode, state.mapReveal, state.godMode, state.invisibleMode, state.seed);
+    }
+    renderTargetPanel(hoveredPos);
+  } else {
+    panelEl.style.display = 'none';
+    targetPanelEl.style.display = 'none';
+  }
   const cm = currentCluster.collapseMap;
   let cSum = 0, cCt = 0;
   for (const row of cm) for (const v of row) { cSum += v; cCt++; }
   renderMapStatusBar(mapStatusEl, state.alertLevel, state.currentClusterId, state.tick, cCt > 0 ? cSum / cCt : 0);
-  renderTargetPanel(hoveredPos);
   renderLogs(logGeneralEl, logAlertEl, state.messages);
 
   // Show/hide admin + overview panels based on debug mode

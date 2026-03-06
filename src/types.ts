@@ -215,11 +215,20 @@ export interface Interactable {
   hasRootPart?: boolean;              // can extract a root part from this entity
   rootPartTaken?: boolean;            // root part already extracted
   deactivatesHazardRoomId?: number;   // hazard room this interactable can deactivate
+  isTutorialEcho?: boolean;           // cluster-0 tutorial echo — triggers SELF panel reveal on close
+  echoFadeAtTick?: number;            // when set, echo dissolves at this tick (smoke + spawn)
 }
 
 export interface RevealEffect {
   positions: string[];  // "x,y" keys
   expireTick: number;
+}
+
+export interface SmokeEffect {
+  x: number;
+  y: number;
+  fg: string;        // faction-based color
+  spawnTick: number; // tick when the effect was created; expires after 3 ticks
 }
 
 export interface ShootingEffect {
@@ -361,6 +370,8 @@ export interface GameState {
   gameOver?: boolean;                  // true when player exits the final cluster
   // Collapse ambient glitch tiles (temporary visual artifacts)
   collapseGlitchTiles: Map<string, { glyph: string; fg: string; expireTick: number }>;
+  selfPanelRevealed: boolean;         // false until player interacts with tutorial echo (or skips cluster 0)
+  smokeEffects: SmokeEffect[];        // transient death/dissolution smoke particles
 }
 
 export interface GameMessage {
