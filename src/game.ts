@@ -8,7 +8,7 @@ import { generateCluster, placeEntryPoint } from './cluster';
 import { computeFOV, floodFillReveal, hasLOS } from './fov';
 import { findPath } from './pathfinding';
 import { updateHazards, onPlayerEnterRoom, getPlayerRoom, applyTileHazardToPlayer, updateAlertModule } from './hazards';
-import { seed as seedRng, generateSeed, randInt } from './rng';
+import { seed as seedRng, generateSeed, randInt, pick } from './rng';
 import {
   updateEntityAI, makeChronicler, makeBitMite, makeLogicLeech, makeWhiteHat, makePropEntity, makeGateKeeper, makeRepairScrapper,
 } from './ai';
@@ -366,7 +366,7 @@ function tryShoot(state: GameState, target: Position): boolean {
   const cluster = getCurrentCluster(state);
   const corrupt = state.player.modules?.find(m => m.id === 'corrupt.m' && m.status === 'loaded');
   if (!corrupt) {
-    addMessage(state, 'No attack module — corrupt.m required.', 'alert');
+    addMessage(state, 'No attack module.', 'alert');
     return false;
   }
 
@@ -410,7 +410,8 @@ function tryShoot(state: GameState, target: Position): boolean {
   if (overQuota > 0 && state.player.coherence != null && !state.godMode) {
     const drain = overQuota * 3;
     state.player.coherence = Math.max(0, state.player.coherence - drain);
-    addMessage(state, `[LEAK] corrupt.m membrane degrading — coherence drain: −${drain} (${state.player.coherence}/${state.player.maxCoherence}).`, 'hazard');
+    const rolledState = pick(['heap corruption', 'memmory corruption', 'buffer overflow', 'stack overflow', 'BUG', 'error'])
+    addMessage(state, `[LEAK] ${rolledState} in corrupt.m — coherence drain: −${drain} (${state.player.coherence}/${state.player.maxCoherence}).`, 'hazard');
   }
 
   corrupt.clusterShotCount = shotCount + 1;
@@ -428,7 +429,7 @@ function tryShoot(state: GameState, target: Position): boolean {
   // Warn when the NEXT shot will start draining coherence
   const newCount = corrupt.clusterShotCount;
   if (newCount === CORRUPT_M_FREE_SHOTS) {
-    addMessage(state, '[WARN] corrupt.m free quota exhausted — next shots will drain coherence.', 'alert');
+    addMessage(state, '[WARN] detected memory errors in corrupt.m — usage is discouraged.', 'alert');
   }
 
   return true;
