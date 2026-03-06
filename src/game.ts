@@ -155,12 +155,7 @@ function spawnClusterEntities(state: GameState, cluster: Cluster) {
   const rooms = cluster.rooms.filter(r => !r.tags.geometric.has('hall'));
   if (rooms.length === 0) return;
 
-  // Scale counts: cluster 0 is sparse, grows by depth
-  const depth = id + 1;
-  const numBitMites   = Math.min(3, Math.floor(depth * 0.8));
-  const numLogicLeech = Math.min(2, Math.floor(depth * 0.5));
-  const numChronicler = Math.min(2, Math.floor(depth * 0.4));
-  const numWhiteHat   = Math.min(2, Math.floor(depth * 0.3));
+  const depth = id + 1; // 1-indexed depth for scaling
 
   const spawned: Entity[] = [];
 
@@ -178,42 +173,65 @@ function spawnClusterEntities(state: GameState, cluster: Cluster) {
     return pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : undefined;
   }
 
-  // Bit-Mite: spawn in the room containing the exit interface
-  const exitRooms = rooms.filter(r => r.tags.geometric.has('exit_interface'));
-  for (let i = 0; i < numBitMites; i++) {
-    const room = exitRooms.length > 0
-      ? exitRooms[Math.floor(Math.random() * exitRooms.length)]
-      : pickRoom();
-    if (!room) continue;
-    const pos = pickWalkableTile(room);
-    if (pos) spawned.push(makeBitMite(pos, id));
+  // Mite guard: cluster 2+ always spawns a Bit-Mite near each interface exit tile
+  if (id >= 2) {
+    for (const iface of cluster.interfaces) {
+      // Find walkable tiles adjacent to the exit interface
+      const { x: ix, y: iy } = iface.position;
+      const adj: Position[] = [];
+      for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]] as const) {
+        const nx = ix + dx, ny = iy + dy;
+        if (cluster.tiles[ny]?.[nx]?.walkable) adj.push({ x: nx, y: ny });
+      }
+      const spawnPos = adj.length > 0 ? adj[Math.floor(Math.random() * adj.length)] : null;
+      if (spawnPos) spawned.push(makeBitMite(spawnPos, id));
+    }
   }
 
-  // Logic Leech: prefer peripheral/dead-end rooms
-  const peripheralRooms = rooms.filter(r => r.tags.geometric.has('peripheral') || r.tags.geometric.has('dead_end'));
-  for (let i = 0; i < numLogicLeech; i++) {
-    const pool = peripheralRooms.length > 0 ? peripheralRooms : rooms;
-    const room = pool[Math.floor(Math.random() * pool.length)];
-    const pos = pickWalkableTile(room);
-    if (pos) spawned.push(makeLogicLeech(pos, id));
+  // Per-room probabilistic spawning — scale probabilities by depth and collapse
+  for (const room of rooms) {
+    const collapse = room.collapse; // [0, 1]
+    const collapseBonus = collapse * 2; // high collapse → more enemies
+
+    // Bit-Mite: base prob scales with depth; high-collapse rooms more likely
+    const bitMiteProb = Math.min(0.9, 0.2 * depth + collapseBonus * 0.4);
+    if (Math.random() < bitMiteProb) {
+      const pos = pickWalkableTile(room);
+      if (pos) spawned.push(makeBitMite(pos, id));
+    }
+    // Extra mite in very high-collapse rooms
+    if (collapse > 0.6 && Math.random() < 0.5) {
+      const pos = pickWalkableTile(room);
+      if (pos) spawned.push(makeBitMite(pos, id));
+    }
+
+    // Logic Leech: prefer peripheral/dead-end; lower base probability
+    const isPeripheral = room.tags.geometric.has('peripheral') || room.tags.geometric.has('dead_end');
+    const leechProb = Math.min(0.7, (isPeripheral ? 0.25 : 0.1) * depth + collapseBonus * 0.2);
+    if (Math.random() < leechProb) {
+      const pos = pickWalkableTile(room);
+      if (pos) spawned.push(makeLogicLeech(pos, id));
+    }
+
+    // Chronicler: neutral, lower probability
+    const chroniclerProb = Math.min(0.5, 0.12 * depth);
+    if (Math.random() < chroniclerProb) {
+      const pos = pickWalkableTile(room);
+      if (pos) spawned.push(makeChronicler(pos, id));
+    }
+
+    // White-Hat: only in safe rooms; probability independent of collapse
+    if (room.roomType === 'normal') {
+      const whiteHatProb = Math.min(0.4, 0.08 * depth);
+      if (Math.random() < whiteHatProb) {
+        const pos = pickWalkableTile(room);
+        if (pos) spawned.push(makeWhiteHat(pos, id));
+      }
+    }
   }
 
-  // Chronicler: any room
-  for (let i = 0; i < numChronicler; i++) {
-    const room = pickRoom();
-    if (!room) continue;
-    const pos = pickWalkableTile(room);
-    if (pos) spawned.push(makeChronicler(pos, id));
-  }
-
-  // White-Hat: prefer non-hazard rooms
-  const safeRooms = rooms.filter(r => r.roomType === 'normal');
-  for (let i = 0; i < numWhiteHat; i++) {
-    const pool = safeRooms.length > 0 ? safeRooms : rooms;
-    const room = pool[Math.floor(Math.random() * pool.length)];
-    const pos = pickWalkableTile(room);
-    if (pos) spawned.push(makeWhiteHat(pos, id));
-  }
+  // Prevent unused variable warning — pickRoom still used below for prop spawning guard
+  void pickRoom;
 
   // Spawn scenario prop entities from rooms that have pendingProps
   for (const room of cluster.rooms) {

@@ -617,6 +617,60 @@ export function updateEntityAI(state: GameState, entity: Entity) {
     case 'bit_mite':    updateBitMite(state, entity, cluster);     break;
     case 'logic_leech': updateLogicLeech(state, entity, cluster);  break;
     case 'white_hat':   updateWhiteHat(state, entity, cluster);    break;
+    case 'gate_keeper': updateGateKeeper(state, entity, cluster);  break;
+  }
+}
+
+function updateGateKeeper(state: GameState, entity: Entity, cluster: Cluster) {
+  const ai = entity.ai!;
+  const all = getAllEntitiesInCluster(state, cluster);
+
+  // Pull all visible aggressive entities one step toward self each turn
+  for (const target of all) {
+    if (target.id === entity.id) continue;
+    if (target.ai?.faction === 'neutral' || target.ai?.faction === 'friendly') continue;
+    if (!canSee(cluster, entity.position, target.position, ai.sightRadius, ai.wallPenetration)) continue;
+
+    const dx = entity.position.x - target.position.x;
+    const dy = entity.position.y - target.position.y;
+    if (dx === 0 && dy === 0) continue;
+
+    // Step pulled entity one tile closer along dominant axis
+    const stepX = dx !== 0 ? Math.sign(dx) : 0;
+    const stepY = dy !== 0 ? Math.sign(dy) : 0;
+    // Prefer the axis with greater distance
+    const absDx = Math.abs(dx), absDy = Math.abs(dy);
+    const candidates: [number, number][] = absDx >= absDy
+      ? [[stepX, 0], [0, stepY]]
+      : [[0, stepY], [stepX, 0]];
+
+    for (const [cx, cy] of candidates) {
+      const nx = target.position.x + cx;
+      const ny = target.position.y + cy;
+      const tile = cluster.tiles[ny]?.[nx];
+      if (!tile?.walkable) continue;
+      const occupied = findEntityAt(state, cluster.id, nx, ny);
+      if (occupied && occupied.id !== entity.id) continue;
+      target.position = { x: nx, y: ny };
+      break;
+    }
+  }
+
+  // Attack adjacent enemies
+  for (const target of all) {
+    if (target.id === entity.id) continue;
+    if (target.ai?.faction === 'neutral' || target.ai?.faction === 'friendly') continue;
+    const dx = Math.abs(entity.position.x - target.position.x);
+    const dy = Math.abs(entity.position.y - target.position.y);
+    if (dx + dy > 1) continue;
+    if (target.coherence === undefined) continue;
+    target.coherence = Math.max(0, target.coherence - entity.attackValue);
+    addAiMessage(state, `Gate-Keeper crushes ${target.name}! −${entity.attackValue}. (${target.coherence} left)`, 'combat');
+    if (target.coherence <= 0) {
+      addAiMessage(state, `Gate-Keeper destroys ${target.name}!`, 'combat');
+      removeEntity(state, target);
+    }
+    return; // one attack per turn
   }
 }
 

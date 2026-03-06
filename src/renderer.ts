@@ -235,8 +235,8 @@ export class Renderer {
         let fg = tile.fg;
         let bg: string = COLORS.bg;
 
-        // Room lighting by functional tag (visible floor/door tiles only)
-        if (isVisible && (tile.type === TileType.Floor || tile.type === TileType.Door) && tile.roomId >= 0) {
+        // Room lighting by functional tag (visible floor tiles only — doors keep default bg)
+        if (isVisible && tile.type === TileType.Floor && tile.roomId >= 0) {
           const funcTag = roomFuncTag.get(tile.roomId);
           if (funcTag) {
             const lighting = ROOM_LIGHTING[funcTag];
@@ -459,9 +459,13 @@ export class Renderer {
       this.display.draw(px, py, '@', COLORS.player, this.bgCache[py][px]);
     }
 
-    // Shooting effects
+    // Shooting effects — only if within 20 tiles of player
     const shootingEffects = extras?.shootingEffects ?? [];
     for (const effect of shootingEffects) {
+      const midX = (effect.from.x + effect.to.x) / 2;
+      const midY = (effect.from.y + effect.to.y) / 2;
+      const dsx = midX - px, dsy = midY - py;
+      if (dsx * dsx + dsy * dsy > 400) continue; // 20² = 400
       renderShootingEffect(this.display, effect, tick);
     }
 
@@ -469,27 +473,35 @@ export class Renderer {
     if (extras?.smokeEffects) {
       const now = performance.now();
       for (const s of extras.smokeEffects) {
+        // Skip if further than 20 tiles from player
+        const dsmx = s.x - px, dsmy = s.y - py;
+        if (dsmx * dsmx + dsmy * dsmy > 400) continue;
+
         const elapsed = now - s.spawnTime;
         if (elapsed < 0 || elapsed >= 480) continue;
         const phase = Math.floor(elapsed / 160); // 0, 1, or 2
         const alt = Math.floor(now / 80) % 2;    // flicker every 80ms
-        // Center glyph
-        const center = [['●', '◉'], ['◎', '◍'], ['◌', '○']][phase][alt];
-        this.drawOver(s.x, s.y, center, s.fg);
-        // Orthogonal neighbours
+        // Center (only on non-wall tiles)
+        if (cluster.tiles[s.y]?.[s.x]?.type !== TileType.Wall) {
+          const center = [['●', '◉'], ['◎', '◍'], ['◌', '○']][phase][alt];
+          this.drawOver(s.x, s.y, center, s.fg);
+        }
+        // Orthogonal neighbours — skip walls
         const orthoG = [['░', '▒'], ['▒', '▓'], ['░', '░']][phase][alt];
         for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]] as const) {
           const nx = s.x + dx, ny = s.y + dy;
-          if (nx >= 0 && nx < this.width && ny >= 0 && ny < this.height)
-            this.drawOver(nx, ny, orthoG, s.fg);
+          if (nx < 0 || nx >= this.width || ny < 0 || ny >= this.height) continue;
+          if (cluster.tiles[ny]?.[nx]?.type === TileType.Wall) continue;
+          this.drawOver(nx, ny, orthoG, s.fg);
         }
-        // Diagonal neighbours (only at phase 1, spreading outward)
+        // Diagonal neighbours (only at phase 1) — skip walls
         if (phase === 1) {
           const diagG = alt === 0 ? '░' : '▒';
           for (const [dx, dy] of [[1,1],[-1,1],[1,-1],[-1,-1]] as const) {
             const nx = s.x + dx, ny = s.y + dy;
-            if (nx >= 0 && nx < this.width && ny >= 0 && ny < this.height)
-              this.drawOver(nx, ny, diagG, s.fg);
+            if (nx < 0 || nx >= this.width || ny < 0 || ny >= this.height) continue;
+            if (cluster.tiles[ny]?.[nx]?.type === TileType.Wall) continue;
+            this.drawOver(nx, ny, diagG, s.fg);
           }
         }
       }
