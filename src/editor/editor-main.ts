@@ -415,6 +415,8 @@ function buildSimState(): GameState {
     showAlertOverlay: false,
     showEnemyVision: false,
     revealEffects: [],
+    shootingEffects: [],
+    animation: null,
     hazardFogMarks: new Map(),
     alertLevel: 0,
     markedEntities: new Set(),

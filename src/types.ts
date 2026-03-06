@@ -212,6 +212,20 @@ export interface RevealEffect {
   expireTick: number;
 }
 
+export interface ShootingEffect {
+  from: Position;
+  to: Position;
+  style: 'single' | 'rapid' | 'beam';
+  animationFrame: number;  // 0 = just added, increments each render
+}
+
+export interface AnimationState {
+  isAnimating: boolean;
+  startTime: number;
+  duration: number;  // ms
+  effects: ShootingEffect[];
+}
+
 // ── Entity AI ──
 
 export type EntityKind = 
@@ -325,6 +339,8 @@ export interface GameState {
   openTerminal?: { terminalId: string; clusterId: number };
   openInteractable?: { id: string; clusterId: number };
   revealEffects: RevealEffect[];
+  shootingEffects: ShootingEffect[];
+  animation: AnimationState | null;
   hazardFogMarks: Map<string, HazardOverlayType>;
   alertLevel: number;  // 0–300+ antivirus threat level: 0–99 friendly, 100–199 suspicious, 200+ enemy
   markedEntities: Set<number>;  // entity ids marked by Chronicler/White-Hat

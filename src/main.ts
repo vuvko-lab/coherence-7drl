@@ -88,6 +88,48 @@ function stopAutoWalk() {
   }
 }
 
+// ── Animation ──
+
+let animationFrameId: number | null = null;
+
+function runAnimationLoop() {
+  const anim = state.animation;
+  if (!anim || !anim.isAnimating) return;
+
+  const update = () => {
+    const elapsed = performance.now() - anim.startTime;
+    const progress = Math.min(elapsed / anim.duration, 1);
+
+    // Update animation frames based on progress
+    for (const effect of anim.effects) {
+      const totalFrames = effect.style === 'rapid' ? 12 : 4;
+      effect.animationFrame = Math.floor(progress * totalFrames);
+    }
+
+    // Render with current animation state
+    renderAll();
+
+    if (progress < 1) {
+      animationFrameId = requestAnimationFrame(update);
+    } else {
+      // Animation complete
+      state.animation = null;
+      animationFrameId = null;
+      renderAll();
+    }
+  };
+
+  animationFrameId = requestAnimationFrame(update);
+}
+
+function cancelAnimation() {
+  if (animationFrameId !== null) {
+    cancelAnimationFrame(animationFrameId);
+    animationFrameId = null;
+    state.animation = null;
+  }
+}
+
 // ── Render ──
 
 const TOGGLE_LABELS: Record<string, string> = {
@@ -226,6 +268,7 @@ ${buttons}
     if (!file) return;
     file.text().then(json => {
       stopAutoWalk();
+      cancelAnimation();
       adminInitialized = false;
       state = loadSave(json);
       window.location.hash = `seed=${state.seed}`;
@@ -633,6 +676,7 @@ function renderAll() {
   renderer.render(currentCluster, state.entities, state.player.position, state.mapReveal, state.showRoomLabels, alertOverlay, collapseOverlay, state.showFunctionalOverlay, {
     tick: state.tick,
     revealEffects: state.revealEffects,
+    shootingEffects: state.animation?.effects ?? [],
     hazardFogMarks: state.hazardFogMarks,
     markedEntities: state.markedEntities,
     aimOverlay,
@@ -672,6 +716,11 @@ function renderAll() {
 // ── Input handling ──
 
 function onAction(action: PlayerAction) {
+  // Block input during animation
+  if (state.animation?.isAnimating) {
+    return;
+  }
+
   // Debug toggle doesn't advance turns
   if (action.kind === 'debug_toggle') {
     state.debugMode = !state.debugMode;
@@ -686,7 +735,13 @@ function onAction(action: PlayerAction) {
   renderer.setPathHighlight([]);
 
   processAction(state, action);
-  renderAll();
+
+  // If animation was set up, run the animation loop
+  if (state.animation?.isAnimating) {
+    runAnimationLoop();
+  } else {
+    renderAll();
+  }
 }
 
 function tryShootAt(pos: Position): boolean {

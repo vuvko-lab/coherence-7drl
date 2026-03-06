@@ -90,6 +90,8 @@ export function createGame(initialSeed?: number): GameState {
     showAlertOverlay: false,
     showEnemyVision: false,
     revealEffects: [],
+    shootingEffects: [],
+    animation: null,
     hazardFogMarks: new Map(),
     alertLevel: 0,
     markedEntities: new Set(),
@@ -501,6 +503,9 @@ export function processAction(state: GameState, action: PlayerAction): boolean {
 
     // Expire reveal effects
     state.revealEffects = state.revealEffects.filter(e => e.expireTick > state.tick);
+
+    // Clear shooting effects - they are handled by animation system now
+    state.shootingEffects = [];
 
     // Update lost echo visibility (random hide/reappear)
     for (const item of cluster.interactables) {

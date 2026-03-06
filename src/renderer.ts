@@ -1,5 +1,5 @@
 import * as ROT from 'rot-js';
-import { Cluster, Entity, Position, COLORS, Room, TileType, HazardOverlayType, RevealEffect } from './types';
+import { Cluster, Entity, Position, COLORS, Room, TileType, HazardOverlayType, RevealEffect, ShootingEffect } from './types';
 import type { FunctionalTag } from './types';
 
 const HAZARD_FOG_COLORS: Partial<Record<HazardOverlayType, string>> = {
@@ -176,6 +176,7 @@ export class Renderer {
     extras?: {
       tick?: number;
       revealEffects?: RevealEffect[];
+      shootingEffects?: ShootingEffect[];
       hazardFogMarks?: Map<string, HazardOverlayType>;
       markedEntities?: Set<number>;
       aimOverlay?: { origin: Position; radius: number; target?: Position };
@@ -417,6 +418,12 @@ export class Renderer {
     const { x: px, y: py } = playerPos;
     if (px >= 0 && px < this.width && py >= 0 && py < this.height) {
       this.display.draw(px, py, '@', COLORS.player, this.bgCache[py][px]);
+    }
+
+    // Shooting effects
+    const shootingEffects = extras?.shootingEffects ?? [];
+    for (const effect of shootingEffects) {
+      renderShootingEffect(this.display, effect, tick);
     }
 
     // Room label overlay
@@ -746,4 +753,51 @@ export function renderOverviewPanel(
     `<div class="panel-edge"><span class="corner">┌</span><span class="label">[ OVERVIEW ]</span><span class="fill"></span><span class="corner">┐</span></div>` +
     `<div class="panel-body">${body}</div>` +
     `<div class="panel-edge"><span class="corner">└</span><span class="fill"></span><span class="corner">┘</span></div>`;
+}
+
+function renderShootingEffect(display: ROT.Display, effect: ShootingEffect, _tick: number) {
+  const { from, to, style, animationFrame } = effect;
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  if (dist === 0) return;
+
+  const maxFrames = style === 'rapid' ? 12 : 4;
+  const progress = Math.min(animationFrame / maxFrames, 1);
+
+  if (style === 'single' || style === 'rapid') {
+    const bulletPos = progress * dist;
+    const bx = Math.round(from.x + (dx / dist) * bulletPos);
+    const by = Math.round(from.y + (dy / dist) * bulletPos);
+    if (bx >= 0 && bx < 50 && by >= 0 && by < 30) {
+      display.draw(bx, by, '•', '#ffffff', null);
+    }
+    if (progress >= 0.9) {
+      const tx = Math.round(to.x);
+      const ty = Math.round(to.y);
+      if (tx >= 0 && tx < 50 && ty >= 0 && ty < 30) {
+        display.draw(tx, ty, '✕', '#ffffff', null);
+      }
+    }
+  } else if (style === 'beam') {
+    const steps = Math.ceil(dist);
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const x = Math.round(from.x + dx * t);
+      const y = Math.round(from.y + dy * t);
+      if (x >= 0 && x < 50 && y >= 0 && y < 30) {
+        const displayChar = i < steps ? '·' : '─';
+        const alpha = 1 - t * 0.5;
+        const fg = adjustAlpha('#00ffff', alpha);
+        display.draw(x, y, displayChar, fg, null);
+      }
+    }
+  }
+}
+
+function adjustAlpha(hex: string, alpha: number): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
 }
