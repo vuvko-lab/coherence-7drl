@@ -931,7 +931,7 @@ function renderGrid(grid: Grid): string {
         case 'floor': line += '·'; break;
         case 'hall':  line += '·'; break;
         case 'door':  line += '+'; break;
-        case 'interface': line += '⇋'; break;
+        case 'interface': line += x === 0 ? '⇏' : '⇨'; break;
         case 'wall': {
           const outer = isOuterWall(grid, y, x);
           line += wallGlyph(grid, x, y, outer);

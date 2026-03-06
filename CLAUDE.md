@@ -48,14 +48,14 @@ Simulation tests (no browser needed):
 
 **Key concepts:**
 
-- **Clusters** are self-contained 50×30 tile maps connected by `⇋` interface exits on left/right edges
+- **Clusters** are self-contained 50×30 tile maps connected by interface exits: entry `⇏` (left edge, coming from previous cluster) and exit `⇨` (right edge, going forward)
 - **Rooms** are generated via BSP and connected with a spanning tree + extra doors for loops
 - **Hazard overlays** are separate from tile types — tiles have a `hazardOverlay` field and rooms have a `RoomHazardState`
 - **Speed-based turns** — entities accumulate energy each tick, act when energy ≥ speed
 - **Three visibility states** — visible (full color), seen/remembered (dimmed), unexplored (black)
 - **Wall glyphs** — double-line box-drawing (`═║╔╗`) for outer walls, single-line (`─│┌┐`) for inner walls
 - **Room tags** — four categories per room: `geometric` (hall/hub/dead_end/etc.), `functional` (engine_room/lab/medbay/etc.), `modifiers` (encrypted/degraded/etc.), `cosmetic`. Tags drive display and future gameplay logic.
-- **Terminals & exit lock** — each cluster has one terminal with `hasKey=true`; `cluster.exitLocked` starts true and unlocks when that terminal is activated, gating the `⇋` exit transfer
+- **Terminals & exit lock** — each cluster has one terminal with `hasKey=true`; `cluster.exitLocked` starts true and unlocks when that terminal is activated, gating the `⇨` exit transfer
 - **Modules** — player carries loadout slots (`alert.m`, `overclock.m`, `corrupt.m`, `cloak.m`, `spoof.m`) with status `loaded | damaged | offline`; `alert.m` actively scans for threats each tick
 - **Seed reproduction** — append `#seed=N` to the URL to load a specific map; seed is logged to console on startup
 
