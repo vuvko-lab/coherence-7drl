@@ -144,6 +144,23 @@ export function createRoomTags(geometric?: GeometricTag[]): RoomTags {
   };
 }
 
+export type RoomScenario = 'stuck_echo' | 'spooky_astronauts' | 'broken_sleever';
+
+export interface ScenarioPropDef {
+  position: Position;
+  glyph: string;
+  fg: string;
+  name: string;
+  propTag: string;
+}
+
+export interface ScenarioState {
+  playerEnteredAtTick?: number; // tick when player first entered this tick-session
+  triggered?: boolean;          // one-shot event has fired
+  lastMessageTick?: number;     // throttle log messages
+  pendingProps?: ScenarioPropDef[]; // prop entities to spawn on first visit
+}
+
 export interface Room {
   id: number;
   x: number;
@@ -155,6 +172,8 @@ export interface Room {
   collapse: number; // infrastructure collapse intensity [0, 1]
   hazardState?: RoomHazardState;
   containedHazards: Set<HazardOverlayType>;
+  scenario?: RoomScenario;
+  scenarioState?: ScenarioState;
 }
 
 export interface InterfaceExit {
@@ -216,7 +235,10 @@ export interface Interactable {
   rootPartTaken?: boolean;            // root part already extracted
   deactivatesHazardRoomId?: number;   // hazard room this interactable can deactivate
   isTutorialEcho?: boolean;           // cluster-0 tutorial echo — triggers SELF panel reveal on close
-  echoFadeAtTick?: number;            // when set, echo dissolves at this tick (smoke + spawn)
+  echoFadeAtTime?: number;            // performance.now() timestamp when echo dissolves (smoke + damaged mite spawn)
+  broadcastLines?: string[];          // stuck_echo: messages to broadcast periodically
+  broadcastPeriod?: number;           // stuck_echo: ticks between broadcasts
+  lastBroadcastTick?: number;         // stuck_echo: last tick a broadcast fired
 }
 
 export interface RevealEffect {
@@ -224,11 +246,13 @@ export interface RevealEffect {
   expireTick: number;
 }
 
+export const SMOKE_DURATION_MS = 480; // total smoke animation time in ms (3 phases × 160ms)
+
 export interface SmokeEffect {
   x: number;
   y: number;
   fg: string;        // faction-based color
-  spawnTick: number; // tick when the effect was created; expires after 3 ticks
+  spawnTime: number; // performance.now() when spawned; expires after SMOKE_DURATION_MS
 }
 
 export interface ShootingEffect {
@@ -329,6 +353,7 @@ export interface Entity {
   maxCoherence?: number;
   modules?: PlayerModule[];
   ai?: EntityAI;
+  propTag?: string; // identifies static prop entities (e.g. 'spacesuit', 'sleever_device')
 }
 
 // ── Game State ──
@@ -372,6 +397,7 @@ export interface GameState {
   collapseGlitchTiles: Map<string, { glyph: string; fg: string; expireTick: number }>;
   selfPanelRevealed: boolean;         // false until player interacts with tutorial echo (or skips cluster 0)
   smokeEffects: SmokeEffect[];        // transient death/dissolution smoke particles
+  pendingGlitch?: string;             // set by game logic; consumed by main.ts to fire glitch effects
 }
 
 export interface GameMessage {

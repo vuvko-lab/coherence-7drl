@@ -10,8 +10,9 @@ import { findPath } from './pathfinding';
 import { updateHazards, onPlayerEnterRoom, getPlayerRoom, applyTileHazardToPlayer, updateAlertModule } from './hazards';
 import { seed as seedRng, generateSeed, randInt } from './rng';
 import {
-  updateEntityAI, makeChronicler, makeBitMite, makeLogicLeech, makeWhiteHat,
+  updateEntityAI, makeChronicler, makeBitMite, makeLogicLeech, makeWhiteHat, makePropEntity,
 } from './ai';
+export { makeDamagedBitMite } from './ai';
 import { shootingAnimation } from './combat_animations';
 
 const DOOR_CLOSE_DELAY = 5; // ticks before an unoccupied open door auto-closes
@@ -128,7 +129,7 @@ export function createGame(initialSeed?: number): GameState {
   };
 
   addMessage(state, 'System boot... ego-fragment loaded from backup.', 'system');
-  addMessage(state, 'Navigate to the interface exit [⇋] to transfer between clusters.', 'system');
+  addMessage(state, 'Navigate to the interface exit [] to transfer between clusters.', 'system');
   addMessage(state, 'Use WASD/arrows to move. Click to pathfind. Enter to transfer.', 'system');
 
   computeFOV(cluster, player.position);
@@ -212,6 +213,16 @@ function spawnClusterEntities(state: GameState, cluster: Cluster) {
     const room = pool[Math.floor(Math.random() * pool.length)];
     const pos = pickWalkableTile(room);
     if (pos) spawned.push(makeWhiteHat(pos, id));
+  }
+
+  // Spawn scenario prop entities from rooms that have pendingProps
+  for (const room of cluster.rooms) {
+    const props = room.scenarioState?.pendingProps;
+    if (!props || props.length === 0) continue;
+    for (const p of props) {
+      spawned.push(makePropEntity(p.position, id, p.glyph, p.fg, p.name, p.propTag));
+    }
+    room.scenarioState!.pendingProps = []; // clear so we don't re-spawn
   }
 
   // Don't spawn on player position
@@ -344,7 +355,7 @@ function tryMove(state: GameState, dx: number, dy: number): boolean {
           state.smokeEffects.push({
             x: bumpedEntity.position.x, y: bumpedEntity.position.y,
             fg: _sf === 'aggressive' ? '#cc4444' : _sf === 'friendly' ? '#23d2a6' : '#aaaa66',
-            spawnTick: state.tick,
+            spawnTime: performance.now(),
           });
           if (bumpedEntity.ai) state.killedEntities.push({ name: bumpedEntity.name, kind: bumpedEntity.ai.kind });
           state.entities = state.entities.filter(e => e.id !== bumpedEntity.id);
@@ -609,30 +620,17 @@ export function processAction(state: GameState, action: PlayerAction): boolean {
     // Remove dead entities (coherence <= 0) — spawn smoke for any not yet handled
     for (const e of state.entities) {
       if ((e.coherence ?? 1) <= 0 && e.id !== state.player.id) {
-        if (!state.smokeEffects.some(s => s.spawnTick === state.tick && s.x === e.position.x && s.y === e.position.y)) {
+        if (!state.smokeEffects.some(s => s.x === e.position.x && s.y === e.position.y)) {
           const _sf = e.ai?.faction;
           state.smokeEffects.push({
             x: e.position.x, y: e.position.y,
             fg: _sf === 'aggressive' ? '#cc4444' : _sf === 'friendly' ? '#23d2a6' : '#aaaa66',
-            spawnTick: state.tick,
+            spawnTime: performance.now(),
           });
         }
       }
     }
     state.entities = state.entities.filter(e => (e.coherence ?? 1) > 0);
-
-    // Echo fade: dissolve interactables with echoFadeAtTick <= current tick
-    const currentCluster = getCurrentCluster(state);
-    for (let i = currentCluster.interactables.length - 1; i >= 0; i--) {
-      const item = currentCluster.interactables[i];
-      if (item.echoFadeAtTick != null && state.tick >= item.echoFadeAtTick) {
-        state.smokeEffects.push({ x: item.position.x, y: item.position.y, fg: '#aaaa66', spawnTick: state.tick });
-        const bm = makeBitMite(item.position, currentCluster.id);
-        state.entities.push(bm);
-        addMessage(state, '...signal dissolved.', 'system');
-        currentCluster.interactables.splice(i, 1);
-      }
-    }
   }
 
   return acted;
@@ -794,6 +792,11 @@ export function executeInteractableAction(
     case 'extract_reward': {
       if (item.rewardTaken) break;
       item.rewardTaken = true;
+
+      // Lost echoes dissolve into a damaged fragment after extraction (2–5 seconds, real-time)
+      if (item.kind === 'lost_echo') {
+        item.echoFadeAtTime = performance.now() + randInt(2000, 5000);
+      }
 
       if ((item.alertCost ?? 0) > 0) {
         const prev = state.alertLevel;

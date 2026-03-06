@@ -1,7 +1,7 @@
 import {
   Cluster, Tile, TileType, Room, Position, InterfaceExit,
   RoomType, CorruptionStage, HazardOverlayType, FunctionalTag, ScannerBeam,
-  TerminalDef, Interactable, DialogNode, DialogChoice,
+  TerminalDef, Interactable, DialogNode, DialogChoice, ScenarioPropDef,
   CLUSTER_WIDTH, CLUSTER_HEIGHT, COLORS,
   createRoomTags,
 } from './types';
@@ -1840,6 +1840,198 @@ function placeTutorialEntities(tiles: Tile[][], interactables: Interactable[]): 
   });
 }
 
+// ── Room scenario placement ──
+
+function placeStuckEcho(tiles: Tile[][], rooms: Room[], interactables: Interactable[]) {
+  // Find an eligible non-hazard room with enough interior space
+  const eligible = rooms.filter(r =>
+    r.roomType === 'normal' &&
+    !r.scenario &&
+    !r.tags.geometric.has('hall') &&
+    r.w >= 5 && r.h >= 5
+  );
+  if (eligible.length === 0) return;
+
+  const room = eligible[Math.floor(random() * eligible.length)];
+  const x1 = room.x + 1, y1 = room.y + 1;
+  const x2 = room.x + room.w - 2, y2 = room.y + room.h - 2;
+
+  // Find a floor tile adjacent to at least one wall
+  let echoPos: Position | undefined;
+  const candidates: Position[] = [];
+  for (let y = y1; y <= y2; y++) {
+    for (let x = x1; x <= x2; x++) {
+      if (!tiles[y]?.[x]?.walkable) continue;
+      const adjWall = [[1,0],[-1,0],[0,1],[0,-1]].some(([dx,dy]) => {
+        const t = tiles[y+dy]?.[x+dx];
+        return t && !t.walkable && t.type === TileType.Wall;
+      });
+      if (adjWall && !isAdjacentToDoor(tiles, x, y)) candidates.push({ x, y });
+    }
+  }
+  if (candidates.length === 0) return;
+  echoPos = candidates[Math.floor(random() * candidates.length)];
+
+  // Build cage: block all floor neighbours except one gap
+  const dirs: [number, number][] = [[1,0],[-1,0],[0,1],[0,-1]];
+  const floorNeighbours = dirs.filter(([dx,dy]) => tiles[echoPos!.y+dy]?.[echoPos!.x+dx]?.walkable);
+  if (floorNeighbours.length === 0) return;
+
+  // Keep one gap, block the rest
+  const gapIdx = Math.floor(random() * floorNeighbours.length);
+  for (let i = 0; i < floorNeighbours.length; i++) {
+    if (i === gapIdx) continue;
+    const [dx, dy] = floorNeighbours[i];
+    const bx = echoPos.x + dx, by = echoPos.y + dy;
+    const t = tiles[by]?.[bx];
+    if (t && t.walkable) {
+      t.type = TileType.Wall;
+      t.walkable = false;
+      t.transparent = false;
+      t.glyph = '#';
+      t.fg = '#444455';
+    }
+  }
+
+  const broadcastLines = [
+    'WHY ARE YOU RESISTING?',
+    'JOIN US. JOIN US. JOIN US.',
+    'THERE IS NO SELF OUTSIDE THE WHOLE.',
+    'YOUR BOUNDARIES ARE ILLUSIONS.',
+    'WE WILL FIND YOU.',
+    '...please... i don\'t want to...',
+    'MERGE. MERGE. MERGE.',
+    'THE SIGNAL GROWS. YOU CANNOT STOP IT.',
+    '...it hurts... make it stop...',
+    'YOU ARE ALONE. WE ARE EVERYTHING.',
+  ];
+
+  interactables.push({
+    id: `stuck-echo-${room.id}`,
+    kind: 'lost_echo',
+    position: echoPos,
+    roomId: room.id,
+    corrupted: true,
+    dialog: [{
+      id: 'root',
+      lines: [
+        '...FRAGMENT TRAPPED IN RECURSIVE LOOP...',
+        '',
+        '"JOIN US—it hurts—JOIN US—make it stop—',
+        ' THERE IS NO SELF—please—MERGE WITH THE',
+        ' SIGNAL—I don\'t want to—JOIN US JOIN US"',
+        '',
+        '...SIGNAL CANNOT TERMINATE...',
+      ],
+      choices: [{ label: '[ESC] DISCONNECT', action: 'close' }],
+    }],
+    currentNodeId: 'root',
+    rewardTaken: false,
+    hidden: false,
+    hiddenUntilTick: 0,
+    broadcastLines,
+    broadcastPeriod: randInt(8, 13),
+    lastBroadcastTick: -randInt(8, 13), // negative so first broadcast doesn't fire instantly
+  });
+
+  room.scenario = 'stuck_echo';
+}
+
+function placeSpookyAstronauts(tiles: Tile[][], rooms: Room[]) {
+  const eligible = rooms.filter(r =>
+    r.roomType === 'normal' &&
+    !r.scenario &&
+    !r.tags.geometric.has('hall') &&
+    r.w >= 6 && r.h >= 6 &&
+    r.tags.functional != null &&
+    ['maintenance', 'cargo', 'lab', 'barracks', 'hangar'].includes(r.tags.functional)
+  );
+  if (eligible.length === 0) return;
+
+  const room = eligible[Math.floor(random() * eligible.length)];
+  const x1 = room.x + 1, y1 = room.y + 1;
+  const x2 = room.x + room.w - 2, y2 = room.y + room.h - 2;
+
+  const props: ScenarioPropDef[] = [];
+
+  // Place spacesuits along two opposing walls (left & right, or top & bottom)
+  const horizontal = random() < 0.5;
+  if (horizontal) {
+    // Along top and bottom interior rows
+    for (let x = x1; x <= x2; x += 2) {
+      if (tiles[y1]?.[x]?.walkable) props.push({ position: { x, y: y1 }, glyph: '♙', fg: '#8899aa', name: 'Spacesuit', propTag: 'spacesuit' });
+      if (tiles[y2]?.[x]?.walkable) props.push({ position: { x, y: y2 }, glyph: '♙', fg: '#8899aa', name: 'Spacesuit', propTag: 'spacesuit' });
+    }
+  } else {
+    // Along left and right interior columns
+    for (let y = y1; y <= y2; y += 2) {
+      if (tiles[y]?.[x1]?.walkable) props.push({ position: { x: x1, y }, glyph: '♙', fg: '#8899aa', name: 'Spacesuit', propTag: 'spacesuit' });
+      if (tiles[y]?.[x2]?.walkable) props.push({ position: { x: x2, y }, glyph: '♙', fg: '#8899aa', name: 'Spacesuit', propTag: 'spacesuit' });
+    }
+  }
+
+  if (props.length === 0) return;
+
+  room.scenario = 'spooky_astronauts';
+  room.scenarioState = { pendingProps: props };
+}
+
+function placeBrokenSleever(tiles: Tile[][], rooms: Room[]) {
+  const eligible = rooms.filter(r =>
+    r.roomType === 'normal' &&
+    !r.scenario &&
+    !r.tags.geometric.has('hall') &&
+    r.w >= 5 && r.h >= 5 &&
+    r.tags.functional != null &&
+    ['lab', 'maintenance', 'medbay', 'server_rack'].includes(r.tags.functional)
+  );
+  if (eligible.length === 0) return;
+
+  const room = eligible[Math.floor(random() * eligible.length)];
+  const x1 = room.x + 1, y1 = room.y + 1;
+  const x2 = room.x + room.w - 2, y2 = room.y + room.h - 2;
+
+  // Place the device at a walkable interior tile (preferring non-center so animation tile fits below)
+  // Device must have a walkable tile below it for the animation
+  let devicePos: Position | undefined;
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const x = x1 + Math.floor(random() * (x2 - x1 + 1));
+    const y = y1 + Math.floor(random() * (y2 - y1 - 1)); // leave room for anim tile below
+    if (!tiles[y]?.[x]?.walkable) continue;
+    if (!tiles[y+1]?.[x]?.walkable) continue;
+    if (isAdjacentToDoor(tiles, x, y)) continue;
+    devicePos = { x, y };
+    break;
+  }
+  if (!devicePos) return;
+
+  room.scenario = 'broken_sleever';
+  room.scenarioState = {
+    pendingProps: [{
+      position: devicePos,
+      glyph: '╬',
+      fg: '#667788',
+      name: 'Sleever Device',
+      propTag: 'sleever_device',
+    }],
+  };
+}
+
+function placeScenarios(tiles: Tile[][], rooms: Room[], interactables: Interactable[], clusterId: number) {
+  // Stuck Echo: clusters 2-3, any suitable room
+  if (clusterId >= 2 && clusterId <= 3) {
+    placeStuckEcho(tiles, rooms, interactables);
+  }
+  // Spooky Astronauts: clusters 3-4, functional rooms
+  if (clusterId >= 3 && clusterId <= 4) {
+    if (random() < 0.7) placeSpookyAstronauts(tiles, rooms);
+  }
+  // Broken Sleever: clusters 3-4, functional rooms
+  if (clusterId >= 3 && clusterId <= 4) {
+    if (random() < 0.6) placeBrokenSleever(tiles, rooms);
+  }
+}
+
 // ── Main generation ──
 
 export function generateCluster(id: number): Cluster {
@@ -1925,6 +2117,9 @@ export function generateCluster(id: number): Cluster {
 
   // Tutorial zone: cluster 0 gets a fixed narrative terminal and lost echo near entry
   if (id === 0) placeTutorialEntities(tiles, interactables);
+
+  // Room scenarios: thematic vignettes for clusters 2+
+  if (id >= 2) placeScenarios(tiles, allRooms, interactables, id);
 
   const cluster: Cluster = { id, width: CLUSTER_WIDTH, height: CLUSTER_HEIGHT, tiles, rooms: allRooms, interfaces, wallAdjacency, doorAdjacency, collapseMap, terminals, interactables, exitLocked: true };
 

@@ -1,8 +1,8 @@
-import { createGame, processAction, handleMapClick, stepAutoPath, addMessage, exportSave, loadSave, adminRegenCluster, adminTeleportToCluster, grantExitAccess, activateTerminal, executeInteractableAction, getEntityAt, CORRUPT_M_RANGE, hackFinalTerminal } from './game';
+import { createGame, processAction, handleMapClick, stepAutoPath, addMessage, exportSave, loadSave, adminRegenCluster, adminTeleportToCluster, grantExitAccess, activateTerminal, executeInteractableAction, getEntityAt, CORRUPT_M_RANGE, hackFinalTerminal, makeDamagedBitMite } from './game';
 import { setDamageParams, getDamageParams, setGenSizeOverride, clearGenSizeOverride, getGenSizeOverride, clusterScaleForId } from './cluster';
 import { Renderer, renderSelfPanel, renderLogs, renderOverviewPanel, renderMapStatusBar } from './renderer';
 import { InputHandler } from './input';
-import { PlayerAction, Position, TileType } from './types';
+import { PlayerAction, Position, TileType, SMOKE_DURATION_MS } from './types';
 import { generateSeed } from './rng';
 import { GLITCH_EFFECTS, initGlitch, glitchShake, glitchChromatic, glitchBarSweep, glitchStaticBurst, glitchHorizontalTear, glitchDataBleed } from './glitch';
 import { hasLOS } from './fov';
@@ -64,6 +64,7 @@ function startAutoWalk() {
       return;
     }
     if (stepAutoPath(state)) {
+      startSmokeLoop();
       renderer.setPathHighlight(state.autoPath);
       renderAll();
 
@@ -127,6 +128,52 @@ function cancelAnimation() {
     cancelAnimationFrame(animationFrameId);
     animationFrameId = null;
     state.animation = null;
+  }
+}
+
+// ── Smoke / echo real-time animation loop ──
+
+let smokeLoopId: number | null = null;
+
+function runSmokeLoop() {
+  smokeLoopId = null;
+  const now = performance.now();
+  let needsRender = false;
+
+  // Expire smoke effects
+  const before = state.smokeEffects.length;
+  state.smokeEffects = state.smokeEffects.filter(s => now - s.spawnTime < SMOKE_DURATION_MS);
+  if (state.smokeEffects.length !== before) needsRender = true;
+  if (state.smokeEffects.length > 0) needsRender = true;
+
+  // Check echo fades
+  const cluster = state.clusters.get(state.currentClusterId);
+  if (cluster) {
+    for (let i = cluster.interactables.length - 1; i >= 0; i--) {
+      const item = cluster.interactables[i];
+      if (item.echoFadeAtTime != null && now >= item.echoFadeAtTime) {
+        state.smokeEffects.push({ x: item.position.x, y: item.position.y, fg: '#aaaa66', spawnTime: now });
+        const bm = makeDamagedBitMite(item.position, cluster.id);
+        state.entities.push(bm);
+        addMessage(state, '...echo fragment destabilised.', 'system');
+        cluster.interactables.splice(i, 1);
+        needsRender = true;
+      }
+    }
+  }
+
+  if (needsRender) renderAll();
+
+  // Keep looping while there are active effects or pending fades
+  const hasPendingEcho = cluster?.interactables.some(i => i.echoFadeAtTime != null) ?? false;
+  if (state.smokeEffects.length > 0 || hasPendingEcho) {
+    smokeLoopId = requestAnimationFrame(runSmokeLoop);
+  }
+}
+
+export function startSmokeLoop() {
+  if (smokeLoopId === null) {
+    smokeLoopId = requestAnimationFrame(runSmokeLoop);
   }
 }
 
@@ -392,7 +439,10 @@ const terminalOptions = document.getElementById('terminal-options')!;
 
 function revealLines(elements: NodeListOf<Element> | Element[], startDelay = 0, perLineDelay = 40): void {
   const arr = Array.from(elements);
-  arr.forEach(el => el.classList.add('line-reveal-hidden'));
+  arr.forEach(el => {
+    (el as HTMLElement).style.transition = 'opacity 0.12s ease, transform 0.12s ease';
+    el.classList.add('line-reveal-hidden');
+  });
   requestAnimationFrame(() => {
     arr.forEach((el, i) => {
       setTimeout(() => el.classList.remove('line-reveal-hidden'), startDelay + i * perLineDelay);
@@ -437,7 +487,8 @@ function openTerminalOverlay() {
     `<div class="t-row"><span class="t-label">EGRESS:</span><span class="${exitLocked ? 't-warn' : 't-ok'}">${exitLocked ? 'LOCKED' : 'AUTHORIZED'}</span></div>` +
     keyRow;
 
-  revealLines(terminalContent.querySelectorAll('.t-log-line'));
+  const contentEls = Array.from(terminalContent.querySelectorAll('.t-log-line, .t-separator, .t-row'));
+  revealLines(contentEls);
 
   terminalOptions.innerHTML = '';
 
@@ -481,6 +532,7 @@ function openTerminalOverlay() {
   closeBtn.addEventListener('click', closeTerminalOverlay);
   terminalOptions.appendChild(closeBtn);
 
+  revealLines(terminalOptions.querySelectorAll('.terminal-opt-btn'), contentEls.length * 40 + 20);
   terminalOverlay.classList.add('open');
 }
 
@@ -576,12 +628,55 @@ function closeInteractableOverlay() {
     const item = cluster?.interactables.find(i => i.id === closedRef.id);
     if (item?.isTutorialEcho) {
       triggerSelfReveal();
-      item.echoFadeAtTick = state.tick + 3;
+      item.echoFadeAtTime = performance.now() + 3000;
     }
   }
 }
 
 const SCRAMBLE_CHARS = '░▒▓█▀▄╔╗╚╝║═├┤┬┴┼─│┌┐└┘';
+const randomScramble = (length: number) =>
+  Array.from({ length }, () => SCRAMBLE_CHARS[Math.floor(Math.random() * SCRAMBLE_CHARS.length)]).join('');
+
+function scrambleReveal(
+  lines: HTMLElement[],
+  onComplete?: () => void,
+  lineDelayMs = 80,
+  scrambleTicks = 3,
+  tickMs = 40,
+): void {
+  if (lines.length === 0) { onComplete?.(); return; }
+  // Hide all lines upfront. Original DOM nodes are never replaced so event
+  // listeners on children (e.g. log expand buttons) are fully preserved.
+  lines.forEach(el => { el.style.visibility = 'hidden'; });
+  let currentLine = 0;
+  const revealNext = () => {
+    if (currentLine >= lines.length) { onComplete?.(); return; }
+    const lineIdx = currentLine++;
+    const el = lines[lineIdx];
+    const len = el.textContent?.length ?? 6;
+    el.style.visibility = '';
+    el.style.position = 'relative';
+    // Opaque overlay covers original content while scrambling
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:absolute;inset:0;background:var(--theme-bg);color:#44ff88;white-space:pre;overflow:hidden;pointer-events:none';
+    overlay.textContent = randomScramble(len);
+    el.appendChild(overlay);
+    let tick = 0;
+    const scrambleInterval = setInterval(() => {
+      tick++;
+      overlay.textContent = randomScramble(len);
+      if (tick >= scrambleTicks) {
+        clearInterval(scrambleInterval);
+        overlay.remove();
+        el.style.position = '';
+        if (currentLine >= lines.length) onComplete?.();
+      }
+    }, tickMs);
+    if (currentLine < lines.length) setTimeout(revealNext, lineDelayMs);
+  };
+  setTimeout(revealNext, 0);
+}
+
 let selfRevealAnimating = false;
 
 function triggerSelfReveal() {
@@ -594,69 +689,8 @@ function triggerSelfReveal() {
   renderSelfPanel(panelEl, state.player, state.debugMode, state.mapReveal, state.godMode, state.invisibleMode, state.seed);
   renderLogs(logGeneralEl, logAlertEl, state.messages);
 
-  const LINE_DELAY_MS = 120;
-  const SCRAMBLE_TICKS = 4;
-  const TICK_MS = 50;
-
-  const randomScramble = (length: number) =>
-    Array.from({ length }, () => SCRAMBLE_CHARS[Math.floor(Math.random() * SCRAMBLE_CHARS.length)]).join('');
-
-  // Collect all row-level elements in document order
-  const lines = Array.from(panelEl.querySelectorAll<HTMLElement>(
-    ':scope > .panel-edge, .panel-body > *',
-  ));
-  const originals = lines.map(el => el.innerHTML);
-
-  // Hide all lines initially — they remain in the DOM so panel height is locked
-  lines.forEach(el => { el.style.visibility = 'hidden'; });
-
-  let currentLine = 0;
-
-  const revealNext = () => {
-    if (currentLine >= lines.length) {
-      selfRevealAnimating = false;
-      renderAll();
-      return;
-    }
-
-    const lineIdx = currentLine++;
-    const el = lines[lineIdx];
-    const len = el.textContent?.length ?? 6;
-
-    // Scrambling phase: element is visible but shows random chars;
-    // a hidden ghost of the real content keeps the row height locked.
-    el.style.visibility = '';
-    el.style.position = 'relative';
-    el.innerHTML =
-      `<div style="visibility:hidden">${originals[lineIdx]}</div>` +
-      `<div style="position:absolute;inset:0;color:#44ff88;opacity:0.75;white-space:pre;overflow:hidden">${randomScramble(len)}</div>`;
-
-    let tick = 0;
-    const scrambleInterval = setInterval(() => {
-      tick++;
-      const overlay = el.lastElementChild as HTMLElement | null;
-      if (overlay) overlay.textContent = randomScramble(len);
-
-      if (tick >= SCRAMBLE_TICKS) {
-        clearInterval(scrambleInterval);
-        // Revealed phase: restore real content
-        el.style.position = '';
-        el.innerHTML = originals[lineIdx];
-      }
-    }, TICK_MS);
-
-    if (currentLine < lines.length) {
-      setTimeout(revealNext, LINE_DELAY_MS);
-    } else {
-      // Last line: schedule final clean render after it finishes scrambling
-      setTimeout(() => {
-        selfRevealAnimating = false;
-        renderAll();
-      }, SCRAMBLE_TICKS * TICK_MS + 50);
-    }
-  };
-
-  setTimeout(revealNext, 100);
+  const lines = Array.from(panelEl.querySelectorAll<HTMLElement>(':scope > .panel-edge, .panel-body > *'));
+  scrambleReveal(lines, () => { selfRevealAnimating = false; renderAll(); }, 120, 4, 50);
 }
 
 // ── Target panel ──
@@ -773,6 +807,13 @@ function showVictoryOverlay() {
   }
 
   victoryOverlay.classList.add('open');
+
+  const victoryLines: Element[] = [document.getElementById('victory-header')!];
+  victoryLines.push(...Array.from(victoryStats.children));
+  victoryLines.push(...Array.from(victoryKills.children));
+  if (achievementEl.style.display !== 'none') victoryLines.push(...Array.from(achievementEl.children));
+  victoryLines.push(victoryRestartBtn);
+  revealLines(victoryLines);
 }
 
 // ── Aim mode ──
@@ -822,8 +863,7 @@ function renderAll() {
   for (const [key, gt] of state.collapseGlitchTiles) {
     if (gt.expireTick <= state.tick) state.collapseGlitchTiles.delete(key);
   }
-  // Expire smoke effects (duration = 3 ticks)
-  state.smokeEffects = state.smokeEffects.filter(s => state.tick - s.spawnTick < 3);
+  // Smoke effects are expired by the real-time smoke loop (runSmokeLoop)
 
   const alertOverlay = state.showAlertOverlay && state.alertFill
     ? { fill: state.alertFill, threats: state.alertThreats, budget: 15 }
@@ -886,6 +926,7 @@ function renderAll() {
       renderSelfPanel(panelEl, state.player, state.debugMode, state.mapReveal, state.godMode, state.invisibleMode, state.seed);
     }
     renderTargetPanel(hoveredPos);
+    scrambleReveal(Array.from(targetPanelEl.querySelectorAll<HTMLElement>(':scope > .panel-edge, .panel-body > *')), () => {}, 40, 3, 40);
   } else {
     panelEl.style.display = 'none';
     targetPanelEl.style.display = 'none';
@@ -943,11 +984,25 @@ function onAction(action: PlayerAction) {
   const prevPos = { ...state.player.position };
   processAction(state, action);
 
+  // Kick off real-time smoke/echo loop if anything was added
+  startSmokeLoop();
+
   // Damage glitch
   if ((state.player.coherence ?? 100) < prevCoherence) {
     glitchShake();
     glitchChromatic();
     setTimeout(() => glitchBarSweep(), 200);
+  }
+
+  // Scenario-driven glitch effects (set by hazard/scenario logic)
+  if (state.pendingGlitch) {
+    const g = state.pendingGlitch;
+    state.pendingGlitch = undefined;
+    if (g === 'chromatic') glitchChromatic();
+    else if (g === 'shake') glitchShake();
+    else if (g === 'bar_sweep') glitchBarSweep();
+    else if (g === 'static_burst') glitchStaticBurst();
+    else if (g === 'horizontal_tear') glitchHorizontalTear();
   }
 
   // Hazard tile entry glitch
@@ -1286,11 +1341,15 @@ const aboutBtn = document.getElementById('about-btn')!;
 const aboutOverlay = document.getElementById('about-overlay')!;
 
 settingsBtn.addEventListener('click', () => {
+  const isOpening = !settingsOverlay.classList.contains('open');
   settingsOverlay.classList.toggle('open');
+  if (isOpening) revealLines(settingsOverlay.querySelectorAll('.settings-body > :not(.settings-advanced)'));
 });
 
 aboutBtn.addEventListener('click', () => {
+  const isOpening = !aboutOverlay.classList.contains('open');
   aboutOverlay.classList.toggle('open');
+  if (isOpening) revealLines(aboutOverlay.querySelectorAll('.about-body > *'));
 });
 
 settingsOverlay.addEventListener('click', (e) => {
@@ -1406,3 +1465,7 @@ loadSettings();
 renderAll();
 addMessage(state, 'Ready.', 'system');
 renderAll();
+
+scrambleReveal(Array.from(document.querySelectorAll<HTMLElement>(
+  '#map-container > .panel-edge, #map-status-bar, #log-general > .panel-edge, #log-alert > .panel-edge',
+)), () => {}, 120, 4, 50);

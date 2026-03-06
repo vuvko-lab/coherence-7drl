@@ -586,7 +586,7 @@ function removeEntity(state: GameState, target: Entity) {
   state.smokeEffects.push({
     x: target.position.x, y: target.position.y,
     fg: factionSmokeColor(target.ai?.faction),
-    spawnTick: state.tick,
+    spawnTime: performance.now(),
   });
   if (target.ai) state.killedEntities.push({ name: target.name, kind: target.ai.kind });
   state.entities = state.entities.filter(e => e.id !== target.id);
@@ -667,6 +667,47 @@ export function makeBitMite(pos: Position, clusterId: number): Entity {
       faction: 'aggressive',
       aiState: 'wander',
       sightRadius: 8,
+      wallPenetration: 0,
+    },
+  };
+}
+
+export function makePropEntity(pos: Position, clusterId: number, glyph: string, fg: string, name: string, propTag: string): Entity {
+  return {
+    id: _nextEntityId++,
+    name,
+    glyph,
+    fg,
+    position: { ...pos },
+    clusterId,
+    speed: 9999,
+    energy: 0,
+    attackDistance: 0,
+    attackValue: 0,
+    propTag,
+    // no ai — static prop, never acts
+  };
+}
+
+export function makeDamagedBitMite(pos: Position, clusterId: number): Entity {
+  return {
+    id: _nextEntityId++,
+    name: 'Corrupted Echo Fragment',
+    glyph: '⁕',
+    fg: '#aa6644',
+    position: { ...pos },
+    clusterId,
+    speed: 18,
+    energy: 0,
+    coherence: 5,
+    maxCoherence: 5,
+    attackDistance: 1,
+    attackValue: 2,
+    ai: {
+      kind: 'bit_mite',
+      faction: 'aggressive',
+      aiState: 'wander',
+      sightRadius: 5,
       wallPenetration: 0,
     },
   };

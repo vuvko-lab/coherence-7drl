@@ -465,24 +465,26 @@ export class Renderer {
       renderShootingEffect(this.display, effect, tick);
     }
 
-    // Smoke / death dissolution effects
+    // Smoke / death dissolution effects (time-based, 480ms total — 3 phases × 160ms)
     if (extras?.smokeEffects) {
+      const now = performance.now();
       for (const s of extras.smokeEffects) {
-        const age = tick - s.spawnTick;
-        if (age < 0 || age >= 3) continue;
-        const alt = tick % 2;
+        const elapsed = now - s.spawnTime;
+        if (elapsed < 0 || elapsed >= 480) continue;
+        const phase = Math.floor(elapsed / 160); // 0, 1, or 2
+        const alt = Math.floor(now / 80) % 2;    // flicker every 80ms
         // Center glyph
-        const center = [['●', '◉'], ['◎', '◍'], ['◌', '○']][age][alt];
+        const center = [['●', '◉'], ['◎', '◍'], ['◌', '○']][phase][alt];
         this.drawOver(s.x, s.y, center, s.fg);
         // Orthogonal neighbours
-        const orthoG = [['░', '▒'], ['▒', '▓'], ['░', '░']][age][alt];
+        const orthoG = [['░', '▒'], ['▒', '▓'], ['░', '░']][phase][alt];
         for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]] as const) {
           const nx = s.x + dx, ny = s.y + dy;
           if (nx >= 0 && nx < this.width && ny >= 0 && ny < this.height)
             this.drawOver(nx, ny, orthoG, s.fg);
         }
-        // Diagonal neighbours (only at age 1, spreading outward)
-        if (age === 1) {
+        // Diagonal neighbours (only at phase 1, spreading outward)
+        if (phase === 1) {
           const diagG = alt === 0 ? '░' : '▒';
           for (const [dx, dy] of [[1,1],[-1,1],[1,-1],[-1,-1]] as const) {
             const nx = s.x + dx, ny = s.y + dy;

@@ -657,6 +657,113 @@ function updateCollapseEffects(state: GameState, cluster: Cluster) {
   }
 }
 
+// ── Room scenario updates ──
+
+function updateRoomScenarios(state: GameState, cluster: Cluster) {
+  const tick = state.tick;
+
+  for (const room of cluster.rooms) {
+    if (!room.scenario) continue;
+
+    const playerInRoom = posInRoom(state.player.position, room);
+
+    switch (room.scenario) {
+      case 'stuck_echo': {
+        // Broadcast screaming messages periodically (even if player isn't in this room)
+        const echo = cluster.interactables.find(
+          i => i.roomId === room.id && i.broadcastLines && i.broadcastLines.length > 0
+        );
+        if (!echo) break;
+        const period = echo.broadcastPeriod ?? 10;
+        const lastTick = echo.lastBroadcastTick ?? -period;
+        if (tick - lastTick >= period) {
+          const idx = Math.floor(random() * echo.broadcastLines!.length);
+          addMessage(state, echo.broadcastLines![idx], 'hazard');
+          echo.lastBroadcastTick = tick;
+          echo.broadcastPeriod = randInt(8, 13);
+        }
+        break;
+      }
+
+      case 'spooky_astronauts': {
+        room.scenarioState ??= {};
+        const ss = room.scenarioState;
+        if (ss.triggered) break;
+
+        if (!playerInRoom) {
+          ss.playerEnteredAtTick = undefined; // reset timer when player leaves
+          break;
+        }
+
+        ss.playerEnteredAtTick ??= tick;
+        const ticksInRoom = tick - ss.playerEnteredAtTick;
+
+        if (ticksInRoom === 5) {
+          addMessage(state, 'alert.m: HOSTILES DETECTED — motion signatures detected.', 'alert');
+          addMessage(state, 'alert.m: Multiple contacts. Sector compromised.', 'alert');
+          state.pendingGlitch = 'chromatic';
+        } else if (ticksInRoom === 6) {
+          // Glitch out the spacesuit props
+          const glitchGlyphs = ['╫', '╪', '▣', '╬', '╳'];
+          for (const entity of state.entities) {
+            if (entity.clusterId !== cluster.id) continue;
+            if (entity.propTag !== 'spacesuit') continue;
+            if (!posInRoom(entity.position, room)) continue;
+            state.collapseGlitchTiles.set(`${entity.position.x},${entity.position.y}`, {
+              glyph: glitchGlyphs[Math.floor(random() * glitchGlyphs.length)],
+              fg: '#cc4444',
+              expireTick: tick + 4,
+            });
+          }
+          ss.triggered = true;
+        }
+        break;
+      }
+
+      case 'broken_sleever': {
+        if (!playerInRoom) break;
+
+        // Find the sleever device entity in this room
+        const device = state.entities.find(
+          e => e.clusterId === cluster.id && e.propTag === 'sleever_device' && posInRoom(e.position, room)
+        );
+        if (!device) break;
+
+        // Animation tile: 1 tile below the device (or above if bottom row)
+        const animX = device.position.x;
+        const animY = device.position.y + 1;
+        const animTile = cluster.tiles[animY]?.[animX];
+        if (!animTile?.walkable) break;
+
+        const phase = tick % 7;
+        const key = `${animX},${animY}`;
+
+        if (phase === 0) {
+          state.collapseGlitchTiles.set(key, { glyph: '·', fg: '#555566', expireTick: tick + 2 });
+        } else if (phase === 1) {
+          state.collapseGlitchTiles.set(key, { glyph: '░', fg: '#7777aa', expireTick: tick + 2 });
+        } else if (phase === 2) {
+          state.collapseGlitchTiles.set(key, { glyph: '▒', fg: '#9999cc', expireTick: tick + 2 });
+        } else if (phase === 3) {
+          state.collapseGlitchTiles.set(key, { glyph: '@', fg: '#aaaadd', expireTick: tick + 2 });
+          if (animTile.visible) {
+            room.scenarioState ??= {};
+            const last = room.scenarioState.lastMessageTick ?? -99;
+            if (tick - last >= 7) {
+              addMessage(state, '...infomorph template detected. Upload cycle failed.', 'system');
+              room.scenarioState.lastMessageTick = tick;
+            }
+          }
+        } else if (phase === 4) {
+          state.collapseGlitchTiles.set(key, { glyph: '╳', fg: '#cc6644', expireTick: tick + 2 });
+        }
+        // phases 5-6: no overlay — tile returns to normal as key expires
+        break;
+      }
+    }
+  }
+}
+
 // ── Main update ──
 
 export function updateHazards(state: GameState) {
@@ -664,6 +771,7 @@ export function updateHazards(state: GameState) {
   if (!cluster) return;
 
   updateCollapseEffects(state, cluster);
+  updateRoomScenarios(state, cluster);
 
   for (const room of cluster.rooms) {
     if (room.roomType === 'normal' || !room.hazardState) continue;
