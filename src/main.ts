@@ -29,6 +29,8 @@ function initRenderer() {
 function restartGame(newSeed: number) {
   stopAutoWalk();
   adminInitialized = false;
+  rootPrivsAnimating = false;
+  lastKnownPrivilegeSet = new Set();
   state = createGame(newSeed);
   initRenderer();
   renderAll();
@@ -680,6 +682,8 @@ function scrambleReveal(
 }
 
 let selfRevealAnimating = false;
+let rootPrivsAnimating = false;
+let lastKnownPrivilegeSet = new Set<string>();
 
 function triggerSelfReveal() {
   state.selfPanelRevealed = true;
@@ -934,8 +938,30 @@ function renderAll() {
   if (state.selfPanelRevealed) {
     panelEl.style.display = '';
     targetPanelEl.style.display = '';
-    if (!selfRevealAnimating) {
+    if (!selfRevealAnimating && !rootPrivsAnimating) {
       renderSelfPanel(panelEl, state.player, state.debugMode, state.mapReveal, state.godMode, state.invisibleMode, state.seed, moduleMenuOpen, selectedModuleIdx, state.rootPrivileges);
+
+      // Detect newly gained root privileges and play descramble animation
+      const currentPrivs = state.rootPrivileges;
+      const newPrivs = currentPrivs.filter(p => !lastKnownPrivilegeSet.has(p));
+      if (newPrivs.length > 0) {
+        const prevSize = lastKnownPrivilegeSet.size;
+        lastKnownPrivilegeSet = new Set(currentPrivs);
+        rootPrivsAnimating = true;
+        const onDone = () => { rootPrivsAnimating = false; renderAll(); };
+        if (prevSize === 0) {
+          // Root section appearing for the first time: reveal sep + all 5 rows
+          const rootEls = Array.from(panelEl.querySelectorAll<HTMLElement>('.root-sep, .root-priv-row'));
+          scrambleReveal(rootEls, onDone, 55, 5, 35);
+        } else {
+          // Privilege changing from locked → granted: descramble only that row
+          const allRows = Array.from(panelEl.querySelectorAll<HTMLElement>('.root-priv-row'));
+          const changedRows = allRows.filter(row =>
+            newPrivs.some(p => row.querySelector('.root-priv-name')?.textContent === p)
+          );
+          scrambleReveal(changedRows, onDone, 0, 7, 40);
+        }
+      }
     }
     renderTargetPanel(hoveredPos);
     scrambleReveal(Array.from(targetPanelEl.querySelectorAll<HTMLElement>(':scope > .panel-edge, .panel-body > *')), () => {}, 40, 3, 40);

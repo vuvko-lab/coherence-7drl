@@ -589,7 +589,7 @@ export function renderSelfPanel(el: HTMLElement, player: Entity, debugMode = fal
 ${moduleRows}
 <div class="panel-sep"><span class="fill"></span><span class="label">perms</span><span class="fill"></span></div>
 <div class="stat-row"><span class="stat-label">engineer / r+w+x</span></div>
-${rootPrivileges.length > 0 ? `<div class="panel-sep"><span class="fill"></span><span class="label">root</span><span class="fill"></span></div>
+${rootPrivileges.length > 0 ? `<div class="panel-sep root-sep"><span class="fill"></span><span class="label">root</span><span class="fill"></span></div>
 ${ROOT_PRIVILEGES.map(p => {
   const granted = rootPrivileges.includes(p);
   return `<div class="stat-row root-priv-row${granted ? ' root-granted' : ' root-locked'}">` +
