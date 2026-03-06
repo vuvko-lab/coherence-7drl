@@ -428,6 +428,27 @@ body {
   color: #6688cc;
 }
 
+/* --- Overlay panel entry animation (shared) --- */
+
+@keyframes overlay-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+#settings-overlay.open   #settings-panel,
+#about-overlay.open      #about-panel,
+#terminal-overlay.open   #terminal-panel,
+#interactable-overlay.open #interactable-panel,
+#victory-overlay.open    #victory-panel {
+  animation: overlay-panel-in 0.18s ease forwards;
+}
+
 /* --- Settings overlay --- */
 #settings-overlay {
   display: none;
