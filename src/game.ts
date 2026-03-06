@@ -417,7 +417,7 @@ function tryShoot(state: GameState, target: Position): boolean {
   corrupt.clusterShotCount = shotCount + 1;
   corrupt.cooldownUntilTick = state.tick + CORRUPT_M_COOLDOWN;
 
-  shootingAnimation(state, from, target, 'single');
+  shootingAnimation(state, from, target, 'beam');
 
   if (targetEntity.coherence !== undefined) {
     targetEntity.coherence = Math.max(0, targetEntity.coherence - CORRUPT_M_DAMAGE);
