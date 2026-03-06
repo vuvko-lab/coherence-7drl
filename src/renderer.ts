@@ -548,7 +548,7 @@ export class Renderer {
 
 // ── SELF panel renderer ──
 
-export function renderSelfPanel(el: HTMLElement, player: Entity, debugMode = false, mapReveal = false, godMode = false, invisibleMode = false, gameSeed = 0, moduleMenuOpen = false, selectedModuleIdx = -1, rootPrivileges: string[] = []) {
+export function renderSelfPanel(el: HTMLElement, player: Entity, debugMode = false, mapReveal = false, godMode = false, invisibleMode = false, gameSeed = 0, moduleMenuOpen = false, selectedModuleIdx = -1, rootPrivileges: string[] = [], tick = 0) {
   const hexId = '0x' + player.id.toString(16).toUpperCase().padStart(4, '0');
   const coherence = player.coherence ?? 100;
   const maxCoherence = player.maxCoherence ?? 100;
@@ -565,15 +565,26 @@ export function renderSelfPanel(el: HTMLElement, player: Entity, debugMode = fal
     const isAlertActive = mod.id === 'alert.m' && mod.alertActive;
     const isToggleActive = ACTIVATABLE_MODULES.has(mod.id) && mod.active;
     const isSelected = moduleMenuOpen && idx === selectedModuleIdx;
+
+    // corrupt.m: dynamic status overrides
+    let statusText = isToggleActive ? 'active' : mod.status;
+    let extraClass = '';
+    if (mod.id === 'corrupt.m' && mod.status === 'loaded') {
+      const reloading = mod.cooldownUntilTick != null && mod.cooldownUntilTick > tick;
+      const leaking = !reloading && (mod.clusterShotCount ?? 0) >= 2;
+      if (reloading) { statusText = 'reloading'; extraClass = ' status-reloading'; }
+      else if (leaking) { statusText = 'leaking'; extraClass = ' status-leaking'; }
+    }
+
     const activeClass = (isAlertActive ? ' module-alert-active' : '') + (isSelected ? ' module-row-selected' : '');
     const indicator = isAlertActive ? '<span class="module-indicator"> ▲ </span>' : '';
-    const statusClass = mod.status === 'damaged' ? ' status-damaged' : mod.status === 'offline' ? ' status-offline' : '';
-    const statusText = isToggleActive ? 'active' : mod.status;
+    const baseStatusClass = mod.status === 'damaged' ? ' status-damaged' : mod.status === 'offline' ? ' status-offline' : '';
+    const statusClass = baseStatusClass + extraClass + (isToggleActive ? ' status-active' : '');
     const menuCursor = isSelected ? '<span class="module-cursor">›</span>' : '';
     return `<div class="module-row${activeClass}" data-module="${mod.id}">` +
       `${menuCursor}<span class="module-name stat-label">&gt; ${mod.id}</span>` +
       `${indicator}` +
-      `<span class="module-status stat-value${statusClass}${isToggleActive ? ' status-active' : ''}">[${statusText}]</span>` +
+      `<span class="module-status stat-value${statusClass}">[${statusText}]</span>` +
       `</div>`;
   }).join('\n');
 

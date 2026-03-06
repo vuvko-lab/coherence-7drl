@@ -692,7 +692,7 @@ function triggerSelfReveal() {
 
   // Render real content into the (now visible) panel so we have DOM to work with
   panelEl.style.display = '';
-  renderSelfPanel(panelEl, state.player, state.debugMode, state.mapReveal, state.godMode, state.invisibleMode, state.seed, moduleMenuOpen, selectedModuleIdx, state.rootPrivileges);
+  renderSelfPanel(panelEl, state.player, state.debugMode, state.mapReveal, state.godMode, state.invisibleMode, state.seed, moduleMenuOpen, selectedModuleIdx, state.rootPrivileges, state.tick);
   renderLogs(logGeneralEl, logAlertEl, state.messages);
 
   const lines = Array.from(panelEl.querySelectorAll<HTMLElement>(':scope > .panel-edge, .panel-body > *'));
@@ -939,7 +939,7 @@ function renderAll() {
     panelEl.style.display = '';
     targetPanelEl.style.display = '';
     if (!selfRevealAnimating && !rootPrivsAnimating) {
-      renderSelfPanel(panelEl, state.player, state.debugMode, state.mapReveal, state.godMode, state.invisibleMode, state.seed, moduleMenuOpen, selectedModuleIdx, state.rootPrivileges);
+      renderSelfPanel(panelEl, state.player, state.debugMode, state.mapReveal, state.godMode, state.invisibleMode, state.seed, moduleMenuOpen, selectedModuleIdx, state.rootPrivileges, state.tick);
 
       // Detect newly gained root privileges and play descramble animation
       const currentPrivs = state.rootPrivileges;

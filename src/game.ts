@@ -358,11 +358,22 @@ export function getEntityAt(state: GameState, cluster: Cluster, x: number, y: nu
   );
 }
 
+const CORRUPT_M_DAMAGE   = 40;
+const CORRUPT_M_COOLDOWN = 10; // ticks between shots
+const CORRUPT_M_FREE_SHOTS = 2; // shots per cluster with no coherence drain
+
 function tryShoot(state: GameState, target: Position): boolean {
   const cluster = getCurrentCluster(state);
   const corrupt = state.player.modules?.find(m => m.id === 'corrupt.m' && m.status === 'loaded');
   if (!corrupt) {
     addMessage(state, 'No attack module — corrupt.m required.', 'alert');
+    return false;
+  }
+
+  // Cooldown check
+  if (corrupt.cooldownUntilTick != null && corrupt.cooldownUntilTick > state.tick) {
+    const remaining = corrupt.cooldownUntilTick - state.tick;
+    addMessage(state, `corrupt.m reloading — ${remaining} tick${remaining !== 1 ? 's' : ''} remaining.`, 'alert');
     return false;
   }
 
@@ -393,15 +404,33 @@ function tryShoot(state: GameState, target: Position): boolean {
     return false;
   }
 
+  // Track shots and apply coherence drain for shots beyond the free quota
+  const shotCount = corrupt.clusterShotCount ?? 0;
+  const overQuota = shotCount - CORRUPT_M_FREE_SHOTS + 1; // >0 means this shot drains
+  if (overQuota > 0 && state.player.coherence != null && !state.godMode) {
+    const drain = overQuota * 3;
+    state.player.coherence = Math.max(0, state.player.coherence - drain);
+    addMessage(state, `[LEAK] corrupt.m membrane degrading — coherence drain: −${drain} (${state.player.coherence}/${state.player.maxCoherence}).`, 'hazard');
+  }
+
+  corrupt.clusterShotCount = shotCount + 1;
+  corrupt.cooldownUntilTick = state.tick + CORRUPT_M_COOLDOWN;
+
   shootingAnimation(state, from, target, 'single');
 
-  const damage = 10;
   if (targetEntity.coherence !== undefined) {
-    targetEntity.coherence = Math.max(0, targetEntity.coherence - damage);
+    targetEntity.coherence = Math.max(0, targetEntity.coherence - CORRUPT_M_DAMAGE);
     addMessage(state,
-      `Corrupt shot hits ${targetEntity.name} for ${damage}. (${targetEntity.coherence}/${targetEntity.maxCoherence})`,
+      `Corrupt shot hits ${targetEntity.name} for ${CORRUPT_M_DAMAGE}. (${targetEntity.coherence}/${targetEntity.maxCoherence})`,
       'combat');
   }
+
+  // Warn when the NEXT shot will start draining coherence
+  const newCount = corrupt.clusterShotCount;
+  if (newCount === CORRUPT_M_FREE_SHOTS) {
+    addMessage(state, '[WARN] corrupt.m free quota exhausted — next shots will drain coherence.', 'alert');
+  }
+
   return true;
 }
 
@@ -582,6 +611,9 @@ function tryTransfer(state: GameState): boolean {
   // Clear per-cluster transient state on transfer
   state.hazardFogMarks.clear();
   state.revealEffects = [];
+  // Reset corrupt.m shot quota (two free shots per cluster)
+  const corruptM = state.player.modules?.find(m => m.id === 'corrupt.m');
+  if (corruptM) corruptM.clusterShotCount = 0;
 
   if (cluster.id === 0) {
     addMessage(state, 'Infomorph sleeving facility. Status: [ERROR]', 'important');
