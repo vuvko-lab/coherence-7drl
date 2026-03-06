@@ -2,7 +2,7 @@ import {
   GameState, Entity, Cluster, Position, PlayerAction, Tile,
   TileType, DIR_DELTA, GameMessage, Direction,
   Interactable, DialogChoice,
-  ALERT_SUSPICIOUS, ALERT_ENEMY, ROOT_PRIVILEGES,
+  ALERT_SUSPICIOUS, ALERT_ENEMY, ROOT_PRIVILEGES, COLORS,
 } from './types';
 import { generateCluster, placeEntryPoint } from './cluster';
 import { computeFOV, floodFillReveal, hasLOS } from './fov';
@@ -1016,11 +1016,20 @@ export function executeInteractableAction(
       if (hazardRoomId == null) break;
       const hazardRoom = cluster.rooms.find(r => r.id === hazardRoomId);
       if (!hazardRoom) break;
+      const wasQuarantine = hazardRoom.roomType === 'quarantine';
       hazardRoom.roomType = 'normal';
       hazardRoom.hazardState = undefined;
       for (let ry = hazardRoom.y; ry < hazardRoom.y + hazardRoom.h; ry++) {
         for (let rx = hazardRoom.x; rx < hazardRoom.x + hazardRoom.w; rx++) {
-          if (cluster.tiles[ry]?.[rx]) cluster.tiles[ry][rx].hazardOverlay = undefined;
+          const tile = cluster.tiles[ry]?.[rx];
+          if (!tile) continue;
+          tile.hazardOverlay = undefined;
+          if (wasQuarantine && tile.type === TileType.Door && !tile.walkable) {
+            tile.walkable = true;
+            tile.glyph = '+';
+            tile.fg = COLORS.door;
+            tile.doorOpen = false;
+          }
         }
       }
       addMessage(state, '[OVERRIDE] Hazard subsystem neutralized.', 'important');
