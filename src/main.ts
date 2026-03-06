@@ -107,7 +107,7 @@ function runAnimationLoop() {
 
     // Update animation frames based on progress
     for (const effect of anim.effects) {
-      const totalFrames = effect.style === 'rapid' ? 12 : 4;
+      const totalFrames = effect.style === 'rapid' ? 12 : effect.style === 'beam' ? 10 : 4;
       effect.animationFrame = Math.floor(progress * totalFrames);
     }
 

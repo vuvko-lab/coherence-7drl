@@ -8,35 +8,27 @@ export type ShootingStyle =
   | 'beam'
   ;
 
-const ANIMATION_DURATION = 200; // 0.2 seconds in ms
+const ANIMATION_DURATION: Record<ShootingStyle, number> = {
+  single: 200,
+  rapid:  200,
+  beam:   400, // 10 frames × 40ms for glitch beam
+};
 
 export function shootingAnimation(state: GameState, fromPosition: Position, targetPosition: Position, shootingStyle: ShootingStyle) {
   const effects: ShootingEffect[] = [];
 
   if (shootingStyle === 'rapid') {
     for (let i = 0; i < 3; i++) {
-      const effect: ShootingEffect = {
-        from: { ...fromPosition },
-        to: { ...targetPosition },
-        style: 'single',
-        animationFrame: i,
-      };
-      effects.push(effect);
+      effects.push({ from: { ...fromPosition }, to: { ...targetPosition }, style: 'single', animationFrame: i });
     }
   } else {
-    const effect: ShootingEffect = {
-      from: { ...fromPosition },
-      to: { ...targetPosition },
-      style: shootingStyle,
-      animationFrame: 0,
-    };
-    effects.push(effect);
+    effects.push({ from: { ...fromPosition }, to: { ...targetPosition }, style: shootingStyle, animationFrame: 0 });
   }
 
   state.animation = {
     isAnimating: true,
     startTime: performance.now(),
-    duration: ANIMATION_DURATION,
+    duration: ANIMATION_DURATION[shootingStyle],
     effects,
   };
 }

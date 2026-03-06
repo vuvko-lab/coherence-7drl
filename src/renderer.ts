@@ -860,6 +860,16 @@ export function renderOverviewPanel(
     `<div class="panel-edge"><span class="corner">└</span><span class="fill"></span><span class="corner">┘</span></div>`;
 }
 
+// Glitch beam palette — cycles through per frame for RGB-shift feel
+const BEAM_CORE_COLORS   = ['#ff00ff','#00ffff','#ff2266','#ffffff','#ff00ff','#00ff88','#ff6600','#88ffff','#ffaaff','#00ffff'];
+const BEAM_CORE_CHARS    = ['█','▓','▒','█','▓','▒','█','▓','▒','░'];
+const BEAM_WIDE_CHARS    = ['▓','▒','░','▓','▒','░','▒','░','░','·'];
+
+function beamDraw(display: ROT.Display, x: number, y: number, ch: string, color: string, alpha: number) {
+  if (x < 0 || x >= 50 || y < 0 || y >= 30) return;
+  display.draw(x, y, ch, adjustAlpha(color, alpha), null);
+}
+
 function renderShootingEffect(display: ROT.Display, effect: ShootingEffect, _tick: number) {
   const { from, to, style, animationFrame } = effect;
   const dx = to.x - from.x;
@@ -867,7 +877,7 @@ function renderShootingEffect(display: ROT.Display, effect: ShootingEffect, _tic
   const dist = Math.sqrt(dx * dx + dy * dy);
   if (dist === 0) return;
 
-  const maxFrames = style === 'rapid' ? 12 : 4;
+  const maxFrames = style === 'rapid' ? 12 : style === 'beam' ? 10 : 4;
   const progress = Math.min(animationFrame / maxFrames, 1);
 
   if (style === 'single' || style === 'rapid') {
@@ -885,17 +895,44 @@ function renderShootingEffect(display: ROT.Display, effect: ShootingEffect, _tic
       }
     }
   } else if (style === 'beam') {
+    const frame = animationFrame % 10;
+    const coreColor  = BEAM_CORE_COLORS[frame];
+    const coreChar   = BEAM_CORE_CHARS[frame];
+    const wideChar   = BEAM_WIDE_CHARS[frame];
+
+    // Perpendicular direction (normalized to grid, rounded)
+    const nx = -dy / dist;   // perpendicular x (unit)
+    const ny =  dx / dist;   // perpendicular y (unit)
+    const px = Math.abs(nx) > Math.abs(ny) ? Math.sign(nx) : 0;
+    const py = Math.abs(ny) >= Math.abs(nx) ? Math.sign(ny) : 0;
+
+    // RGB shift offsets: red displaced -1, blue displaced +1 along beam axis
+    const axX = Math.round(dx / dist);
+    const axY = Math.round(dy / dist);
+
     const steps = Math.ceil(dist);
     for (let i = 0; i <= steps; i++) {
       const t = i / steps;
       const x = Math.round(from.x + dx * t);
       const y = Math.round(from.y + dy * t);
-      if (x >= 0 && x < 50 && y >= 0 && y < 30) {
-        const displayChar = i < steps ? '·' : '─';
-        const alpha = 1 - t * 0.5;
-        const fg = adjustAlpha('#00ffff', alpha);
-        display.draw(x, y, displayChar, fg, null);
-      }
+      const fadeAlpha = 1 - t * 0.35; // slight fade toward target
+
+      // RGB-shift chromatic aberration layers
+      beamDraw(display, x - axX, y - axY, coreChar, '#ff0033', 0.55 * fadeAlpha); // red, shifted back
+      beamDraw(display, x + axX, y + axY, coreChar, '#0033ff', 0.55 * fadeAlpha); // blue, shifted fwd
+
+      // Wide beam: ±1 perpendicular cells
+      beamDraw(display, x + px, y + py, wideChar, coreColor, 0.45 * fadeAlpha);
+      beamDraw(display, x - px, y - py, wideChar, coreColor, 0.45 * fadeAlpha);
+
+      // Core beam — drawn last so it sits on top
+      beamDraw(display, x, y, coreChar, coreColor, fadeAlpha);
+    }
+
+    // Impact flash on target cell for first half of animation
+    if (frame < 5) {
+      const flashChars = ['✕','×','✦','*','✕'];
+      beamDraw(display, to.x, to.y, flashChars[frame], '#ffffff', 1);
     }
   }
 }
