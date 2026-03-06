@@ -914,7 +914,7 @@ export function makeRepairScrapper(pos: Position, clusterId: number): Entity {
     id: _nextEntityId++,
     name: 'Repair Scrapper',
     glyph: '⚙',
-    fg: '#7799bb',
+    fg: '#aaaa66',
     position: { ...pos },
     clusterId,
     speed: 25,
