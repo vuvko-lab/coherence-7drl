@@ -184,17 +184,28 @@ function spawnClusterEntities(state: GameState, cluster: Cluster) {
     return null;
   }
 
-  // Mite guard: cluster 2+ always spawns a Bit-Mite near each interface exit tile
+  // Mite guard: cluster 2+ spawns 2–3 Bit-Mites near each forward exit interface.
+  // Skips the back-reference entry (x=0). Searches a 3-tile radius so mites
+  // are guaranteed to spawn on reachable floor even if the exit is in a corridor.
   if (id >= 2) {
+    const guardCount = id >= 4 ? 3 : 2;
     for (const iface of cluster.interfaces) {
+      if (iface.position.x === 0) continue; // skip entry back-reference
       const { x: ix, y: iy } = iface.position;
-      const adj: Position[] = [];
-      for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]] as const) {
-        const nx = ix + dx, ny = iy + dy;
-        if (cluster.tiles[ny]?.[nx]?.walkable) adj.push({ x: nx, y: ny });
+      const nearby: Position[] = [];
+      for (let dy2 = -3; dy2 <= 3; dy2++) {
+        for (let dx2 = -3; dx2 <= 3; dx2++) {
+          if (dx2 === 0 && dy2 === 0) continue;
+          const nx = ix + dx2, ny2 = iy + dy2;
+          if (nx < 0 || nx >= cluster.width || ny2 < 0 || ny2 >= cluster.height) continue;
+          const t = cluster.tiles[ny2]?.[nx];
+          if (t?.walkable && t.type !== TileType.InterfaceExit) nearby.push({ x: nx, y: ny2 });
+        }
       }
-      const spawnPos = adj.length > 0 ? adj[Math.floor(Math.random() * adj.length)] : null;
-      if (spawnPos) spawned.push(makeBitMite(spawnPos, id));
+      nearby.sort(() => Math.random() - 0.5);
+      for (let i = 0; i < Math.min(guardCount, nearby.length); i++) {
+        spawned.push(makeBitMite(nearby[i], id));
+      }
     }
   }
 
@@ -528,7 +539,7 @@ function tryMove(state: GameState, dx: number, dy: number): boolean {
     if (cluster.id === 0 && nx < 1) {
       addMessage(state, 'Infomorph sleeving facility. Status: [ERROR]', 'important');
     } else {
-      addMessage(state, 'Interface exit detected. Press Enter to transfer.', 'important');
+      addMessage(state, 'Interface exit [CLOSED]. No way back now.', 'important');
     }
   }
 
