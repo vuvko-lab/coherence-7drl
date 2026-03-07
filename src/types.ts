@@ -245,6 +245,17 @@ export interface Interactable {
   broadcastLines?: string[];          // stuck_echo: messages to broadcast periodically
   broadcastPeriod?: number;           // stuck_echo: ticks between broadcasts
   lastBroadcastTick?: number;         // stuck_echo: last tick a broadcast fired
+  // Data archive fields (procedural archive_echo only)
+  isDataArchive?: boolean;
+  archiveDecayAccum?: number;         // how many data queries fired so far
+  archiveDecayMax?: number;           // total queries until disintegration
+  archivePools?: {                    // content pools sampled per category
+    echoLogs: string[];
+    archivedLogs: string[];
+    dialogRecords: string[];
+  };
+  archiveCurrentCategory?: 'menu' | 'echo_logs' | 'archived_logs' | 'dialog_records';
+  archiveCurrentLines?: string[];     // lines shown in the current content view
 }
 
 export interface RevealEffect {

@@ -559,6 +559,139 @@ const IA_KIND_LABELS: Record<string, string> = {
   archive_echo:  '[ ARCHIVE FRAGMENT ]',
 };
 
+// ── Data archive helpers ──
+
+const GLITCH_CHARS = '█▓▒░▄▀▌▐■□▪▫◌◍◎●◉○◘◙▲▼◄►╳╬╫╪▣▤▥▧▨▩';
+
+function glitchText(text: string, fraction: number): string {
+  if (fraction <= 0) return text;
+  return text.split('').map(ch => {
+    if (ch === ' ' || ch === '\n') return ch;
+    return Math.random() < fraction * 0.75
+      ? GLITCH_CHARS[Math.floor(Math.random() * GLITCH_CHARS.length)]
+      : ch;
+  }).join('');
+}
+
+function glitchLabel(length: number): string {
+  return Array.from({ length: length + Math.floor(Math.random() * 4) },
+    () => GLITCH_CHARS[Math.floor(Math.random() * GLITCH_CHARS.length)]
+  ).join('');
+}
+
+function sampleLines(pool: string[], n: number): string[] {
+  const copy = [...pool].sort(() => Math.random() - 0.5);
+  return copy.slice(0, Math.min(n, copy.length));
+}
+
+function renderDataArchive(item: import('./types').Interactable) {
+  const accum = item.archiveDecayAccum ?? 0;
+  const max   = item.archiveDecayMax   ?? 5;
+  const decay = Math.min(accum / max, 1);
+  const fullyDecayed = accum >= max;
+
+  iaKindBadge.textContent = '[ DATA ARCHIVE ]';
+
+  if (fullyDecayed) {
+    // All content is now pure corruption noise
+    glitchHorizontalTear();
+    const noiseLines = Array.from({ length: 4 },
+      () => glitchLabel(32 + Math.floor(Math.random() * 16))
+    );
+    iaContent.innerHTML = noiseLines
+      .map(l => `<div class="ia-line ia-archive-destroyed">${l}</div>`)
+      .join('');
+    iaChoices.innerHTML = '';
+    // Three corrupted phantom buttons + one clear exit
+    for (let i = 0; i < 3; i++) {
+      const btn = document.createElement('button');
+      btn.className = 'ia-choice-btn ia-choice-corrupted';
+      btn.textContent = `> ${glitchLabel(18 + Math.floor(Math.random() * 10))}`;
+      btn.disabled = true;
+      iaChoices.appendChild(btn);
+    }
+    const exitBtn = document.createElement('button');
+    exitBtn.className = 'ia-choice-btn';
+    exitBtn.textContent = '> [CLEAR] PURGE ARCHIVE';
+    exitBtn.addEventListener('click', () => {
+      item.echoFadeAtTime = performance.now() + 800;
+      closeInteractableOverlay();
+      renderAll();
+    });
+    iaChoices.appendChild(exitBtn);
+    revealLines(iaContent.querySelectorAll('.ia-line'));
+    revealLines(iaChoices.querySelectorAll('.ia-choice-btn'), 4 * 40 + 20);
+    interactableOverlay.classList.add('open');
+    return;
+  }
+
+  const cat = item.archiveCurrentCategory ?? 'menu';
+
+  if (cat === 'menu') {
+    const integrityPct = Math.round((1 - decay) * 100);
+    const remaining = max - accum;
+    iaContent.innerHTML = [
+      `<div class="ia-line">${glitchText('[DATA ARCHIVE — SUBSTRATE FRAGMENT]', decay * 0.3)}</div>`,
+      `<div class="ia-line ia-archive-meta">INTEGRITY: ${integrityPct}%  ·  QUERIES REMAINING: ${remaining}</div>`,
+    ].join('');
+
+    iaChoices.innerHTML = '';
+    const categories: Array<[string, 'echo_logs' | 'archived_logs' | 'dialog_records']> = [
+      ['ACCESS ECHO LOGS',      'echo_logs'],
+      ['ACCESS ARCHIVED LOGS',  'archived_logs'],
+      ['ACCESS DIALOG RECORDS', 'dialog_records'],
+    ];
+    for (const [label, catKey] of categories) {
+      const btn = document.createElement('button');
+      btn.className = 'ia-choice-btn';
+      btn.textContent = `> ${glitchText(label, decay * 0.4)}`;
+      btn.addEventListener('click', () => {
+        const pools = item.archivePools!;
+        const pool = catKey === 'echo_logs' ? pools.echoLogs
+          : catKey === 'archived_logs'      ? pools.archivedLogs
+          : pools.dialogRecords;
+        item.archiveCurrentLines = sampleLines(pool, 3 + Math.floor(Math.random() * 2));
+        item.archiveCurrentCategory = catKey;
+        item.archiveDecayAccum = (item.archiveDecayAccum ?? 0) + 1;
+        glitchBarSweep().then(() => { renderDataArchive(item); });
+      });
+      iaChoices.appendChild(btn);
+    }
+    const exitBtn = document.createElement('button');
+    exitBtn.className = 'ia-choice-btn';
+    exitBtn.textContent = '> [ESC] DISCONNECT';
+    exitBtn.addEventListener('click', () => { closeInteractableOverlay(); renderAll(); });
+    iaChoices.appendChild(exitBtn);
+
+  } else {
+    const catLabel = cat === 'echo_logs'      ? 'ECHO LOG FRAGMENT'
+      : cat === 'archived_logs'               ? 'ARCHIVED LOG'
+      : 'DIALOG RECORD';
+    const lines = item.archiveCurrentLines ?? ['[DATA MISSING]'];
+    iaContent.innerHTML = [
+      `<div class="ia-line ia-archive-header">[ ${catLabel} ]</div>`,
+      ...lines.map(l =>
+        `<div class="ia-line ia-archive-decay-${Math.min(4, Math.ceil(decay * 4))}">${glitchText(l, decay * 0.6)}</div>`
+      ),
+    ].join('');
+
+    iaChoices.innerHTML = '';
+    const backBtn = document.createElement('button');
+    backBtn.className = 'ia-choice-btn';
+    backBtn.textContent = `> ${glitchText('[BACK] RETURN TO INDEX', decay * 0.3)}`;
+    backBtn.addEventListener('click', () => {
+      item.archiveCurrentCategory = 'menu';
+      renderDataArchive(item);
+    });
+    iaChoices.appendChild(backBtn);
+  }
+
+  revealLines(iaContent.querySelectorAll('.ia-line'));
+  revealLines(iaChoices.querySelectorAll('.ia-choice-btn'),
+    (iaContent.querySelectorAll('.ia-line').length) * 40 + 20);
+  interactableOverlay.classList.add('open');
+}
+
 function openInteractableOverlay() {
   const { openInteractable } = state;
   if (!openInteractable) return;
@@ -566,6 +699,12 @@ function openInteractableOverlay() {
   if (!cluster) return;
   const item = cluster.interactables.find(i => i.id === openInteractable.id);
   if (!item) return;
+
+  if (item.isDataArchive) {
+    if (item.corrupted) glitchHorizontalTear().then(() => glitchBarSweep());
+    renderDataArchive(item);
+    return;
+  }
 
   const node = item.dialog.find(n => n.id === item.currentNodeId);
   if (!node) return;

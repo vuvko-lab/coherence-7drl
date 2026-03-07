@@ -1111,6 +1111,28 @@ body {
   letter-spacing: 0.02em;
 }
 
+/* Data archive decay levels (1 = light → 4 = severe) */
+.ia-archive-header { color: var(--color-accent); margin-bottom: 0.3em; }
+.ia-archive-meta   { color: var(--color-dim); font-size: 0.85em; margin-bottom: 0.4em; }
+
+.ia-archive-decay-1 { color: #aabb88; }
+.ia-archive-decay-2 { color: #cc9944; letter-spacing: 0.03em; }
+.ia-archive-decay-3 { color: #cc6622; letter-spacing: 0.06em; }
+.ia-archive-decay-4 { color: #cc3333; letter-spacing: 0.10em; }
+
+.ia-archive-destroyed {
+  color: #882222;
+  letter-spacing: 0.12em;
+  opacity: 0.7;
+}
+
+.ia-choice-corrupted {
+  color: #882222 !important;
+  opacity: 0.5;
+  pointer-events: none;
+  cursor: default;
+}
+
 .ia-choice-btn {
   display: block;
   width: 100%;

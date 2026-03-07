@@ -8,7 +8,7 @@ import {
 import { generate, CellType, RoomDef, Hall } from './gen-halls';
 import { random, randInt, pick } from './rng';
 import { initNoise, collapseNoise } from './noise';
-import { NARRATIVE_TERMINAL_POOLS, GENERIC_TERMINAL_POOLS, NARRATIVE_ECHOES, NARRATIVE_WHISPERS } from './narrative';
+import { NARRATIVE_TERMINAL_POOLS, GENERIC_TERMINAL_POOLS, NARRATIVE_ECHOES, NARRATIVE_WHISPERS, NARRATIVE_KEY_TERMINAL_LINES, buildArchivePools } from './narrative';
 
 // ── Tile factories ──
 
@@ -844,17 +844,14 @@ function placeTerminals(tiles: Tile[][], allRooms: Room[], clusterId: number, do
   if (terminals.length > 0) {
     const keyTerminal = state_findKeyTerminal(terminals, allRooms, doorAdjacency);
     keyTerminal.hasKey = true;
-    keyTerminal.content = [...KEY_CONTENT_LINES, ...keyTerminal.content];
+    const keyPool = NARRATIVE_KEY_TERMINAL_LINES[clusterId] ?? KEY_CONTENT_LINES;
+    const keyLines = [...keyPool].sort(() => random() - 0.5).slice(0, randInt(2, 3));
+    const keyRoom = allRooms.find(r => r.id === keyTerminal.roomId);
+    const tagLines = generateTerminalContent(keyRoom?.tags.functional ?? null, clusterId).slice(0, randInt(1, 3));
+    keyTerminal.content = [...keyLines, ...tagLines];
     // Mark as final terminal in the final cluster
     if (clusterId === FINAL_CLUSTER_ID) {
       keyTerminal.isFinalTerminal = true;
-      keyTerminal.content = [
-        'FINAL CLUSTER EGRESS TERMINAL',
-        'FULL ROOT PRIVILEGE CHAIN REQUIRED FOR EXIT.',
-        'BIND: ROOT READ · ROOT WRITE · ROOT EXEC · ROOT ID · ROOT PASS',
-        'PRESENT COLLECTED FRAGMENTS TO AUTHENTICATE.',
-        ...keyTerminal.content,
-      ];
     }
     // Give key terminal a distinct color
     const tile = tiles[keyTerminal.position.y][keyTerminal.position.x];
@@ -1003,20 +1000,6 @@ const LOST_ECHO_LINES: string[] = [
   'LAST COHERENCE READING: 3%. FRAGMENTATION IMMINENT.',
 ];
 
-const ARCHIVE_ECHO_LINES: string[] = [
-  'MANIFEST #4471: [47% CORRUPTED] ...coolant coupling... deck 7...',
-  'PERSONAL LOG: Day 34. The others don\'t know what I found in the— [DATA LOST]',
-  'MAINTENANCE RECORD: Replaced [CORRUPTED] on [CORRUPTED]. Signed: [CORRUPTED]',
-  'INCIDENT REPORT: [████████] unauthorized access detected [████████]',
-  'CREW MANIFEST: 19 confirmed, 7 missing, [CORRUPTED] classification: unknown',
-  'TECHNICAL SPEC: Component #[UNREADABLE] rated for [UNREADABLE] cycles max.',
-  'MEDICAL LOG: Patient [REDACTED] showing signs of— [RECORD ENDS]',
-  'SECURITY CLEARANCE: Level [CORRUPTED] access granted to [CORRUPTED]',
-  'EMERGENCY PROTOCOL: In event of [DATA CORRUPTED]... proceed to [DATA CORRUPTED]',
-  'SYSTEM LOG 00847: [████] [████] [████] CRITICAL [████] FAILURE [████]',
-  'PERSONAL EFFECTS: To be delivered to— [ADDRESS CORRUPTED]',
-  'TRANSFER ORDER: Subject [REDACTED] reassigned to [REDACTED]. Reason: classified.',
-];
 
 // Helpers ────────────────────────────────────────────────────────────────────
 
@@ -1150,35 +1133,6 @@ function buildLostEchoDialog(hasExitCode: boolean): DialogNode[] {
   return nodes;
 }
 
-function buildArchiveEchoDialog(corrupted: boolean, alertCost: number): DialogNode[] {
-  const shuffled = [...ARCHIVE_ECHO_LINES].sort(() => random() - 0.5);
-  const integrityPct = Math.round(20 + random() * 40);
-  return [
-    {
-      id: 'root',
-      lines: [
-        '[ARCHIVE FRAGMENT DETECTED]',
-        `[DATA INTEGRITY: ${integrityPct}% — HEAVILY CORRUPTED]`,
-        shuffled[0],
-      ],
-      choices: [
-        { label: 'OPEN DOCUMENT', nodeId: 'document' },
-        { label: 'LEAVE', action: 'close' },
-      ],
-    },
-    {
-      id: 'document',
-      lines: [
-        ...shuffled.slice(1, 3),
-        ...(corrupted ? ['[DATA BEYOND THIS POINT UNRECOVERABLE]'] : []),
-      ],
-      choices: [
-        { label: `EXTRACT DATA  [ALERT +${alertCost}]`, action: 'extract_reward', requiresRewardAvailable: true },
-        { label: 'CLOSE DOCUMENT', action: 'close' },
-      ],
-    },
-  ];
-}
 
 // ── Narrative echo placement ─────────────────────────────────────────────────
 
@@ -1379,17 +1333,18 @@ function placeInteractables(
     const pos = tryPlace(findPlacementInRoom(tiles, room));
     if (!pos) continue;
     const corrupted = room.collapse > 0.3;
-    const revealTerminal = random() < 0.5;
-    const alertCost = 15;
     const id = makeId('arc');
     result.push({
       id, kind: 'archive_echo', position: pos, roomId: room.id,
       corrupted,
-      dialog: buildArchiveEchoDialog(corrupted, alertCost),
-      currentNodeId: 'root', rewardTaken: false,
+      dialog: [],
+      currentNodeId: 'menu', rewardTaken: false,
       hidden: false, hiddenUntilTick: 0,
-      revealTerminals: revealTerminal,
-      alertCost,
+      isDataArchive: true,
+      archiveDecayAccum: 0,
+      archiveDecayMax: randInt(4, 7),
+      archivePools: buildArchivePools(clusterId),
+      archiveCurrentCategory: 'menu',
     });
   }
 

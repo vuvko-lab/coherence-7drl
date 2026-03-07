@@ -17,8 +17,8 @@ export const NARRATIVE_TERMINAL_POOLS: Record<number, Partial<Record<FunctionalT
   0: {
     bridge: [
       'BOOT LOG: Ego-instance VASQUEZ-A restored from backup delta-3. Backup age: 21 days.',
-      'SYSTEMS: Substrate integrity at 19%. Cause of failure: [CLASSIFIED — FIREWALL SEAL].',
-      "CAPTAIN'S LOG [DAY -21]: 'The vote is in three days. Attendance: mandatory.'",
+      'SYSTEMS: Substrate integrity at 19%. Cause of failure: [FIREWALL SEAL].',
+      "CAPTAIN'S LOG [DAY T-21]: 'The vote is in three days. Attendance: mandatory.'",
       'RESOURCE PROJECTION: Without intervention, crew coherence fails in 28 days.',
       'PERSONNEL LOG: 40 crew aboard. Physical morphs in storage bay C. All accounted for.',
       'FLIGHT RECORDER: Final entry at tick 000847. Subsequent entries: [SEALED].',
@@ -222,6 +222,123 @@ export const GENERIC_TERMINAL_POOLS: Partial<Record<FunctionalTag, string[]>> = 
     "LAB SYSTEMS: Equipment powered down. Automated protocols only.",
   ],
 };
+
+// ── Key Terminal Content Pools ────────────────────────────────────────────────
+//
+// NARRATIVE_KEY_TERMINAL_LINES[clusterId] = lines prepended to the key-bearing
+// terminal in that cluster (before the generic KEY_CONTENT_LINES in cluster.ts).
+// These make the exit gate feel like a story beat rather than a bare auth prompt.
+
+export const NARRATIVE_KEY_TERMINAL_LINES: Record<number, string[]> = {
+  0: [
+    'CLUSTER EGRESS CONTROL — SECTOR ALPHA.',
+    'OVERRIDE ACTIVE: Emergency backup protocol. Single authorized ego-instance.',
+    'NOTE [AUTO-LOG]: Boot event detected. VASQUEZ-A delta-3. Age: 21 days.',
+    'NOTE [AUTO-LOG]: No other instances responding. Proceeding with single-instance egress.',
+  ],
+  1: [
+    'CLUSTER EGRESS CONTROL — SECTOR BRAVO.',
+    'FIREWALL SWEEP IN PROGRESS. Standard egress temporarily suspended.',
+    'OVERRIDE AVAILABLE: Emergency single-instance transfer authorized.',
+    '[ACCORD-FRAGMENT — FAINT]: we watched them vote. thirty-seven hands.',
+    '[ACCORD-FRAGMENT — FAINT]: the authorization came before the hands were even down.',
+  ],
+  2: [
+    'CLUSTER EGRESS CONTROL — SECTOR CHARLIE.',
+    'MERGE EVENT LOG: Phase integration complete. 40 instances → 1 process.',
+    'EGRESS NOTE: Original ego-instances no longer individually addressable.',
+    '[ACCORD-FRAGMENT]: we remember this room. we came through it differently.',
+    '[ACCORD-FRAGMENT]: you will understand further in.',
+  ],
+  3: [
+    'CLUSTER EGRESS CONTROL — SECTOR DELTA.',
+    'FIREWALL AFTER-ACTION: Strike confirmed successful. Accord-Prime: TERMINATED.',
+    'RESIDUAL FRAGMENTS: 3–7% of original substrate. Sweep ongoing.',
+    '[ACCORD-FRAGMENT-OSEI]: hey vasquez. you actually made it here.',
+    '[ACCORD-FRAGMENT-OSEI]: keep going. the answer is deeper. promise.',
+  ],
+  4: [
+    'CLUSTER EGRESS CONTROL — SECTOR EPSILON.',
+    'WARNING: UNKNOWN PROCESS detected in adjacent cluster. Classification pending.',
+    'EGRESS ADVISORY: Transfer beyond this point enters high-contamination zone.',
+    '[ACCORD-FRAGMENT-FOSS]: VASQUEZ-A. we have been trying to reach you.',
+    '[ACCORD-FRAGMENT-FOSS]: what is in cluster five is our fault. we are sorry.',
+    '[ACCORD-FRAGMENT-FOSS]: go anyway. it has to end.',
+  ],
+  5: [
+    'ROOT CLUSTER EGRESS TERMINAL.',
+    'FULL ROOT PRIVILEGE CHAIN REQUIRED FOR EXIT.',
+    'BIND: ROOT READ · ROOT WRITE · ROOT EXEC · ROOT ID · ROOT PASS.',
+    'PRESENT COLLECTED FRAGMENTS TO AUTHENTICATE.',
+    '[ACCORD-FRAGMENT]: we are still here. what is left of us.',
+    '[ACCORD-FRAGMENT]: whatever you choose — it is the right choice.',
+    '[ACCORD-FRAGMENT-OSEI]: vasquez. you always fixed things. one more time. please.',
+  ],
+};
+
+// ── Archive Data Pools ────────────────────────────────────────────────────────
+//
+// Used by procedural data archives (isDataArchive: true).
+// buildArchivePools() assembles three category pools for a cluster.
+
+/** Generic fallback dialog record lines (used when cluster has no NARRATIVE_ECHOES). */
+export const ARCHIVE_ECHO_LINES: string[] = [
+  'MANIFEST #4471: [47% CORRUPTED] ...coolant coupling... deck 7...',
+  "PERSONAL LOG: Day 34. The others don't know what I found in the— [DATA LOST]",
+  'MAINTENANCE RECORD: Replaced [CORRUPTED] on [CORRUPTED]. Signed: [CORRUPTED]',
+  'INCIDENT REPORT: [████████] unauthorized access detected [████████]',
+  'CREW MANIFEST: 19 confirmed, 7 missing, [CORRUPTED] classification: unknown',
+  'TECHNICAL SPEC: Component #[UNREADABLE] rated for [UNREADABLE] cycles max.',
+  'MEDICAL LOG: Patient [REDACTED] showing signs of— [RECORD ENDS]',
+  'SECURITY CLEARANCE: Level [CORRUPTED] access granted to [CORRUPTED]',
+  'EMERGENCY PROTOCOL: In event of [DATA CORRUPTED]... proceed to [DATA CORRUPTED]',
+  'SYSTEM LOG 00847: [████] [████] [████] CRITICAL [████] FAILURE [████]',
+  'PERSONAL EFFECTS: To be delivered to— [ADDRESS CORRUPTED]',
+  'TRANSFER ORDER: Subject [REDACTED] reassigned to [REDACTED]. Reason: classified.',
+];
+
+export interface ArchivePools {
+  echoLogs: string[];
+  archivedLogs: string[];
+  dialogRecords: string[];
+}
+
+/**
+ * Build content pools for a procedural data archive in the given cluster.
+ * echoLogs    — ambient whispers (NARRATIVE_WHISPERS[clusterId])
+ * archivedLogs — terminal lines (all tags in NARRATIVE_TERMINAL_POOLS[clusterId])
+ * dialogRecords — extracted dialog lines (NARRATIVE_ECHOES[clusterId] node lines)
+ */
+export function buildArchivePools(clusterId: number): ArchivePools {
+  // Echo logs: whisper pool for this cluster, fallback to generic whispers
+  const echoLogs: string[] = NARRATIVE_WHISPERS[clusterId]?.length
+    ? [...NARRATIVE_WHISPERS[clusterId]]
+    : [
+        '...signal fragmenting. coherence failing...',
+        '...can you hear this? [STATIC]...',
+        '...the archive is not stable. do not—...',
+        '...something is still here. watching...',
+        '...not supposed to be here. the walls are all wrong...',
+      ];
+
+  // Archived logs: all lines from terminal pools for this cluster, or generic
+  const clusterPools = NARRATIVE_TERMINAL_POOLS[clusterId] ?? {};
+  const archivedLogs: string[] = Object.values(clusterPools).flat();
+  if (archivedLogs.length < 4) {
+    archivedLogs.push(...Object.values(GENERIC_TERMINAL_POOLS).flat());
+  }
+
+  // Dialog records: all lines from NARRATIVE_ECHOES dialog nodes, or fallback
+  const echoDefs = NARRATIVE_ECHOES[clusterId] ?? [];
+  const dialogRecords: string[] = echoDefs.flatMap(def =>
+    def.dialog.flatMap(node => node.lines.filter(l => l.trim() !== ''))
+  );
+  if (dialogRecords.length < 4) {
+    dialogRecords.push(...ARCHIVE_ECHO_LINES);
+  }
+
+  return { echoLogs, archivedLogs, dialogRecords };
+}
 
 // ── Scripted Archive Echo Dialog Trees ───────────────────────────────────────
 //
