@@ -13,7 +13,7 @@ import { seed as seedRng, generateSeed, randInt, pick } from './rng';
 import {
   updateEntityAI, makeChronicler, makeBitMite, makeLogicLeech, makeSentry, makePropEntity, makeGateKeeper, makeRepairScrapper, makeTitanSpawn,
 } from './ai';
-import { NARRATIVE_TRIGGERS } from './narrative';
+import { NARRATIVE_TRIGGERS, GAME_MESSAGES } from './narrative';
 export { makeDamagedBitMite } from './ai';
 import { shootingAnimation } from './combat_animations';
 
@@ -137,9 +137,7 @@ export function createGame(initialSeed?: number): GameState {
   // Fire cluster 0 entry triggers
   checkNarrativeTriggers(state, 'cluster_enter', { clusterId: 0 });
 
-  addMessage(state, 'System boot... ego-fragment loaded from backup.', 'system');
-  addMessage(state, 'Navigate to the interface exit [⇨] to transfer between clusters.', 'system');
-  addMessage(state, 'Use WASD/arrows to move. Click to pathfind. Enter to transfer.', 'system');
+  for (const line of GAME_MESSAGES.boot) addMessage(state, line, 'system');
 
   computeFOV(cluster, player.position);
 
@@ -406,7 +404,7 @@ function tryShoot(state: GameState, target: Position): boolean {
   const cluster = getCurrentCluster(state);
   const corrupt = state.player.modules?.find(m => m.id === 'corrupt.m' && m.status === 'loaded');
   if (!corrupt) {
-    addMessage(state, 'No attack module.', 'alert');
+    addMessage(state, GAME_MESSAGES.noAttackModule, 'alert');
     return false;
   }
 
@@ -423,18 +421,18 @@ function tryShoot(state: GameState, target: Position): boolean {
   const dist = Math.sqrt(dx * dx + dy * dy);
 
   if (dist > CORRUPT_M_RANGE) {
-    addMessage(state, 'Target out of range.', 'alert');
+    addMessage(state, GAME_MESSAGES.targetOutOfRange, 'alert');
     return false;
   }
 
   const targetTile = cluster.tiles[target.y]?.[target.x];
   if (!targetTile?.visible) {
-    addMessage(state, 'No visible target.', 'alert');
+    addMessage(state, GAME_MESSAGES.noVisibleTarget, 'alert');
     return false;
   }
 
   if (!hasLOS(cluster, from, target)) {
-    addMessage(state, 'No line of sight.', 'alert');
+    addMessage(state, GAME_MESSAGES.noLineOfSight, 'alert');
     return false;
   }
 
@@ -467,7 +465,7 @@ function tryShoot(state: GameState, target: Position): boolean {
   // Warn when the NEXT shot will start draining coherence
   const newCount = corrupt.clusterShotCount;
   if (newCount === CORRUPT_M_FREE_SHOTS) {
-    addMessage(state, '[WARN] detected memory errors in corrupt.m — usage is discouraged.', 'alert');
+    addMessage(state, GAME_MESSAGES.corruptModuleWarn, 'alert');
   }
 
   return true;
@@ -489,7 +487,7 @@ function tryMove(state: GameState, dx: number, dy: number): boolean {
     state.player.position.x = nx;
     state.player.position.y = ny;
     if (targetTile.type === TileType.InterfaceExit) {
-      addMessage(state, 'Interface exit detected. Press Enter to transfer.', 'important');
+      addMessage(state, GAME_MESSAGES.interfaceExitDetected, 'important');
     }
     return true;
   }
@@ -570,11 +568,11 @@ function tryMove(state: GameState, dx: number, dy: number): boolean {
   const tile = cluster.tiles[ny][nx];
   if (tile.type === TileType.InterfaceExit) {
     if (cluster.id === 0 && nx < 1) {
-      addMessage(state, 'Infomorph sleeving facility. Status: [ERROR]', 'important');
+      addMessage(state, GAME_MESSAGES.sleevingFacility, 'important');
     } else if (nx < 1) {
-      addMessage(state, 'Interface exit [CLOSED]. No way back now.', 'important');
+      addMessage(state, GAME_MESSAGES.interfaceClosed, 'important');
     } else {
-      addMessage(state, 'Interface exit located. Press `Enter` to transit.', 'important');
+      addMessage(state, GAME_MESSAGES.interfaceLocated, 'important');
     }
   }
 
@@ -587,7 +585,7 @@ function tryTransfer(state: GameState): boolean {
   const tile = cluster.tiles[y][x];
 
   if (tile.type !== TileType.InterfaceExit) {
-    addMessage(state, 'No interface connection here.');
+    addMessage(state, GAME_MESSAGES.noInterfaceHere);
     return false;
   }
 
@@ -599,20 +597,20 @@ function tryTransfer(state: GameState): boolean {
 
   // Block backtracking through entry interface (x=0 in all clusters except the first)
   if (iface.position.x === 0 && cluster.id > 0) {
-    addMessage(state, '[ERROR] Interface blocked — no way back.', 'important');
+    addMessage(state, GAME_MESSAGES.interfaceBlocked, 'important');
     return false;
   }
 
   // Victory: exiting the final cluster triggers the end screen
   if (cluster.id === state.finalClusterId && x > 0) {
     state.gameOver = true;
-    addMessage(state, 'COHERENCE RESTORED. System integration complete.', 'important');
+    addMessage(state, GAME_MESSAGES.victory, 'important');
     return false;
   }
 
   // Forward exits (x > 0; x=0 is always the back-entry) require authorization
   if (x > 0 && cluster.exitLocked) {
-    addMessage(state, 'Exit locked — authorization required. Find and activate a terminal.', 'hazard');
+    addMessage(state, GAME_MESSAGES.exitLocked, 'hazard');
     return false;
   }
 
@@ -663,9 +661,9 @@ function tryTransfer(state: GameState): boolean {
   if (corruptM) corruptM.clusterShotCount = 0;
 
   if (cluster.id === 0) {
-    addMessage(state, 'Infomorph sleeving facility. Status: [ERROR]', 'important');
+    addMessage(state, GAME_MESSAGES.sleevingFacility, 'important');
   } else {
-    addMessage(state, `Transferred to cluster ${iface.targetClusterId}.`, 'important');
+    addMessage(state, `${GAME_MESSAGES.transferPrefix} ${iface.targetClusterId}.`, 'important');
   }
 
   dlog(state, 'system', 'cluster_transfer', `from=${state.currentClusterId} to=${iface.targetClusterId}`);
@@ -842,7 +840,7 @@ export function grantExitAccess(state: GameState, terminalId: string, clusterId:
   // Final terminal: requires root parts or hacking
   if (terminal.isFinalTerminal) {
     if (terminal.lockModeUntilTick != null && terminal.lockModeUntilTick > state.tick) {
-      addMessage(state, `[TERMINAL LOCKED] Access suspended. Wait ${terminal.lockModeUntilTick - state.tick} ticks.`, 'hazard');
+      addMessage(state, `${GAME_MESSAGES.terminalLocked} Wait ${terminal.lockModeUntilTick - state.tick} ticks.`, 'hazard');
       state.openTerminal = undefined;
       return;
     }
@@ -850,10 +848,10 @@ export function grantExitAccess(state: GameState, terminalId: string, clusterId:
     if (state.rootPrivileges.length >= needed) {
       terminal.activated = true;
       cluster.exitLocked = false;
-      addMessage(state, `Privilege chain verified [${state.rootPrivileges.join(' · ')}]. Egress unlocked.`, 'important');
+      addMessage(state, `${GAME_MESSAGES.privilegeVerified} [${state.rootPrivileges.join(' · ')}]. Egress unlocked.`, 'important');
     } else {
       const missing = ROOT_PRIVILEGES.filter(p => !state.rootPrivileges.includes(p));
-      addMessage(state, `PRIVILEGE CHAIN INCOMPLETE. Missing: ${missing.join(', ')}. Use HACK to override.`, 'hazard');
+      addMessage(state, `${GAME_MESSAGES.privilegeIncomplete} Missing: ${missing.join(', ')}. Use HACK to override.`, 'hazard');
     }
     state.openTerminal = undefined;
     return;
@@ -861,12 +859,12 @@ export function grantExitAccess(state: GameState, terminalId: string, clusterId:
 
   terminal.activated = true;
   if (!terminal.hasKey) {
-    addMessage(state, 'No exit key found on this terminal.', 'normal');
+    addMessage(state, GAME_MESSAGES.noExitKey, 'normal');
     state.openTerminal = undefined;
     return;
   }
   cluster.exitLocked = false;
-  addMessage(state, 'Exit authorization granted. Cluster egress unlocked.', 'important');
+  addMessage(state, GAME_MESSAGES.exitUnlocked, 'important');
   state.openTerminal = undefined;
 }
 
@@ -877,7 +875,7 @@ export function hackFinalTerminal(state: GameState, terminalId: string, clusterI
   const terminal = cluster.terminals.find(t => t.id === terminalId);
   if (!terminal?.isFinalTerminal) return;
   if (terminal.lockModeUntilTick != null && terminal.lockModeUntilTick > state.tick) {
-    addMessage(state, '[TERMINAL LOCKED] Cannot hack — still in lockdown.', 'hazard');
+    addMessage(state, GAME_MESSAGES.hackLocked, 'hazard');
     return;
   }
 
@@ -888,7 +886,7 @@ export function hackFinalTerminal(state: GameState, terminalId: string, clusterI
     // All missing privs already hacked — unlock
     terminal.activated = true;
     cluster.exitLocked = false;
-    addMessage(state, 'Override chain complete. Egress unlocked.', 'important');
+    addMessage(state, GAME_MESSAGES.overrideComplete, 'important');
     state.openTerminal = undefined;
     return;
   }
@@ -931,7 +929,7 @@ export function hackFinalTerminal(state: GameState, terminalId: string, clusterI
     // All missing privs hacked — unlock now
     terminal.activated = true;
     cluster.exitLocked = false;
-    addMessage(state, 'Override chain complete. Egress unlocked.', 'important');
+    addMessage(state, GAME_MESSAGES.overrideComplete, 'important');
   } else {
     // Lock terminal briefly between hacks
     terminal.lockModeUntilTick = state.tick + randInt(8, 15);
@@ -978,7 +976,7 @@ function spawnCorruptionAtRoom(state: GameState, cluster: Cluster, roomId: numbe
     }
   }
   room.containedHazards.add('corruption');
-  addMessage(state, 'Coherence field destabilised — corruption hazard spawned!', 'hazard');
+  addMessage(state, GAME_MESSAGES.corruptionSpawned, 'hazard');
 }
 
 // ── Narrative trigger evaluation ──
@@ -1089,14 +1087,14 @@ export function executeInteractableAction(
         state.alertLevel += item.alertCost!;
         addMessage(state, `Antivirus alert level: ${state.alertLevel}.`, 'alert');
         if (prev < ALERT_SUSPICIOUS && state.alertLevel >= ALERT_SUSPICIOUS)
-          addMessage(state, 'WARNING: Flagged as suspicious entity. Antivirus is tracking.', 'alert');
+          addMessage(state, GAME_MESSAGES.flaggedSuspicious, 'alert');
         else if (prev < ALERT_ENEMY && state.alertLevel >= ALERT_ENEMY)
-          addMessage(state, 'CRITICAL: Designated hostile entity. Antivirus hunting.', 'alert');
+          addMessage(state, GAME_MESSAGES.flaggedHostile, 'alert');
         checkNarrativeTriggers(state, 'alert_threshold', { alertLevel: state.alertLevel });
       }
       if (item.hasExitCode) {
         cluster.exitLocked = false;
-        addMessage(state, 'Exit code extracted. Cluster egress unlocked.', 'important');
+        addMessage(state, GAME_MESSAGES.exitCodeExtracted, 'important');
       }
       if (item.spawnHazardOnExtract) {
         spawnCorruptionAtRoom(state, cluster, item.roomId);
@@ -1106,7 +1104,7 @@ export function executeInteractableAction(
         if (unvisited.length > 0) {
           const t = unvisited[Math.floor(Math.random() * unvisited.length)];
           applyReveal(state, cluster, floodFillReveal(cluster, t.position, 2), 10);
-          addMessage(state, 'Data fragment points to an unvisited terminal.', 'normal');
+          addMessage(state, GAME_MESSAGES.dataFragment, 'normal');
         }
       }
       break;
@@ -1148,7 +1146,7 @@ export function executeInteractableAction(
           if (t) t.seen = true;
         }
       }
-      addMessage(state, '[OVERRIDE] Hazard subsystem neutralized.', 'important');
+      addMessage(state, GAME_MESSAGES.hazardNeutralized, 'important');
       dlog(state, 'hazard', 'deactivate', `room=${hazardRoomId} type=${wasQuarantine ? 'quarantine' : 'other'} via=${item.id}`);
       return true; // close dialog
     }
@@ -1174,7 +1172,7 @@ function checkFinalTerminalLockExpiry(state: GameState, cluster: Cluster) {
     if (terminal.lockModeUntilTick != null && terminal.lockModeUntilTick <= state.tick) {
       terminal.lockModeUntilTick = undefined;
       cluster.exitLocked = false;
-      addMessage(state, 'Terminal lockdown expired. Cluster egress unlocked.', 'important');
+      addMessage(state, GAME_MESSAGES.lockdownExpired, 'important');
     }
   }
 }
@@ -1269,7 +1267,7 @@ export function stepAutoPath(state: GameState): boolean {
   // Verify next step is still walkable
   if (!isWalkable(cluster, next.x, next.y)) {
     state.autoPath = [];
-    addMessage(state, 'Path blocked.');
+    addMessage(state, GAME_MESSAGES.pathBlocked);
     return false;
   }
 

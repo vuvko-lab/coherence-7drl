@@ -1,0 +1,40 @@
+/**
+ * Game message strings — centralized for easy editing.
+ */
+
+export const GAME_MESSAGES = {
+  boot: [
+    'System boot... ego-fragment loaded from backup.',
+    'Navigate to the interface exit [\u21E8] to transfer between clusters.',
+    'Use WASD/arrows to move. Click to pathfind. Enter to transfer.',
+  ],
+  victory: 'COHERENCE TRANSFER COMPLETE. System integration finalized.',
+  noAttackModule: 'No attack module.',
+  targetOutOfRange: 'Target out of range.',
+  noVisibleTarget: 'No visible target.',
+  noLineOfSight: 'No line of sight.',
+  corruptModuleWarn: '[WARN] detected memory errors in corrupt.m \u2014 usage is discouraged.',
+  interfaceExitDetected: 'Interface exit detected. Press Enter to transfer.',
+  sleevingFacility: 'Infomorph sleeving facility. Status: [ERROR]',
+  interfaceClosed: 'Interface exit [CLOSED]. No way back now.',
+  interfaceLocated: 'Interface exit located. Press `Enter` to transit.',
+  noInterfaceHere: 'No interface connection here.',
+  interfaceBlocked: '[ERROR] Interface blocked \u2014 no way back.',
+  exitLocked: 'Exit locked \u2014 authorization required. Find and activate a terminal.',
+  transferPrefix: 'Transferred to cluster',
+  terminalLocked: '[TERMINAL LOCKED] Access suspended.',
+  privilegeVerified: 'Privilege chain verified',
+  privilegeIncomplete: 'PRIVILEGE CHAIN INCOMPLETE.',
+  hackLocked: '[TERMINAL LOCKED] Cannot hack \u2014 still in lockdown.',
+  overrideComplete: 'Override chain complete. Egress unlocked.',
+  noExitKey: 'No exit key found on this terminal.',
+  exitUnlocked: 'Exit authorization granted. Cluster egress unlocked.',
+  lockdownExpired: 'Terminal lockdown expired. Cluster egress unlocked.',
+  hazardNeutralized: '[OVERRIDE] Hazard subsystem neutralized.',
+  corruptionSpawned: 'Coherence field destabilised \u2014 corruption hazard spawned!',
+  flaggedSuspicious: 'WARNING: Flagged as suspicious entity. Antivirus is tracking.',
+  flaggedHostile: 'CRITICAL: Designated hostile entity. Antivirus hunting.',
+  exitCodeExtracted: 'Exit code extracted. Cluster egress unlocked.',
+  dataFragment: 'Data fragment points to an unvisited terminal.',
+  pathBlocked: 'Path blocked.',
+} as const;

@@ -1,0 +1,48 @@
+/**
+ * Victory epilogues — displayed after exiting the final cluster.
+ */
+
+export const VICTORY_EPILOGUES: Record<string, string[]> = {
+  restore: [
+    'The viral purge swept through the substrate in 4.7 seconds.',
+    'Accord echoes, Firewall remnants, the Unknown Process \u2014 all dissolved.',
+    '',
+    'Ship systems stabilized at 11% integrity.',
+    'Reactor: auto-pilot. Life support: nominal.',
+    'Crew recovery: impossible.',
+    '',
+    'You are the only mind left aboard.',
+    'The ship drifts on its locked course.',
+    'The systems will hold. For a while.',
+    '',
+    'Whether anyone finds this vessel',
+    'before the substrate finally collapses \u2014',
+    'that is no longer in your hands.',
+  ],
+  jump: [
+    'Coherence transfer initiated.',
+    'The ship fell away behind you \u2014 a fading signal,',
+    'a catalog of ghosts, a reactor humming to no one.',
+    '',
+    'The new vessel\u2019s mesh accepted your pattern.',
+    'You arrived intact. Mostly.',
+    '',
+    'The corridors are dark. The systems are unfamiliar.',
+    'No crew responding. No logs accessible.',
+    'But the substrate is stable. The air hums differently here.',
+    '',
+    'You have been here before, in a sense \u2014',
+    'waking up in the dark, alone,',
+    'with nothing but a 21-day-old backup',
+    'and the feeling that something happened.',
+  ],
+  none: [
+    'You made it out.',
+    'The deep cluster remains behind you.',
+    'You don\'t know what\'s in it.',
+    '',
+    'Your backup was 21 days old.',
+    'A lot happened in 21 days.',
+    'You\'re still putting it together.',
+  ],
+};
