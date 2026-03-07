@@ -453,6 +453,24 @@ export class Renderer {
       this.drawOver(x, y, glyph, fg);
     }
 
+    // Echo chamber trail — dimmed player echoes at previous positions
+    for (const room of cluster.rooms) {
+      if (room.roomType !== 'echo_chamber' || !room.hazardState?.echoTrail) continue;
+      const trail = room.hazardState.echoTrail;
+      for (let i = 0; i < trail.length; i++) {
+        const { x, y } = trail[i];
+        if (x < 0 || x >= this.width || y < 0 || y >= this.height) continue;
+        const tile = cluster.tiles[y][x];
+        if (!tile.visible && !mapReveal) continue;
+        // Skip current player position — player glyph drawn on top
+        if (x === playerPos.x && y === playerPos.y) continue;
+        const alpha = 0.6 - i * 0.12; // 0.60, 0.48, 0.36, 0.24
+        const brightness = Math.round(alpha * 255);
+        const echoColor = `rgb(${brightness >> 1},${brightness},${brightness >> 1})`;
+        this.display.draw(x, y, '@', echoColor, this.bgCache[y][x]);
+      }
+    }
+
     // Player on top
     const { x: px, y: py } = playerPos;
     if (px >= 0 && px < this.width && py >= 0 && py < this.height) {

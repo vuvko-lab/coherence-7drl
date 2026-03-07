@@ -1,4 +1,4 @@
-import { createGame, processAction, handleMapClick, stepAutoPath, addMessage, exportSave, loadSave, adminRegenCluster, adminTeleportToCluster, grantExitAccess, activateTerminal, executeInteractableAction, getEntityAt, CORRUPT_M_RANGE, hackFinalTerminal, makeDamagedBitMite } from './game';
+import { createGame, processAction, handleMapClick, stepAutoPath, addMessage, exportSave, exportDebugLog, loadSave, adminRegenCluster, adminTeleportToCluster, grantExitAccess, activateTerminal, executeInteractableAction, getEntityAt, CORRUPT_M_RANGE, hackFinalTerminal, makeDamagedBitMite } from './game';
 import { setDamageParams, getDamageParams, setGenSizeOverride, clearGenSizeOverride, getGenSizeOverride, clusterScaleForId } from './cluster';
 import { Renderer, renderSelfPanel, renderLogs, renderOverviewPanel, renderMapStatusBar } from './renderer';
 import { InputHandler } from './input';
@@ -227,6 +227,7 @@ function initAdminPanel() {
 <button class="admin-btn admin-random-restart">&gt; random restart</button>
 <button class="admin-btn admin-export">&gt; export save</button>
 <button class="admin-btn admin-import">&gt; import save</button>
+<button class="admin-btn admin-debug-log">&gt; export debug log</button>
 <input type="file" class="admin-import-input" accept=".json" style="display:none">
 </div>
 <button class="admin-section-hdr" data-section="cluster">[+] CLUSTER</button>
@@ -308,6 +309,21 @@ ${buttons}
     a.click();
     URL.revokeObjectURL(url);
     addMessage(state, `[DEBUG] Save exported (${state.actionLog.length} actions, tick ${state.tick})`, 'debug');
+    renderAll();
+  });
+
+  // Wire up debug log export
+  const debugLogBtn = adminEl.querySelector('.admin-debug-log');
+  debugLogBtn?.addEventListener('click', () => {
+    const log = exportDebugLog(state);
+    const blob = new Blob([log], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `coherence-debug-${state.seed}-t${state.tick}.log`;
+    a.click();
+    URL.revokeObjectURL(url);
+    addMessage(state, `[DEBUG] Debug log exported (${state.debugLog.length} entries)`, 'debug');
     renderAll();
   });
 
@@ -738,13 +754,13 @@ function openInteractableOverlay() {
         item.currentNodeId = choice.nodeId;
         openInteractableOverlay();
       } else if (choice.action) {
-        const isScanAction = choice.action === 'reveal_terminals' || choice.action === 'reveal_exits';
+        const useGlitch = choice.action === 'reveal_terminals' || choice.action === 'reveal_exits' || choice.action === 'deactivate_hazard';
         const shouldClose = executeInteractableAction(
           state, item.id, openInteractable.clusterId, choice.action, choice,
         );
         if (shouldClose) {
           closeInteractableOverlay();
-          if (isScanAction) {
+          if (useGlitch) {
             glitchBarSweep().then(() => renderAll());
           } else {
             renderAll();

@@ -79,8 +79,8 @@ function move(entity: Entity, cluster: Cluster, target: Position, state?: GameSt
   const tile = cluster.tiles[target.y]?.[target.x];
   if (!tile) return false;
   if (!tile.walkable) {
-    if (tile.type === TileType.Door) {
-      // Open the door
+    if (tile.type === TileType.Door && tile.glyph !== '▪') {
+      // Open normal closed door (not sealed quarantine doors)
       tile.doorOpen = true;
       tile.walkable = true;
       tile.transparent = true;
@@ -227,7 +227,7 @@ function updateBitMite(state: GameState, entity: Entity, cluster: Cluster) {
         const nx = entity.position.x + dir.x;
         const ny = entity.position.y + dir.y;
         const tile = cluster.tiles[ny]?.[nx];
-        if (tile?.type === TileType.Door) {
+        if (tile?.type === TileType.Door && tile.glyph !== '▪') {
           tile.doorOpen = true;
           tile.walkable = true;
           tile.transparent = true;

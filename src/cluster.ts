@@ -1587,11 +1587,11 @@ const HAZARD_DISPLAY_NAMES: Partial<Record<RoomType, string>> = {
   gravity_well: 'GRAVITY WELL',
 };
 
-/** For each hazard room, assign 1-3 non-room interactables that can deactivate it. */
+/** For each hazard room, assign 1-3 non-room interactables that can deactivate it.
+ *  Each interactable can hold multiple hazard overrides (one per hazard room). */
 function assignHazardDeactivation(interactables: Interactable[], allRooms: Room[]) {
   const hazardRooms = allRooms.filter(r => r.roomType !== 'normal');
   for (const hazardRoom of hazardRooms) {
-    console.log('finding switch for hazard', hazardRoom)
     const candidates = [...interactables].filter(i => i.roomId !== hazardRoom.id)
       .sort(() => random() - 0.5);
     if (candidates.length === 0) continue;
@@ -1601,32 +1601,31 @@ function assignHazardDeactivation(interactables: Interactable[], allRooms: Room[
     if (candidates.length > 2 && random() < 0.15) selected.push(candidates[2]);
 
     const hazardName = HAZARD_DISPLAY_NAMES[hazardRoom.roomType] ?? hazardRoom.roomType.toUpperCase().replace(/_/g, ' ');
+    const hazardHex = '0x' + randInt(0x1000, 0xFFFF).toString(16).toUpperCase();
+    const hazardLabel = `${hazardName} ${hazardHex}`;
 
     for (const ia of selected) {
-      console.log('considering', ia)
-      // Avoid assigning the same hazard room twice to an interactable
-      if (ia.deactivatesHazardRoomId != null) continue;
-      ia.deactivatesHazardRoomId = hazardRoom.id;
+      // Check if this interactable already has a deactivation for THIS specific hazard room
+      if (ia.dialog.some(n => n.id === `deactivate_${hazardRoom.id}`)) continue;
 
       const nodeId = `deactivate_${hazardRoom.id}`;
       ia.dialog.push({
         id: nodeId,
         lines: [
           'UNAUTHORIZED SUBSYSTEM ACCESS DETECTED.',
-          `OVERRIDE CODE LOCATED: ${hazardName} NEUTRALIZATION AVAILABLE.`,
+          `OVERRIDE CODE LOCATED: ${hazardLabel} NEUTRALIZATION AVAILABLE.`,
           'WARNING: DEACTIVATION IS PERMANENT.',
         ],
         choices: [
-          { label: `OVERRIDE ${hazardName}`, action: 'deactivate_hazard' },
+          { label: `OVERRIDE ${hazardLabel}`, action: 'deactivate_hazard', deactivatesHazardRoomId: hazardRoom.id },
           { label: '[BACK] RETURN', nodeId: 'root' },
         ],
       });
-      console.log('pushed', ia)
 
       const rootNode = ia.dialog.find(n => n.id === 'root');
       if (rootNode) {
         const closeIdx = rootNode.choices.findIndex(c => c.action === 'close');
-        const choice: DialogChoice = { label: `[OVERRIDE] ${hazardName}`, nodeId };
+        const choice: DialogChoice = { label: `[OVERRIDE] ${hazardLabel}`, nodeId };
         if (closeIdx >= 0) rootNode.choices.splice(closeIdx, 0, choice);
         else rootNode.choices.push(choice);
       }

@@ -80,6 +80,8 @@ interface SeedResult {
   snapshots: SimSnapshot[];
   genTimeMs: number;
   deterministic: boolean;
+  quarantineWithoutSwitch: number;  // quarantine rooms with no deactivation interactable
+  totalQuarantine: number;          // total quarantine rooms
 }
 
 // ── BFS reachability ──
@@ -417,7 +419,7 @@ function snapshotCluster(
 
 // ── Simulation ──
 
-function simulateCluster(seed: number, ticks: number, clusterId: number): { snapshots: SimSnapshot[]; genTimeMs: number } {
+function simulateCluster(seed: number, ticks: number, clusterId: number): { snapshots: SimSnapshot[]; genTimeMs: number; quarantineWithoutSwitch: number; totalQuarantine: number } {
   const t0 = performance.now();
   const state = createGame(seed);
 
@@ -435,7 +437,7 @@ function simulateCluster(seed: number, ticks: number, clusterId: number): { snap
   const genTimeMs = performance.now() - t0;
 
   if (!state.clusters.has(clusterId)) {
-    return { snapshots: [], genTimeMs };
+    return { snapshots: [], genTimeMs, quarantineWithoutSwitch: 0, totalQuarantine: 0 };
   }
 
   const cluster = state.clusters.get(clusterId)!;
@@ -467,7 +469,18 @@ function simulateCluster(seed: number, ticks: number, clusterId: number): { snap
     }
   }
 
-  return { snapshots, genTimeMs };
+  // Check quarantine rooms have deactivation switches
+  const quarantineRooms = cluster.rooms.filter(r => r.roomType === 'quarantine');
+  const totalQuarantine = quarantineRooms.length;
+  let quarantineWithoutSwitch = 0;
+  for (const qRoom of quarantineRooms) {
+    const hasSwitch = cluster.interactables.some(ia =>
+      ia.dialog.some(n => n.choices.some(c => c.deactivatesHazardRoomId === qRoom.id))
+    );
+    if (!hasSwitch) quarantineWithoutSwitch++;
+  }
+
+  return { snapshots, genTimeMs, quarantineWithoutSwitch, totalQuarantine };
 }
 
 // ── Determinism check ──
@@ -760,9 +773,9 @@ async function main() {
     const origLog2 = console.log;
     console.log = () => {};  // suppress cluster-gen logs during simulation runs
     for (const seed of seeds) {
-      const { snapshots, genTimeMs } = simulateCluster(seed, TOTAL_TICKS, cid);
+      const { snapshots, genTimeMs, quarantineWithoutSwitch, totalQuarantine } = simulateCluster(seed, TOTAL_TICKS, cid);
       const deterministic = checkDeterminism(seed);
-      cidResults.push({ seed, snapshots, genTimeMs, deterministic });
+      cidResults.push({ seed, snapshots, genTimeMs, deterministic, quarantineWithoutSwitch, totalQuarantine });
     }
     console.log = origLog2;
     allClusterResults.set(cid, cidResults);
@@ -966,6 +979,12 @@ async function main() {
   });
   const avgEmptyPct = mean(finalEmptyPcts);
   printMetric(`Avg empty rooms (no entity 10+ ticks) @${TOTAL_TICKS}`, `${avgEmptyPct.toFixed(1)}%`, true, 'low');
+
+  // Quarantine deactivation check
+  const totalQRooms = validResults.reduce((s, r) => s + r.totalQuarantine, 0);
+  const missingQSwitches = validResults.reduce((s, r) => s + r.quarantineWithoutSwitch, 0);
+  console.log('\nHazard integrity:');
+  printMetric('Quarantine rooms without deactivation switch', `${missingQSwitches}/${totalQRooms}`, missingQSwitches === 0, 'high');
 
   console.log('\nSeed variance:');
   printMetric('CV path damage @50', cvDamage.toFixed(3), cvDamage <= 0.4, 'medium');

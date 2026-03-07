@@ -408,6 +408,7 @@ function buildSimState(): GameState {
     actionLog: [],
     seed: state.seed ?? 0,
     debugMode: false,
+    debugLog: [],
     mapReveal: true,
     godMode: false,
     invisibleMode: true,

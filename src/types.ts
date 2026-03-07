@@ -103,6 +103,10 @@ export interface RoomHazardState {
   // Quarantine
   locked?: boolean;
 
+  // Echo chamber
+  echoTrail?: Position[];          // last 4 player positions (newest first)
+  wallGlitches?: { x: number; y: number; origGlyph: string; ticksLeft: number }[];
+
   // Gravity well
   singularityPos?: Position;
   pullInterval?: number;
@@ -210,6 +214,7 @@ export interface DialogChoice {
          | 'extract_root_part' | 'deactivate_hazard' | 'hack_terminal'
          | 'set_narrative_choice';
   narrativeChoiceValue?: string;     // used with set_narrative_choice
+  deactivatesHazardRoomId?: number;  // used with deactivate_hazard
   requiresRewardAvailable?: boolean; // hide choice if rewardTaken
   requiresExitLocked?: boolean;      // show choice only if cluster.exitLocked
   requiresRootPartAvailable?: boolean; // hide choice if root part already taken
@@ -448,6 +453,7 @@ export interface GameState {
   actionLog: PlayerAction[];
   seed: number;
   debugMode: boolean;
+  debugLog: DebugLogEntry[];
   mapReveal: boolean;
   godMode: boolean;
   invisibleMode: boolean;
@@ -481,6 +487,14 @@ export interface GameState {
   // Achievement tracking
   corruptShotsFired: number;          // total corrupt.m shots fired across all clusters
   terminalsRead: number;              // total terminals interacted with
+}
+
+export interface DebugLogEntry {
+  tick: number;
+  cluster: number;
+  category: 'hazard' | 'terminal' | 'interactable' | 'entity' | 'narrative' | 'room' | 'player' | 'system';
+  event: string;
+  detail?: string;
 }
 
 export interface GameMessage {

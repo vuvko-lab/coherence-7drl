@@ -135,6 +135,7 @@ function createStateForCluster(seed: number, clusterId: number): GameState {
     actionLog: [],
     seed,
     debugMode: false,
+    debugLog: [],
     mapReveal: true,
     godMode: false,
     invisibleMode: false,

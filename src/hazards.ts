@@ -533,6 +533,81 @@ function updateTriggerTrapVisuals(cluster: Cluster, room: Room, tick: number) {
   }
 }
 
+// ── Echo Chamber ──
+
+const ECHO_GLITCH_CHARS = ['░', '▒', '▓', '█', '┃', '⌇', '¦'];
+
+function updateEchoChamber(state: GameState, cluster: Cluster, room: Room) {
+  const hz = room.hazardState!;
+  const px = state.player.position.x;
+  const py = state.player.position.y;
+  const playerInRoom = px >= room.x && px < room.x + room.w &&
+                       py >= room.y && py < room.y + room.h;
+
+  // Update echo trail — record player position if inside room
+  if (!hz.echoTrail) hz.echoTrail = [];
+  if (playerInRoom) {
+    // Only add if player moved to a new position
+    const last = hz.echoTrail[0];
+    if (!last || last.x !== px || last.y !== py) {
+      hz.echoTrail.unshift({ x: px, y: py });
+      if (hz.echoTrail.length > 4) hz.echoTrail.length = 4;
+    }
+  }
+
+  // Update wall glitches — restore expired, spawn new
+  if (!hz.wallGlitches) hz.wallGlitches = [];
+
+  // Tick down existing glitches
+  for (let i = hz.wallGlitches.length - 1; i >= 0; i--) {
+    const wg = hz.wallGlitches[i];
+    wg.ticksLeft--;
+    if (wg.ticksLeft <= 0) {
+      // Restore original wall glyph
+      const tile = cluster.tiles[wg.y]?.[wg.x];
+      if (tile && tile.type === TileType.Wall) {
+        tile.glyph = wg.origGlyph;
+        tile.fg = COLORS.wall;
+      }
+      hz.wallGlitches.splice(i, 1);
+    }
+  }
+
+  // Spawn new wall glitches (1-2 per tick, ~40% chance each)
+  if (random() < 0.4) {
+    const { x1, y1, x2, y2 } = roomInterior(room);
+    // Pick a random wall tile on the room border
+    const wallTiles: { x: number; y: number }[] = [];
+    for (let y = room.y; y < room.y + room.h; y++) {
+      for (let x = room.x; x < room.x + room.w; x++) {
+        if (x > x1 && x < x2 && y > y1 && y < y2) continue; // skip interior
+        const tile = cluster.tiles[y]?.[x];
+        if (tile?.type === TileType.Wall) {
+          // Don't double-glitch
+          if (!hz.wallGlitches.some(g => g.x === x && g.y === y)) {
+            wallTiles.push({ x, y });
+          }
+        }
+      }
+    }
+    if (wallTiles.length > 0) {
+      const count = randInt(1, Math.min(2, wallTiles.length));
+      for (let i = 0; i < count; i++) {
+        const idx = Math.floor(random() * wallTiles.length);
+        const wt = wallTiles.splice(idx, 1)[0];
+        const tile = cluster.tiles[wt.y][wt.x];
+        hz.wallGlitches.push({
+          x: wt.x, y: wt.y,
+          origGlyph: tile.glyph,
+          ticksLeft: randInt(1, 3),
+        });
+        tile.glyph = ECHO_GLITCH_CHARS[Math.floor(random() * ECHO_GLITCH_CHARS.length)];
+        tile.fg = '#335544';
+      }
+    }
+  }
+}
+
 // ── Gravity Well ──
 
 function updateGravityWell(state: GameState, cluster: Cluster, room: Room) {
@@ -897,6 +972,9 @@ export function updateHazards(state: GameState) {
       case 'unstable':
         updateUnstable(state, cluster, room);
         break;
+      case 'echo_chamber':
+        updateEchoChamber(state, cluster, room);
+        break;
       case 'gravity_well':
         updateGravityWell(state, cluster, room);
         break;
@@ -1046,6 +1124,7 @@ export function onPlayerEnterRoom(state: GameState, room: Room) {
     }
     case 'echo_chamber':
       addMessage(state, 'Residual process echoes shimmer around you...', 'system');
+      state.pendingGlitch = 'static';
       break;
     case 'gravity_well':
       addMessage(state, 'You feel a gravitational pull toward the center...', 'hazard');

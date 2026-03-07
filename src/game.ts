@@ -1,6 +1,6 @@
 import {
   GameState, Entity, Cluster, Position, PlayerAction, Tile,
-  TileType, DIR_DELTA, GameMessage, Direction,
+  TileType, DIR_DELTA, GameMessage, Direction, DebugLogEntry,
   Interactable, DialogChoice, Faction,
   ALERT_SUSPICIOUS, ALERT_ENEMY, ROOT_PRIVILEGES, COLORS,
   FACTION_RELATIONS, NarrativeTriggerEvent,
@@ -108,6 +108,7 @@ export function createGame(initialSeed?: number): GameState {
     actionLog: [],
     seed: gameSeed,
     debugMode: false,
+    debugLog: [],
     mapReveal: false,
     godMode: false,
     invisibleMode: false,
@@ -150,6 +151,10 @@ export function createGame(initialSeed?: number): GameState {
 
 export function addMessage(state: GameState, text: string, type: GameMessage['type'] = 'normal') {
   state.messages.push({ text, type, tick: state.tick });
+}
+
+export function dlog(state: GameState, category: DebugLogEntry['category'], event: string, detail?: string) {
+  state.debugLog.push({ tick: state.tick, cluster: state.currentClusterId, category, event, detail });
 }
 
 // ── Entity spawning ──
@@ -446,6 +451,7 @@ function tryShoot(state: GameState, target: Position): boolean {
   corrupt.clusterShotCount = shotCount + 1;
   corrupt.cooldownUntilTick = state.tick + CORRUPT_M_COOLDOWN;
   state.corruptShotsFired++;
+  dlog(state, 'player', 'shoot', `target=(${target.x},${target.y}) shot#=${corrupt.clusterShotCount}`);
 
   shootingAnimation(state, from, target, 'beam');
 
@@ -530,6 +536,7 @@ function tryMove(state: GameState, dx: number, dy: number): boolean {
           });
           if (bumpedEntity.ai) {
             state.killedEntities.push({ name: bumpedEntity.name, kind: bumpedEntity.ai.kind });
+            dlog(state, 'entity', 'killed_by_player', `name=${bumpedEntity.name} kind=${bumpedEntity.ai.kind} pos=(${bumpedEntity.position.x},${bumpedEntity.position.y})`);
             checkNarrativeTriggers(state, 'entity_killed', { killedFaction: bumpedEntity.ai.faction });
           }
           state.entities = state.entities.filter(e => e.id !== bumpedEntity.id);
@@ -661,6 +668,7 @@ function tryTransfer(state: GameState): boolean {
     addMessage(state, `Transferred to cluster ${iface.targetClusterId}.`, 'important');
   }
 
+  dlog(state, 'system', 'cluster_transfer', `from=${state.currentClusterId} to=${iface.targetClusterId}`);
   checkNarrativeTriggers(state, 'cluster_enter', { clusterId: iface.targetClusterId });
 
   computeFOV(targetCluster, state.player.position);
@@ -751,6 +759,7 @@ export function processAction(state: GameState, action: PlayerAction): boolean {
     // Check room entry
     const newRoom = getPlayerRoom(state);
     if (newRoom && (!prevRoom || prevRoom.id !== newRoom.id)) {
+      dlog(state, 'room', 'enter', `room=${newRoom.id} type=${newRoom.roomType} functional=${newRoom.tags.functional} collapse=${newRoom.collapse.toFixed(2)}`);
       onPlayerEnterRoom(state, newRoom);
       checkNarrativeTriggers(state, 'room_enter', { room: newRoom });
     }
@@ -936,7 +945,10 @@ export function activateTerminal(state: GameState, terminalId: string, clusterId
   const cluster = state.clusters.get(clusterId);
   if (!cluster) return;
   const terminal = cluster.terminals.find(t => t.id === terminalId);
-  if (terminal) terminal.activated = true;
+  if (terminal) {
+    terminal.activated = true;
+    dlog(state, 'terminal', 'activate', `id=${terminalId} hasKey=${terminal.hasKey} cluster=${clusterId}`);
+  }
 }
 
 // ── Interactable actions ──
@@ -1013,6 +1025,7 @@ export function checkNarrativeTriggers(
       }
     }
 
+    dlog(state, 'narrative', 'trigger_fired', `id=${trigger.id} event=${event}`);
     // Fire effects
     for (const effect of trigger.effects) {
       if (effect.kind === 'message') {
@@ -1040,6 +1053,8 @@ export function executeInteractableAction(
   if (!cluster) return true;
   const item = cluster.interactables.find(i => i.id === itemId) as Interactable | undefined;
   if (!item) return true;
+
+  dlog(state, 'interactable', action, `item=${itemId} kind=${item.kind} room=${item.roomId}`);
 
   switch (action) {
     case 'reveal_terminals': {
@@ -1105,7 +1120,7 @@ export function executeInteractableAction(
       return true; // close dialog
     }
     case 'deactivate_hazard': {
-      const hazardRoomId = item.deactivatesHazardRoomId;
+      const hazardRoomId = choice?.deactivatesHazardRoomId ?? item.deactivatesHazardRoomId;
       if (hazardRoomId == null) break;
       const hazardRoom = cluster.rooms.find(r => r.id === hazardRoomId);
       if (!hazardRoom) break;
@@ -1118,14 +1133,23 @@ export function executeInteractableAction(
           if (!tile) continue;
           tile.hazardOverlay = undefined;
           if (wasQuarantine && tile.type === TileType.Door && !tile.walkable) {
-            tile.walkable = true;
-            tile.glyph = '+';
+            // Restore sealed door to normal closed door state
+            closeDoor(tile);
             tile.fg = COLORS.door;
-            tile.doorOpen = false;
           }
         }
       }
+      // Reveal 2x2 center of the deactivated room
+      const cx = Math.floor(hazardRoom.x + hazardRoom.w / 2);
+      const cy = Math.floor(hazardRoom.y + hazardRoom.h / 2);
+      for (let dy = -1; dy <= 0; dy++) {
+        for (let dx = -1; dx <= 0; dx++) {
+          const t = cluster.tiles[cy + dy]?.[cx + dx];
+          if (t) t.seen = true;
+        }
+      }
       addMessage(state, '[OVERRIDE] Hazard subsystem neutralized.', 'important');
+      dlog(state, 'hazard', 'deactivate', `room=${hazardRoomId} type=${wasQuarantine ? 'quarantine' : 'other'} via=${item.id}`);
       return true; // close dialog
     }
     case 'hack_terminal': {
@@ -1337,6 +1361,14 @@ export function adminTeleportToCluster(state: GameState, targetId: number): void
 }
 
 // ── Save / Load ──
+
+export function exportDebugLog(state: GameState): string {
+  const header = `Coherence Debug Log — seed=${state.seed} tick=${state.tick} cluster=${state.currentClusterId}\n`;
+  const lines = state.debugLog.map(e =>
+    `[t${e.tick} c${e.cluster}] ${e.category}/${e.event}${e.detail ? ': ' + e.detail : ''}`
+  );
+  return header + lines.join('\n');
+}
 
 export function exportSave(state: GameState): string {
   return JSON.stringify({ seed: state.seed, actions: state.actionLog });
