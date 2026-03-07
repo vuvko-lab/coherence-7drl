@@ -429,6 +429,8 @@ function buildSimState(): GameState {
     selfPanelRevealed: true,
     smokeEffects: [],
     firedTriggerIds: new Set(),
+    corruptShotsFired: 0,
+    terminalsRead: 0,
   };
 
   computeFOV(clusterClone, entryPos);

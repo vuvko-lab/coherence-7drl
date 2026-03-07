@@ -129,6 +129,8 @@ export function createGame(initialSeed?: number): GameState {
     selfPanelRevealed: false,
     smokeEffects: [],
     firedTriggerIds: new Set(),
+    corruptShotsFired: 0,
+    terminalsRead: 0,
   };
 
   // Fire cluster 0 entry triggers
@@ -431,12 +433,6 @@ function tryShoot(state: GameState, target: Position): boolean {
     return false;
   }
 
-  const targetEntity = getEntityAt(state, cluster, target.x, target.y);
-  if (!targetEntity || targetEntity.id === state.player.id) {
-    addMessage(state, 'Nothing to shoot.', 'normal');
-    return false;
-  }
-
   // Track shots and apply coherence drain for shots beyond the free quota
   const shotCount = corrupt.clusterShotCount ?? 0;
   const overQuota = shotCount - CORRUPT_M_FREE_SHOTS + 1; // >0 means this shot drains
@@ -449,10 +445,13 @@ function tryShoot(state: GameState, target: Position): boolean {
 
   corrupt.clusterShotCount = shotCount + 1;
   corrupt.cooldownUntilTick = state.tick + CORRUPT_M_COOLDOWN;
+  state.corruptShotsFired++;
 
   shootingAnimation(state, from, target, 'beam');
 
-  if (targetEntity.coherence !== undefined) {
+  // Damage entity at target if present
+  const targetEntity = getEntityAt(state, cluster, target.x, target.y);
+  if (targetEntity && targetEntity.id !== state.player.id && targetEntity.coherence !== undefined) {
     targetEntity.coherence = Math.max(0, targetEntity.coherence - CORRUPT_M_DAMAGE);
     addMessage(state,
       `Corrupt shot hits ${targetEntity.name} for ${CORRUPT_M_DAMAGE}. (${targetEntity.coherence}/${targetEntity.maxCoherence})`,
@@ -979,7 +978,7 @@ export function checkNarrativeTriggers(
     clusterId?: number;
     room?: { tags: { functional: string | null }; collapse: number };
     killedFaction?: string;
-    alertLevel?: number;
+    alertLevel?: number;  
   } = {},
 ): void {
   for (const trigger of NARRATIVE_TRIGGERS) {
@@ -1250,18 +1249,29 @@ export function stepAutoPath(state: GameState): boolean {
     return false;
   }
 
-  // If a non-hostile entity occupies the next tile, reroute around all entities
+  // If next tile has a non-hostile entity or interactable (and it's not the destination), reroute
+  const dest = state.autoPath[state.autoPath.length - 1];
+  const isDestination = next.x === dest.x && next.y === dest.y;
+
   const blockerEntity = state.entities.find(
     e => e.clusterId === cluster.id && e.position.x === next.x && e.position.y === next.y
   );
-  if (blockerEntity && FACTION_RELATIONS['player']?.[blockerEntity.ai?.faction ?? 'neutral'] !== 'attack') {
-    const dest = state.autoPath[state.autoPath.length - 1];
-    const entityBlocked = new Set(
-      state.entities
-        .filter(e => e.clusterId === cluster.id)
-        .map(e => `${e.position.x},${e.position.y}`)
+  const blockerInteractable = !isDestination && cluster.interactables.find(
+    i => i.position.x === next.x && i.position.y === next.y && !i.hidden
+  );
+
+  if (blockerInteractable || (blockerEntity && FACTION_RELATIONS['player']?.[blockerEntity.ai?.faction ?? 'neutral'] !== 'attack')) {
+    const blocked = new Set(
+      [
+        ...state.entities
+          .filter(e => e.clusterId === cluster.id)
+          .map(e => `${e.position.x},${e.position.y}`),
+        ...cluster.interactables
+          .filter(i => !i.hidden)
+          .map(i => `${i.position.x},${i.position.y}`),
+      ]
     );
-    const newPath = findPath(cluster, state.player.position, dest, entityBlocked);
+    const newPath = findPath(cluster, state.player.position, dest, blocked);
     if (newPath && newPath.length > 0) {
       state.autoPath = newPath;
     } else {

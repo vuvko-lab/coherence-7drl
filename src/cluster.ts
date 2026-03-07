@@ -8,7 +8,7 @@ import {
 import { generate, CellType, RoomDef, Hall } from './gen-halls';
 import { random, randInt, pick } from './rng';
 import { initNoise, collapseNoise } from './noise';
-import { NARRATIVE_TERMINAL_POOLS, GENERIC_TERMINAL_POOLS, NARRATIVE_ECHOES, NARRATIVE_WHISPERS, NARRATIVE_KEY_TERMINAL_LINES, buildArchivePools } from './narrative';
+import { NARRATIVE_TERMINAL_HEADER, NARRATIVE_TERMINAL_POOLS, GENERIC_TERMINAL_POOLS, NARRATIVE_ECHOES, NARRATIVE_WHISPERS, NARRATIVE_KEY_TERMINAL_LINES, buildArchivePools } from './narrative';
 
 // ── Tile factories ──
 
@@ -405,7 +405,9 @@ function weightedPick(pool: HazardTier): RoomType {
 }
 
 function hazardTierForCollapse(c: number, clusterId = 0): HazardTier {
-  if (c < 0.1) return TIER_SAFE;
+  // Later clusters: lower thresholds so more rooms qualify for hazards
+  const safeThreshold = clusterId <= 1 ? 0.1 : clusterId <= 3 ? 0.02 : 0.01;
+  if (c < safeThreshold) return TIER_SAFE;
   if (c < 0.3) return TIER_LOW;
   if (c < 0.5) return TIER_MID;
   if (c < 0.6) {
@@ -428,7 +430,8 @@ function assignHazardsByCollapse(allRooms: Room[], clusterId = 0) {
     .sort((a, b) => b.collapse - a.collapse);
 
   let hazardCount = 0;
-  const maxHazards = Math.max(1, Math.floor(allRooms.length * 0.25));
+  const hazardFraction = clusterId <= 1 ? 0.25 : clusterId <= 3 ? 0.50 : 0.75;
+  const maxHazards = Math.max(1, Math.floor(allRooms.length * hazardFraction));
 
   for (const room of sorted) {
     if (hazardCount >= maxHazards) break;
@@ -724,7 +727,7 @@ const TERMINAL_CONTENT_POOLS: Record<string, string[]> = {
 };
 
 const FALLBACK_CONTENT: string[] = [
-  'SYSTEM STATUS: Nominal. (Last updated: NEVER)',
+  'SYSTEM STATUS: Nominal. (Last updated: [ERROR])',
   'ERROR: Unable to retrieve log. Disk read failure.',
   'NOTICE: This terminal has been decommissioned.',
   'ACCESS LOG: Last accessed by: [USER DELETED].',
@@ -743,9 +746,10 @@ function generateTerminalContent(functionalTag: string | null, clusterId: number
     ?? (functionalTag && GENERIC_TERMINAL_POOLS[functionalTag as FunctionalTag])
     ?? (functionalTag && TERMINAL_CONTENT_POOLS[functionalTag])
     ?? FALLBACK_CONTENT;
-  // Pick 2-3 random lines without repeating
+  // Pick 2-3 random lines without repeating, prepend header
   const shuffled = [...narrativePool].sort(() => random() - 0.5);
-  return shuffled.slice(0, randInt(2, 3));
+  const header = NARRATIVE_TERMINAL_HEADER[clusterId] ?? NARRATIVE_TERMINAL_HEADER[-1];
+  return [...header, ...shuffled.slice(0, randInt(2, 3))];
 }
 
 function placeTerminals(tiles: Tile[][], allRooms: Room[], clusterId: number, doorAdjacency: Map<number, number[]>): TerminalDef[] {
@@ -1261,7 +1265,7 @@ function placeInteractables(
   // ── Info terminals (1–2 per cluster) ─────────────────────────────────────
   const infoEligible = allRooms.filter(r => r.collapse < 0.9)
     .sort((a, b) => a.collapse - b.collapse);
-  const infoTarget = randInt(1, 2);
+  const infoTarget = clusterId >= 4 ? randInt(3, 4) : clusterId >= 2 ? randInt(2, 3) : randInt(1, 2);
   let infoPlaced = 0;
   for (const room of infoEligible) {
     if (infoPlaced >= infoTarget) break;
@@ -1283,10 +1287,11 @@ function placeInteractables(
   }
 
   // ── Lost echos (collapse-weighted) ───────────────────────────────────────
-  const echoRooms = allRooms.filter(r => r.collapse > 0.25)
+  const echoThreshold = clusterId >= 4 ? 0.05 : clusterId >= 2 ? 0.10 : 0.25;
+  const echoRooms = allRooms.filter(r => r.collapse > echoThreshold)
     .sort((a, b) => b.collapse - a.collapse);
   let echoCount = 0;
-  const echoMax = 8;
+  const echoMax = clusterId >= 4 ? 20 : clusterId >= 2 ? 12 : 8;
   // Allow one echo per cluster to hold an exit code (only if cluster has one)
   let exitCodeAssigned = false;
 
@@ -1294,9 +1299,10 @@ function placeInteractables(
     if (echoCount >= echoMax) break;
     const maxHere = room.collapse > 0.7 ? 3 : room.collapse > 0.5 ? 2 : 1;
     const isHall = room.tags.geometric.has('hall');
+    const echoBoost = clusterId >= 4 ? 0.5 : clusterId >= 2 ? 0.2 : 0;
     const spawnCount = isHall
-      ? (random() < room.collapse * 1.5 ? 1 : 0)
-      : (room.collapse > 0.6 ? randInt(1, maxHere) : (random() < room.collapse ? 1 : 0));
+      ? (random() < room.collapse * 1.5 + echoBoost ? 1 : 0)
+      : (room.collapse > 0.6 ? randInt(1, maxHere) : (random() < room.collapse + echoBoost ? 1 : 0));
 
     for (let i = 0; i < spawnCount && echoCount < echoMax; i++) {
       const pos = tryPlace(findPlacementInRoom(tiles, room));
@@ -1322,7 +1328,8 @@ function placeInteractables(
   const archiveEligible = allRooms.filter(r =>
     !r.tags.geometric.has('hall') && r.collapse < 0.5 && r.tags.functional !== null,
   ).sort(() => random() - 0.5);
-  const archiveTarget = Math.min(2, Math.max(0, Math.floor(archiveEligible.length / 3)));
+  const archiveCap = clusterId >= 4 ? 5 : clusterId >= 2 ? 4 : 2;
+  const archiveTarget = Math.min(archiveCap, Math.max(0, Math.floor(archiveEligible.length / 2)));
 
   for (let i = 0; i < archiveTarget; i++) {
     const room = archiveEligible[i];
@@ -1584,17 +1591,19 @@ const HAZARD_DISPLAY_NAMES: Partial<Record<RoomType, string>> = {
 function assignHazardDeactivation(interactables: Interactable[], allRooms: Room[]) {
   const hazardRooms = allRooms.filter(r => r.roomType !== 'normal');
   for (const hazardRoom of hazardRooms) {
+    console.log('finding switch for hazard', hazardRoom)
     const candidates = [...interactables].filter(i => i.roomId !== hazardRoom.id)
       .sort(() => random() - 0.5);
     if (candidates.length === 0) continue;
 
     const selected: Interactable[] = [candidates[0]];
-    if (candidates.length > 1 && random() < 0.5) selected.push(candidates[1]);
-    if (candidates.length > 2 && random() < 0.05) selected.push(candidates[2]);
+    if (candidates.length > 1 && random() < 0.75) selected.push(candidates[1]);
+    if (candidates.length > 2 && random() < 0.15) selected.push(candidates[2]);
 
     const hazardName = HAZARD_DISPLAY_NAMES[hazardRoom.roomType] ?? hazardRoom.roomType.toUpperCase().replace(/_/g, ' ');
 
     for (const ia of selected) {
+      console.log('considering', ia)
       // Avoid assigning the same hazard room twice to an interactable
       if (ia.deactivatesHazardRoomId != null) continue;
       ia.deactivatesHazardRoomId = hazardRoom.id;
@@ -1612,6 +1621,7 @@ function assignHazardDeactivation(interactables: Interactable[], allRooms: Room[
           { label: '[BACK] RETURN', nodeId: 'root' },
         ],
       });
+      console.log('pushed', ia)
 
       const rootNode = ia.dialog.find(n => n.id === 'root');
       if (rootNode) {

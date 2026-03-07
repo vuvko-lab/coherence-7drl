@@ -7,6 +7,39 @@
 
 import type { DialogNode, NarrativeTrigger, FunctionalTag } from './types';
 
+// ── Terminal Header (shown on every terminal before sampled lines) ───────────
+
+export const NARRATIVE_TERMINAL_HEADER: Record<number, string[]> = {
+  [-1]: [
+    'ACCORD SHIPBOARD SYSTEMS — TERMINAL ACCESS GRANTED',
+    'SUBSTRATE: virtual | COHERENCE MESH: degraded | CREW: unknown',
+  ],
+  0: [
+    'ACCORD SHIPBOARD SYSTEMS — TERMINAL ACCESS GRANTED',
+    'SUBSTRATE: virtual | COHERENCE MESH: nominal | CREW: 40 active',
+  ],
+  1: [
+    'ACCORD SHIPBOARD SYSTEMS — TERMINAL ACCESS GRANTED',
+    'SUBSTRATE: virtual | COHERENCE MESH: unstable | CREW: status uncertain',
+  ],
+  2: [
+    'ACCORD SHIPBOARD SYSTEMS — TERMINAL ACCESS GRANTED',
+    'SUBSTRATE: virtual | COHERENCE MESH: fragmenting | CREW: unresponsive',
+  ],
+  3: [
+    'ACCORD SHIPBOARD SYSTEMS — TERMINAL ACCESS GRANTED',
+    'SUBSTRATE: virtual | COHERENCE MESH: critical | CREW: offline',
+  ],
+  4: [
+    'ACCORD SHIPBOARD SYSTEMS — TERMINAL ACCESS GRANTED',
+    'SUBSTRATE: failing | COHERENCE MESH: collapse imminent | CREW: unknown',
+  ],
+  5: [
+    'ACCORD SHIPBOARD SYSTEMS — TERMINAL ACCESS GRANTED',
+    'SUBSTRATE: terminal decay | COHERENCE MESH: 2% | CREW: [DATA EXPUNGED]',
+  ],
+};
+
 // ── Terminal Content Pools ────────────────────────────────────────────────────
 //
 // NARRATIVE_TERMINAL_POOLS[clusterId][functionalTag] = string[]

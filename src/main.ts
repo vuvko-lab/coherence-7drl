@@ -465,6 +465,8 @@ function openTerminalOverlay() {
   const terminal = cluster.terminals.find(t => t.id === openTerminal.terminalId);
   if (!terminal) return;
 
+  state.terminalsRead++;
+
   // Mark as accessed on open
   activateTerminal(state, openTerminal.terminalId, openTerminal.clusterId);
 
@@ -959,12 +961,28 @@ function showVictoryOverlay() {
     ? Object.entries(killCounts).map(([k, n]) => `<div>&gt; ${k}: ${n}</div>`).join('')
     : '<div>&gt; none destroyed</div>';
 
-  const achievementEl = document.getElementById('victory-achievement')!;
+  // Collect all unlocked achievements
+  const achievements: { name: string; desc: string }[] = [];
   if (!state.selfPanelRevealed) {
-    achievementEl.innerHTML =
+    achievements.push({ name: 'SILENT PROTOCOL', desc: 'Exited the system without loading an identity.' });
+  }
+  if (state.corruptShotsFired === 0) {
+    achievements.push({ name: 'CLEAN SIGNAL', desc: 'Escaped without firing corrupt.m once.' });
+  }
+  if (state.killedEntities.length === 0) {
+    achievements.push({ name: 'ZERO FOOTPRINT', desc: 'Escaped without destroying any entity.' });
+  }
+  if (state.terminalsRead === 0) {
+    achievements.push({ name: 'GHOST IN THE MESH', desc: 'Escaped without reading any terminal.' });
+  }
+
+  const achievementEl = document.getElementById('victory-achievement')!;
+  if (achievements.length > 0) {
+    achievementEl.innerHTML = achievements.map(a =>
       `<div class="achievement-badge">◈ ACHIEVEMENT UNLOCKED ◈</div>` +
-      `<div class="achievement-name">SILENT PROTOCOL</div>` +
-      `<div class="achievement-desc">Exited the system without loading an identity.</div>`;
+      `<div class="achievement-name">${a.name}</div>` +
+      `<div class="achievement-desc">${a.desc}</div>`
+    ).join('');
     achievementEl.style.display = '';
   } else {
     achievementEl.style.display = 'none';
@@ -1153,6 +1171,11 @@ function onAction(action: PlayerAction) {
     return;
   }
 
+  // Block game input while overlay is open (only Escape closes it)
+  if (state.openTerminal || state.openInteractable) {
+    return;
+  }
+
   // Debug toggle doesn't advance turns
   if (action.kind === 'debug_toggle') {
     state.debugMode = !state.debugMode;
@@ -1212,16 +1235,19 @@ function onAction(action: PlayerAction) {
 
 function tryShootAt(pos: Position): boolean {
   const cluster = state.clusters.get(state.currentClusterId)!;
-  const entity = getEntityAt(state, cluster, pos.x, pos.y);
-  if (!entity || entity.id === state.player.id) return false;
-  if (entity.ai?.faction !== 'aggressive') return false;
+  const tile = cluster.tiles[pos.y]?.[pos.x];
+  if (!tile?.visible) return false;
   const dx = pos.x - state.player.position.x;
   const dy = pos.y - state.player.position.y;
   const dist = Math.sqrt(dx * dx + dy * dy);
-  if (dist > CORRUPT_M_RANGE) return false;
-  const tile = cluster.tiles[pos.y]?.[pos.x];
-  if (!tile?.visible) return false;
-  if (!hasLOS(cluster, state.player.position, pos)) return false;
+  if (dist > CORRUPT_M_RANGE) {
+    addMessage(state, 'Target out of range.', 'alert');
+    return false;
+  }
+  if (!hasLOS(cluster, state.player.position, pos)) {
+    addMessage(state, 'No line of sight.', 'alert');
+    return false;
+  }
   onAction({ kind: 'shoot', target: pos });
   return true;
 }
@@ -1238,7 +1264,11 @@ function onMapClick(pos: Position) {
   }
 
   // Left-click on visible hostile in range: shoot directly
-  if (tryShootAt(pos)) return;
+  const cluster = state.clusters.get(state.currentClusterId)!;
+  const clickedEntity = getEntityAt(state, cluster, pos.x, pos.y);
+  if (clickedEntity && clickedEntity.id !== state.player.id && clickedEntity.ai?.faction === 'aggressive') {
+    if (tryShootAt(pos)) return;
+  }
 
   // Check if clicking adjacent tile — single step
   const dx = Math.abs(pos.x - state.player.position.x);
@@ -1334,26 +1364,10 @@ renderer.onCellClick = (pos) => {
 };
 
 renderer.onCellRightClick = (pos) => {
-  // Right-click: enter aim and attempt shot, or cancel aim
-  if (aimMode) {
-    const shot = tryShootAt(pos);
-    exitAim();
-    if (!shot) renderAll();
-  } else {
-    aimMode = true;
-    mapGridWrap.classList.add('aim-mode');
-    let banner = mapContainer.querySelector('.aim-banner');
-    if (!banner) {
-      banner = document.createElement('div');
-      banner.className = 'aim-banner';
-      mapContainer.insertBefore(banner, mapGridWrap);
-    }
-    banner.textContent = `── AIM MODE ── click/RMB to shoot · Esc to cancel ──`;
-    // Attempt immediate shot at right-clicked position
-    const shot = tryShootAt(pos);
-    if (shot) exitAim();
-    else renderAll();
-  }
+  // Right-click: shoot directly at target, no aim overlay
+  if (aimMode) exitAim();
+  tryShootAt(pos);
+  renderAll();
 };
 
 renderer.onCellHover = (pos) => {

@@ -71,6 +71,8 @@ interface SimSnapshot {
   totalTiles: number;
   // Faction entity counts
   factionCounts: Record<Faction, number>;
+  // Room emptiness: % of rooms with no entity for 10+ consecutive ticks (after tick 20)
+  emptyRoomPct: number;
 }
 
 interface SeedResult {
@@ -237,6 +239,7 @@ function snapshotCluster(
   entryPos: Position,
   initialEntityCount: number,
   currentEntityCount: number,
+  roomLastEntityTick?: Map<number, number>,
 ): SimSnapshot {
   const cluster = state.clusters.get(clusterId)!;
   const reachable = bfsReach(cluster, entryPos);
@@ -366,6 +369,29 @@ function snapshotCluster(
     }
   }
 
+  // Room emptiness: % of non-hall rooms that are truly empty (no hazard, no terminal,
+  // no interactable, and no entity for 10+ consecutive ticks) after tick 20
+  let emptyRoomPct = 0;
+  if (state.tick >= 20 && roomLastEntityTick) {
+    const terminalRoomIds = new Set(cluster.terminals.map(t => t.roomId));
+    const interactableRoomIds = new Set(
+      cluster.interactables.filter(i => !i.hidden).map(i => i.roomId)
+    );
+    const nonHallRooms = cluster.rooms.filter(r => !r.tags.geometric.has('hall'));
+    const emptyCount = nonHallRooms.filter(r => {
+      // Has hazard?
+      if (r.roomType !== 'normal') return false;
+      // Has terminal?
+      if (terminalRoomIds.has(r.id)) return false;
+      // Has visible interactable?
+      if (interactableRoomIds.has(r.id)) return false;
+      // Has had an entity in the last 10 ticks?
+      const lastTick = roomLastEntityTick.get(r.id) ?? -1;
+      return state.tick - lastTick >= 10;
+    }).length;
+    emptyRoomPct = nonHallRooms.length > 0 ? (emptyCount / nonHallRooms.length) * 100 : 0;
+  }
+
   return {
     tick: state.tick,
     exitReachable,
@@ -385,6 +411,7 @@ function snapshotCluster(
     walkableTiles,
     totalTiles,
     factionCounts,
+    emptyRoomPct,
   };
 }
 
@@ -415,13 +442,28 @@ function simulateCluster(seed: number, ticks: number, clusterId: number): { snap
   const entryPos = getEntryPos(cluster);
   const initialEntityCount = state.entities.length;
 
+  // Track last tick each room had an entity present (for empty room metric)
+  const roomLastEntityTick = new Map<number, number>();
+
+  function updateRoomEntityPresence() {
+    for (const e of state.entities) {
+      if (e.clusterId !== clusterId) continue;
+      const tile = cluster.tiles[e.position.y]?.[e.position.x];
+      if (tile?.roomId != null && tile.roomId >= 0) {
+        roomLastEntityTick.set(tile.roomId, state.tick);
+      }
+    }
+  }
+
+  updateRoomEntityPresence();
   const snapshots: SimSnapshot[] = [];
-  snapshots.push(snapshotCluster(state, clusterId, entryPos, initialEntityCount, state.entities.length));
+  snapshots.push(snapshotCluster(state, clusterId, entryPos, initialEntityCount, state.entities.length, roomLastEntityTick));
 
   for (let t = 0; t < ticks; t++) {
     processAction(state, { kind: 'wait' });
+    updateRoomEntityPresence();
     if ((t + 1) % SNAPSHOT_INTERVAL === 0) {
-      snapshots.push(snapshotCluster(state, clusterId, entryPos, initialEntityCount, state.entities.length));
+      snapshots.push(snapshotCluster(state, clusterId, entryPos, initialEntityCount, state.entities.length, roomLastEntityTick));
     }
   }
 
@@ -653,6 +695,24 @@ function generatePlots(
     );
   }
 
+  // 5. Empty room % over time
+  html += '<h2>Empty Rooms Over Time (% rooms with no entity for 10+ ticks)</h2>';
+  for (const cid of ALL_CLUSTER_IDS) {
+    const cidResults = allClusterResults.get(cid);
+    if (!cidResults) continue;
+    const valid = cidResults.filter(r => r.snapshots.length > 1);
+    if (valid.length === 0) continue;
+    const snapshotTicks = valid[0].snapshots.map(s => s.tick);
+    html += lineChart(
+      `Cluster ${cid} Empty Room %`,
+      snapshotTicks,
+      [{ label: 'empty %', values: snapshotTicks.map((_, si) => {
+        const vals = valid.map(r => r.snapshots[si]?.emptyRoomPct ?? 0);
+        return vals.reduce((a, b) => a + b, 0) / vals.length;
+      }), color: '#e67e22' }],
+    );
+  }
+
   html += '</body></html>';
 
   mkdirSync('sim-plots', { recursive: true });
@@ -680,6 +740,7 @@ async function main() {
     'iso@0'.padEnd(pcColW),
     'ent@0'.padEnd(pcColW),
     'ent@100'.padEnd(pcColW),
+    'empty%'.padEnd(pcColW),
     'genMs'.padEnd(pcColW),
   ].join(' ');
   console.log(pcHeader);
@@ -720,6 +781,7 @@ async function main() {
     const isoCount = valid.filter(r => (getSnap(r, 0)?.isolatedRooms.length ?? 0) > 0).length;
     const avgEnt0   = mean(valid.map(r => getSnap(r, 0)?.totalEntities ?? 0));
     const avgEnt100 = mean(valid.map(r => getSnap(r, 100)?.totalEntities ?? 0));
+    const avgEmpty  = mean(valid.map(r => r.snapshots[r.snapshots.length - 1]?.emptyRoomPct ?? 0));
     const avgGen    = mean(valid.map(r => r.genTimeMs));
 
     const exitColor = exitPct >= 95 ? GREEN : RED;
@@ -734,6 +796,7 @@ async function main() {
       `${isoColor}${isoCount}${RESET}`.padEnd(pcColW + isoColor.length + RESET.length),
       `${entColor}${avgEnt0.toFixed(1)}${RESET}`.padEnd(pcColW + entColor.length + RESET.length),
       avgEnt100.toFixed(1).padEnd(pcColW),
+      `${avgEmpty.toFixed(0)}%`.padEnd(pcColW),
       avgGen.toFixed(1).padEnd(pcColW),
     ].join(' ');
     console.log(row);
@@ -895,6 +958,14 @@ async function main() {
   console.log('\nEntities:');
   const NE = resultsWithEntities.length;
   printMetric('All entities dead before tick 40', `${allDeadBy40}/${NE} seeds with initial entities`, NE === 0 || allDeadBy40 / NE <= 0.10, 'medium');
+
+  // Empty room metric: avg % of non-hall rooms with no entity for 10+ ticks, at final snapshot
+  const finalEmptyPcts = validResults.map(r => {
+    const last = r.snapshots[r.snapshots.length - 1];
+    return last?.emptyRoomPct ?? 0;
+  });
+  const avgEmptyPct = mean(finalEmptyPcts);
+  printMetric(`Avg empty rooms (no entity 10+ ticks) @${TOTAL_TICKS}`, `${avgEmptyPct.toFixed(1)}%`, true, 'low');
 
   console.log('\nSeed variance:');
   printMetric('CV path damage @50', cvDamage.toFixed(3), cvDamage <= 0.4, 'medium');

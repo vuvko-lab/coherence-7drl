@@ -110,7 +110,8 @@ function move(entity: Entity, cluster: Cluster, target: Position, state?: GameSt
   return true;
 }
 
-function addAiMessage(state: GameState, text: string, type: 'normal' | 'system' | 'hazard' | 'alert' | 'combat' = 'normal') {
+function addAiMessage(state: GameState, text: string, type: 'normal' | 'system' | 'hazard' | 'alert' | 'combat' = 'normal', playerInvolved = true) {
+  if (!playerInvolved && !state.debugMode) return;
   state.messages.push({ text, type, tick: state.tick });
 }
 
@@ -193,10 +194,11 @@ function updateChronicler(state: GameState, entity: Entity, cluster: Cluster) {
 
 function bitMiteAttack(state: GameState, entity: Entity, target: Entity) {
   if (target.coherence !== undefined) {
+    const pi = target.id === state.player.id;
     target.coherence = Math.max(0, target.coherence - entity.attackValue);
-    addAiMessage(state, `Bit-Mite Swarm attacks ${target.name}! −${entity.attackValue} coherence. (${target.coherence}/${target.maxCoherence})`, 'combat');
+    addAiMessage(state, `Bit-Mite Swarm attacks ${target.name}! −${entity.attackValue} coherence. (${target.coherence}/${target.maxCoherence})`, 'combat', pi);
     if (target.coherence <= 0) {
-      addAiMessage(state, `Bit-Mite Swarm destroys ${target.name}!`, 'combat');
+      addAiMessage(state, `Bit-Mite Swarm destroys ${target.name}!`, 'combat', pi);
       removeEntity(state, target);
       entity.ai!.aiState = 'wander';
       entity.ai!.targetId = undefined;
@@ -305,10 +307,11 @@ function updateBitMite(state: GameState, entity: Entity, cluster: Cluster) {
 
 function leechMeleeAttack(state: GameState, entity: Entity, target: Entity): boolean {
   if (target.coherence === undefined) return false;
+  const pi = target.id === state.player.id;
   target.coherence = Math.max(0, target.coherence - entity.attackValue);
-  addAiMessage(state, `Logic Leech strikes ${target.name}! −${entity.attackValue} coherence. (${target.coherence}/${target.maxCoherence})`, 'combat');
+  addAiMessage(state, `Logic Leech strikes ${target.name}! −${entity.attackValue} coherence. (${target.coherence}/${target.maxCoherence})`, 'combat', pi);
   if (target.coherence <= 0) {
-    addAiMessage(state, `Logic Leech destroys ${target.name}!`, 'combat');
+    addAiMessage(state, `Logic Leech destroys ${target.name}!`, 'combat', pi);
     removeEntity(state, target);
   }
   return true;
@@ -399,10 +402,11 @@ function updateLogicLeech(state: GameState, entity: Entity, cluster: Cluster) {
       const hitTargetFaction: Faction = hitTarget?.id === state.player.id ? 'player' : (hitTarget?.ai?.faction ?? 'neutral');
       if (hitTarget && getRelation('aggressive', hitTargetFaction, state.alertLevel) === 'attack') {
         if (hitTarget.coherence !== undefined) {
+          const pi = hitTarget.id === state.player.id;
           hitTarget.coherence = Math.max(0, hitTarget.coherence - entity.attackValue);
-          addAiMessage(state, `Logic Leech charge hits ${hitTarget.name}! −${entity.attackValue} coherence. (${hitTarget.coherence}/${hitTarget.maxCoherence})`, 'combat');
+          addAiMessage(state, `Logic Leech charge hits ${hitTarget.name}! −${entity.attackValue} coherence. (${hitTarget.coherence}/${hitTarget.maxCoherence})`, 'combat', pi);
           if (hitTarget.coherence <= 0) {
-            addAiMessage(state, `Logic Leech destroys ${hitTarget.name}!`, 'combat');
+            addAiMessage(state, `Logic Leech destroys ${hitTarget.name}!`, 'combat', pi);
             removeEntity(state, hitTarget);
           }
         }
@@ -442,11 +446,12 @@ function updateLogicLeech(state: GameState, entity: Entity, cluster: Cluster) {
 
 function sentryAttack(state: GameState, entity: Entity, target: Entity) {
   if (target.coherence !== undefined) {
+    const pi = target.id === state.player.id;
     target.coherence = Math.max(0, target.coherence - entity.attackValue);
-    addAiMessage(state, `Sentry strikes ${target.name}! −${entity.attackValue}. (${target.coherence} left)`, 'combat');
+    addAiMessage(state, `Sentry strikes ${target.name}! −${entity.attackValue}. (${target.coherence} left)`, 'combat', pi);
     shootingAnimation(state, entity.position, target.position, 'single');
     if (target.coherence <= 0) {
-      addAiMessage(state, `Sentry destroys ${target.name}!`, 'combat');
+      addAiMessage(state, `Sentry destroys ${target.name}!`, 'combat', pi);
       removeEntity(state, target);
       entity.ai!.aiState = 'patrol';
       entity.ai!.targetId = undefined;
@@ -723,29 +728,31 @@ function updateTitanSpawn(state: GameState, entity: Entity, cluster: Cluster) {
   const range = entity.attackDistance;
   const dmg = entity.attackValue;
 
-  // Find all attackable targets within range
+  // Find all attackable targets within range with clear LOS
   const targets: Entity[] = [];
   for (const t of all) {
     if (t.id === entity.id) continue;
     if (t.coherence === undefined) continue;
-    const dx = entity.position.x - t.position.x;
-    const dy = entity.position.y - t.position.y;
-    if (dx * dx + dy * dy > range * range) continue;
     const tFaction: Faction = t.id === state.player.id ? 'player' : (t.ai?.faction ?? 'neutral');
     if (getRelation(ai.faction, tFaction, state.alertLevel) !== 'attack') continue;
+    if (!canSee(cluster, entity.position, t.position, range, 0)) continue;
     targets.push(t);
   }
 
   if (targets.length > 0) {
-    // AoE attack — hit all targets simultaneously
+    // AoE attack — hit all targets simultaneously, with shooting animation
+    for (const t of targets) {
+      shootingAnimation(state, entity.position, t.position, 'rapid');
+    }
     const dead: Entity[] = [];
     for (const t of targets) {
       t.coherence = Math.max(0, t.coherence! - dmg);
       if (t.coherence! <= 0) dead.push(t);
     }
-    addAiMessage(state, `[UNKNOWN PROCESS] pulses destructive energy! Hits ${targets.length} target${targets.length > 1 ? 's' : ''}. −${dmg} each.`, 'combat');
+    const pi = targets.some(t => t.id === state.player.id);
+    addAiMessage(state, `[UNKNOWN PROCESS] pulses destructive energy! Hits ${targets.length} target${targets.length > 1 ? 's' : ''}. −${dmg} each.`, 'combat', pi);
     for (const t of dead) {
-      addAiMessage(state, `[UNKNOWN PROCESS] destroys ${t.name}!`, 'combat');
+      addAiMessage(state, `[UNKNOWN PROCESS] destroys ${t.name}!`, 'combat', t.id === state.player.id);
       removeEntity(state, t);
     }
   } else {
@@ -833,11 +840,12 @@ function updateGateKeeper(state: GameState, entity: Entity, cluster: Cluster) {
     if (!canSee(cluster, entity.position, target.position, entity.attackDistance, 0)) continue;
     if (target.coherence === undefined) continue;
 
+    const pi = target.id === state.player.id;
     target.coherence = Math.max(0, target.coherence - entity.attackValue);
-    addAiMessage(state, `Gate-Keeper fires containment beam at ${target.name}! −${entity.attackValue}. (${target.coherence} left)`, 'combat');
+    addAiMessage(state, `Gate-Keeper fires containment beam at ${target.name}! −${entity.attackValue}. (${target.coherence} left)`, 'combat', pi);
     shootingAnimation(state, entity.position, target.position, 'beam');
     if (target.coherence <= 0) {
-      addAiMessage(state, `Gate-Keeper destroys ${target.name}!`, 'combat');
+      addAiMessage(state, `Gate-Keeper destroys ${target.name}!`, 'combat', pi);
       removeEntity(state, target);
     }
     ai.actionCooldown = 3; // beam fires every 3 ticks

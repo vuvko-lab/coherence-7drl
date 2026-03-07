@@ -155,6 +155,9 @@ function createStateForCluster(seed: number, clusterId: number): GameState {
     collapseGlitchTiles: new Map(),
     selfPanelRevealed: true,
     smokeEffects: [],
+    firedTriggerIds: new Set(),
+    corruptShotsFired: 0,
+    terminalsRead: 0,
   };
 
   computeFOV(cluster, entryPos);

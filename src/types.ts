@@ -478,6 +478,9 @@ export interface GameState {
   pendingGlitch?: string;             // set by game logic; consumed by main.ts to fire glitch effects
   narrativeChoice?: 'purge' | 'preserve' | 'eject'; // final-room choice; shapes victory epilogue
   firedTriggerIds: Set<string>;       // ids of once-only narrative triggers that have already fired
+  // Achievement tracking
+  corruptShotsFired: number;          // total corrupt.m shots fired across all clusters
+  terminalsRead: number;              // total terminals interacted with
 }
 
 export interface GameMessage {
