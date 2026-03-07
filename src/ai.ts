@@ -719,31 +719,46 @@ function updateRepairScrapper(state: GameState, entity: Entity, cluster: Cluster
 
 function updateTitanSpawn(state: GameState, entity: Entity, cluster: Cluster) {
   const ai = entity.ai!;
-  const target = findAttackTarget(state, entity, cluster);
+  const all = getAllEntitiesInCluster(state, cluster);
+  const range = entity.attackDistance;
+  const dmg = entity.attackValue;
 
-  if (!target) {
-    const step = randomWalkStep(cluster, entity.position);
-    if (step) move(entity, cluster, step, state);
-    return;
+  // Find all attackable targets within range
+  const targets: Entity[] = [];
+  for (const t of all) {
+    if (t.id === entity.id) continue;
+    if (t.coherence === undefined) continue;
+    const dx = entity.position.x - t.position.x;
+    const dy = entity.position.y - t.position.y;
+    if (dx * dx + dy * dy > range * range) continue;
+    const tFaction: Faction = t.id === state.player.id ? 'player' : (t.ai?.faction ?? 'neutral');
+    if (getRelation(ai.faction, tFaction, state.alertLevel) !== 'attack') continue;
+    targets.push(t);
   }
 
-  ai.targetId = target.id;
-  const dx = Math.abs(entity.position.x - target.position.x);
-  const dy = Math.abs(entity.position.y - target.position.y);
-
-  if (dx + dy <= 1) {
-    // Adjacent — attack
-    if (target.coherence !== undefined) {
-      target.coherence = Math.max(0, target.coherence - entity.attackValue);
-      addAiMessage(state, `[UNKNOWN PROCESS] consumes ${target.name}! −${entity.attackValue}. (${target.coherence} left)`, 'combat');
-      if (target.coherence <= 0) {
-        addAiMessage(state, `[UNKNOWN PROCESS] destroys ${target.name}!`, 'combat');
-        removeEntity(state, target);
-      }
+  if (targets.length > 0) {
+    // AoE attack — hit all targets simultaneously
+    const dead: Entity[] = [];
+    for (const t of targets) {
+      t.coherence = Math.max(0, t.coherence! - dmg);
+      if (t.coherence! <= 0) dead.push(t);
+    }
+    addAiMessage(state, `[UNKNOWN PROCESS] pulses destructive energy! Hits ${targets.length} target${targets.length > 1 ? 's' : ''}. −${dmg} each.`, 'combat');
+    for (const t of dead) {
+      addAiMessage(state, `[UNKNOWN PROCESS] destroys ${t.name}!`, 'combat');
+      removeEntity(state, t);
     }
   } else {
-    const step = stepToward(cluster, entity.position, target.position);
-    if (step) move(entity, cluster, step, state);
+    // No targets in range — chase nearest potential target
+    const nearest = findAttackTarget(state, entity, cluster);
+    if (nearest) {
+      ai.targetId = nearest.id;
+      const step = stepToward(cluster, entity.position, nearest.position);
+      if (step) move(entity, cluster, step, state);
+    } else {
+      const step = randomWalkStep(cluster, entity.position);
+      if (step) move(entity, cluster, step, state);
+    }
   }
 }
 
@@ -868,10 +883,10 @@ export function makeBitMite(pos: Position, clusterId: number): Entity {
     clusterId,
     speed: 12,
     energy: 0,
-    coherence: 20,
-    maxCoherence: 20,
+    coherence: 15,
+    maxCoherence: 15,
     attackDistance: 1,
-    attackValue: 3,
+    attackValue: 4,
     ai: {
       kind: 'bit_mite',
       faction: 'aggressive',
@@ -936,7 +951,7 @@ export function makeLogicLeech(pos: Position, clusterId: number): Entity {
     coherence: 25,
     maxCoherence: 25,
     attackDistance: 1,
-    attackValue: 30,
+    attackValue: 12,
     ai: {
       kind: 'logic_leech',
       faction: 'aggressive',
@@ -958,10 +973,10 @@ export function makeSentry(pos: Position, clusterId: number): Entity {
     clusterId,
     speed: 20,
     energy: 0,
-    coherence: 40,
-    maxCoherence: 40,
+    coherence: 15,
+    maxCoherence: 15,
     attackDistance: 5,
-    attackValue: 5,
+    attackValue: 4,
     ai: {
       kind: 'sentry',
       faction: 'friendly',
@@ -982,10 +997,10 @@ export function makeGateKeeper(pos: Position, clusterId: number): Entity {
     clusterId,
     speed: 15,
     energy: 0,
-    coherence: 150,
-    maxCoherence: 150,
+    coherence: 40,
+    maxCoherence: 40,
     attackDistance: 6,  // beam range
-    attackValue: 20,
+    attackValue: 12,
     ai: {
       kind: 'gate_keeper',
       faction: 'friendly',
@@ -1008,7 +1023,7 @@ export function makeTitanSpawn(pos: Position, clusterId: number): Entity {
     energy: 0,
     coherence: 60,
     maxCoherence: 60,
-    attackDistance: 1,
+    attackDistance: 4,
     attackValue: 20,
     ai: {
       kind: 'titan_spawn',

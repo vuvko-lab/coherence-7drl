@@ -866,7 +866,6 @@ export const NARRATIVE_TRIGGERS: NarrativeTrigger[] = [
     condition: { event: 'coherence_low', coherencePct: 25, once: true },
     effects: [
       { kind: 'message', text: 'EGO-INTEGRITY CRITICAL: Coherence at 25%. Ego-dissolution imminent.', style: 'important' },
-      { kind: 'message', text: '[MESH-ID {corr}]: we can feel your edges fraying. hurry.', style: 'system' },
     ],
   },
 
@@ -900,7 +899,7 @@ export const NARRATIVE_TRIGGERS: NarrativeTrigger[] = [
     id: 'reactor_room_enter',
     condition: { event: 'room_enter', functionalTag: 'reactor', once: true },
     effects: [
-      { kind: 'message', text: "The reactor hum is familiar. You've been here before — the other you.", style: 'normal' },
+      { kind: 'message', text: "The reactor hum is familiar. You've been here before.", style: 'normal' },
     ],
   },
   {
