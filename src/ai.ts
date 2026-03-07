@@ -1,5 +1,6 @@
 import {
-  GameState, Entity, Cluster, Position, TileType,
+  GameState, Entity, Cluster, Position, TileType, Faction,
+  FACTION_RELATIONS, ALERT_ENEMY,
 } from './types';
 import { shootingAnimation } from './combat_animations';
 import { findPath } from './pathfinding';
@@ -193,8 +194,8 @@ function updateChronicler(state: GameState, entity: Entity, cluster: Cluster) {
 function updateBitMite(state: GameState, entity: Entity, cluster: Cluster) {
   const ai = entity.ai!;
 
-  // Find nearest visible non-aggressive target
-  const target = findNonFactionTarget(state, entity, cluster, 'aggressive');
+  // Find nearest visible attack target per faction table
+  const target = findAttackTarget(state, entity, cluster);
 
   switch (ai.aiState) {
     case 'wander': {
@@ -302,7 +303,7 @@ function updateLogicLeech(state: GameState, entity: Entity, cluster: Cluster) {
 
   switch (ai.aiState) {
     case 'wall_walk': {
-      const target = findNonFactionTarget(state, entity, cluster, 'aggressive');
+      const target = findAttackTarget(state, entity, cluster);
       if (target) {
         ai.targetId = target.id;
         ai.lastTargetPos = { ...target.position };
@@ -365,7 +366,8 @@ function updateLogicLeech(state: GameState, entity: Entity, cluster: Cluster) {
 
       // Check for entity hit at charge destination
       const hitTarget = findEntityAt(state, cluster.id, nx, ny);
-      if (hitTarget && hitTarget.ai?.faction !== 'aggressive') {
+      const hitTargetFaction: Faction = hitTarget?.id === state.player.id ? 'player' : (hitTarget?.ai?.faction ?? 'neutral');
+      if (hitTarget && getRelation('aggressive', hitTargetFaction, state.alertLevel) === 'attack') {
         if (hitTarget.coherence !== undefined) {
           hitTarget.coherence = Math.max(0, hitTarget.coherence - entity.attackValue);
           addAiMessage(state, `Logic Leech charge hits ${hitTarget.name}! −${entity.attackValue} coherence. (${hitTarget.coherence}/${hitTarget.maxCoherence})`, 'combat');
@@ -401,15 +403,16 @@ function updateLogicLeech(state: GameState, entity: Entity, cluster: Cluster) {
   }
 }
 
-// ── White-Hat Sentry (friendly) ──
-// Speed 20. Patrols room, 10% chance to switch to adjacent room. Attacks aggressive entities.
+// ── Sentry (friendly) ──
+// Speed 20. Patrols room, 10% chance to switch to adjacent room.
+// Attacks aggressive+titan entities; attacks player when alertLevel >= ALERT_ENEMY.
 
-function updateWhiteHat(state: GameState, entity: Entity, cluster: Cluster) {
+function updateSentry(state: GameState, entity: Entity, cluster: Cluster) {
   const ai = entity.ai!;
   // addAiMessage(state, `Sentry state ${ai.aiState}`);
 
-  // Look for aggressive entities in sight
-  const threat = findAggressiveTarget(state, entity, cluster);
+  // Look for attack targets per faction table (includes player at high alert)
+  const threat = findAttackTarget(state, entity, cluster);
   if (threat) {
     ai.targetId = threat.id;
     ai.aiState = 'attack';
@@ -486,10 +489,10 @@ function updateWhiteHat(state: GameState, entity: Entity, cluster: Cluster) {
       }
       if (target.coherence !== undefined) {
         target.coherence = Math.max(0, target.coherence - entity.attackValue);
-        addAiMessage(state, `White-Hat Sentry strikes ${target.name}! −${entity.attackValue}. (${target.coherence} left)`, 'combat');
+        addAiMessage(state, `Sentry strikes ${target.name}! −${entity.attackValue}. (${target.coherence} left)`, 'combat');
         shootingAnimation(state, entity.position, target.position, 'single');
         if (target.coherence <= 0) {
-          addAiMessage(state, `White-Hat Sentry destroys ${target.name}!`, 'combat');
+          addAiMessage(state, `Sentry destroys ${target.name}!`, 'combat');
           removeEntity(state, target);
           ai.aiState = 'patrol';
           ai.targetId = undefined;
@@ -539,15 +542,25 @@ function pickAdjacentRoomWaypoint(cluster: Cluster, entity: Entity): Position | 
   return undefined;
 }
 
-/** Find the nearest visible entity NOT of the given faction. */
-function findNonFactionTarget(state: GameState, entity: Entity, cluster: Cluster, excludeFaction: string): Entity | undefined {
+/** Resolve whether `attackerFaction` should attack `targetFaction` given current alertLevel. */
+function getRelation(attackerFaction: Faction, targetFaction: Faction, alertLevel: number): 'attack' | 'ignore' {
+  if (attackerFaction === 'friendly' && targetFaction === 'player') {
+    return alertLevel >= ALERT_ENEMY ? 'attack' : 'ignore';
+  }
+  return FACTION_RELATIONS[attackerFaction]?.[targetFaction] ?? 'ignore';
+}
+
+/** Find the nearest visible entity that `entity` should attack, per the faction table. */
+function findAttackTarget(state: GameState, entity: Entity, cluster: Cluster): Entity | undefined {
   const ai = entity.ai!;
+  const attackerFaction = ai.faction;
   const all = getAllEntitiesInCluster(state, cluster);
   let best: Entity | undefined;
   let bestDist = Infinity;
   for (const t of all) {
     if (t.id === entity.id) continue;
-    if (t.ai?.faction === excludeFaction) continue;
+    const targetFaction: Faction = t.id === state.player.id ? 'player' : (t.ai?.faction ?? 'neutral');
+    if (getRelation(attackerFaction, targetFaction, state.alertLevel) !== 'attack') continue;
     if (!canSee(cluster, entity.position, t.position, ai.sightRadius, ai.wallPenetration)) continue;
     const dx = t.position.x - entity.position.x;
     const dy = t.position.y - entity.position.y;
@@ -555,19 +568,6 @@ function findNonFactionTarget(state: GameState, entity: Entity, cluster: Cluster
     if (dist < bestDist) { bestDist = dist; best = t; }
   }
   return best;
-}
-
-/** Find the nearest visible aggressive-faction entity (for White-Hat). */
-function findAggressiveTarget(state: GameState, sentry: Entity, cluster: Cluster): Entity | undefined {
-  const ai = sentry.ai!;
-  for (const e of state.entities) {
-    if (e.id === sentry.id) continue;
-    if (e.clusterId !== sentry.clusterId) continue;
-    if (e.ai?.faction !== 'aggressive') continue;
-    // if (e.id === 0x3A7F && )
-    if (canSee(cluster, sentry.position, e.position, ai.sightRadius, ai.wallPenetration)) return e;
-  }
-  return undefined;
 }
 
 /** Find any entity (including player) at a given position in a cluster. */
@@ -676,6 +676,39 @@ function updateRepairScrapper(state: GameState, entity: Entity, cluster: Cluster
   }
 }
 
+// ── Titan Spawn (titan) ──
+// Speed 15 (fast). Hunts nearest entity of ANY faction — attacks everything.
+
+function updateTitanSpawn(state: GameState, entity: Entity, cluster: Cluster) {
+  const ai = entity.ai!;
+  const target = findAttackTarget(state, entity, cluster);
+
+  if (!target) {
+    const step = randomWalkStep(cluster, entity.position);
+    if (step) move(entity, cluster, step, state);
+    return;
+  }
+
+  ai.targetId = target.id;
+  const dx = Math.abs(entity.position.x - target.position.x);
+  const dy = Math.abs(entity.position.y - target.position.y);
+
+  if (dx + dy <= 1) {
+    // Adjacent — attack
+    if (target.coherence !== undefined) {
+      target.coherence = Math.max(0, target.coherence - entity.attackValue);
+      addAiMessage(state, `[UNKNOWN PROCESS] consumes ${target.name}! −${entity.attackValue}. (${target.coherence} left)`, 'combat');
+      if (target.coherence <= 0) {
+        addAiMessage(state, `[UNKNOWN PROCESS] destroys ${target.name}!`, 'combat');
+        removeEntity(state, target);
+      }
+    }
+  } else {
+    const step = stepToward(cluster, entity.position, target.position);
+    if (step) move(entity, cluster, step, state);
+  }
+}
+
 // ── Main dispatch ──
 
 export function updateEntityAI(state: GameState, entity: Entity) {
@@ -688,9 +721,10 @@ export function updateEntityAI(state: GameState, entity: Entity) {
     case 'chronicler':      updateChronicler(state, entity, cluster);      break;
     case 'bit_mite':        updateBitMite(state, entity, cluster);         break;
     case 'logic_leech':     updateLogicLeech(state, entity, cluster);      break;
-    case 'white_hat':       updateWhiteHat(state, entity, cluster);        break;
+    case 'sentry':          updateSentry(state, entity, cluster);          break;
     case 'gate_keeper':     updateGateKeeper(state, entity, cluster);      break;
     case 'repair_scrapper': updateRepairScrapper(state, entity, cluster);  break;
+    case 'titan_spawn':     updateTitanSpawn(state, entity, cluster);     break;
   }
 }
 
@@ -698,10 +732,11 @@ function updateGateKeeper(state: GameState, entity: Entity, cluster: Cluster) {
   const ai = entity.ai!;
   const all = getAllEntitiesInCluster(state, cluster);
 
-  // Pull all visible aggressive entities one step toward self each turn
+  // Pull all visible attack-targets one step toward self each turn
   for (const target of all) {
     if (target.id === entity.id) continue;
-    if (target.ai?.faction === 'neutral' || target.ai?.faction === 'friendly') continue;
+    const tFaction: Faction = target.id === state.player.id ? 'player' : (target.ai?.faction ?? 'neutral');
+    if (getRelation('friendly', tFaction, state.alertLevel) !== 'attack') continue;
     if (!canSee(cluster, entity.position, target.position, ai.sightRadius, ai.wallPenetration)) continue;
 
     const dx = entity.position.x - target.position.x;
@@ -735,7 +770,8 @@ function updateGateKeeper(state: GameState, entity: Entity, cluster: Cluster) {
 
   for (const target of all) {
     if (target.id === entity.id) continue;
-    if (target.ai?.faction === 'neutral' || target.ai?.faction === 'friendly') continue;
+    const beamTargetFaction: Faction = target.id === state.player.id ? 'player' : (target.ai?.faction ?? 'neutral');
+    if (getRelation('friendly', beamTargetFaction, state.alertLevel) !== 'attack') continue;
     const dx = Math.abs(entity.position.x - target.position.x);
     const dy = Math.abs(entity.position.y - target.position.y);
     const distSq = dx * dx + dy * dy;
@@ -874,10 +910,10 @@ export function makeLogicLeech(pos: Position, clusterId: number): Entity {
   };
 }
 
-export function makeWhiteHat(pos: Position, clusterId: number): Entity {
+export function makeSentry(pos: Position, clusterId: number): Entity {
   return {
     id: _nextEntityId++,
-    name: 'White-Hat Sentry',
+    name: 'Sentry',
     glyph: 'S',
     fg: '#23d2a6',
     position: { ...pos },
@@ -889,7 +925,7 @@ export function makeWhiteHat(pos: Position, clusterId: number): Entity {
     attackDistance: 5,
     attackValue: 5,
     ai: {
-      kind: 'white_hat',
+      kind: 'sentry',
       faction: 'friendly',
       aiState: 'patrol',
       sightRadius: 10,
@@ -918,6 +954,30 @@ export function makeGateKeeper(pos: Position, clusterId: number): Entity {
       aiState: 'lockdown',        // pulls targets onto inself
       sightRadius: 6,
       wallPenetration: 0,
+    },
+  };
+}
+
+export function makeTitanSpawn(pos: Position, clusterId: number): Entity {
+  return {
+    id: _nextEntityId++,
+    name: '[UNKNOWN PROCESS]',
+    glyph: 'X',
+    fg: '#ff44ff',
+    position: { ...pos },
+    clusterId,
+    speed: 15,
+    energy: 0,
+    coherence: 60,
+    maxCoherence: 60,
+    attackDistance: 1,
+    attackValue: 20,
+    ai: {
+      kind: 'titan_spawn',
+      faction: 'titan',
+      aiState: 'hunt',
+      sightRadius: 12,
+      wallPenetration: 1,
     },
   };
 }

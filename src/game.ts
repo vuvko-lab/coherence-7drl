@@ -1,8 +1,9 @@
 import {
   GameState, Entity, Cluster, Position, PlayerAction, Tile,
   TileType, DIR_DELTA, GameMessage, Direction,
-  Interactable, DialogChoice,
+  Interactable, DialogChoice, Faction,
   ALERT_SUSPICIOUS, ALERT_ENEMY, ROOT_PRIVILEGES, COLORS,
+  FACTION_RELATIONS, NarrativeTriggerEvent,
 } from './types';
 import { generateCluster, placeEntryPoint } from './cluster';
 import { computeFOV, floodFillReveal, hasLOS } from './fov';
@@ -10,8 +11,9 @@ import { findPath } from './pathfinding';
 import { updateHazards, onPlayerEnterRoom, getPlayerRoom, applyTileHazardToPlayer, updateAlertModule } from './hazards';
 import { seed as seedRng, generateSeed, randInt, pick } from './rng';
 import {
-  updateEntityAI, makeChronicler, makeBitMite, makeLogicLeech, makeWhiteHat, makePropEntity, makeGateKeeper, makeRepairScrapper,
+  updateEntityAI, makeChronicler, makeBitMite, makeLogicLeech, makeSentry, makePropEntity, makeGateKeeper, makeRepairScrapper, makeTitanSpawn,
 } from './ai';
+import { NARRATIVE_TRIGGERS } from './narrative';
 export { makeDamagedBitMite } from './ai';
 import { shootingAnimation } from './combat_animations';
 
@@ -126,7 +128,11 @@ export function createGame(initialSeed?: number): GameState {
     collapseGlitchTiles: new Map(),
     selfPanelRevealed: false,
     smokeEffects: [],
+    firedTriggerIds: new Set(),
   };
+
+  // Fire cluster 0 entry triggers
+  checkNarrativeTriggers(state, 'cluster_enter', { clusterId: 0 });
 
   addMessage(state, 'System boot... ego-fragment loaded from backup.', 'system');
   addMessage(state, 'Navigate to the interface exit [⇨] to transfer between clusters.', 'system');
@@ -232,16 +238,16 @@ function spawnClusterEntities(state: GameState, cluster: Cluster) {
     const inSafeRoom = room.roomType === 'normal';
     const hasEnemies = id >= 2; // enemies only in cluster 2+
 
-    // Weights: [bit_mite, logic_leech, chronicler, white_hat, gate_keeper, repair_scrapper]
+    // Weights: [bit_mite, logic_leech, chronicler, sentry, gate_keeper, repair_scrapper]
     // Logic Leech and Gate-Keeper scale up significantly with cluster depth.
-    // White-Hat sentry spawns are rare and capped to avoid friendly flood.
+    // Sentry spawns are rare and capped to avoid friendly flood.
     const leechWeight = hasEnemies
       ? (isPeripheral ? 2 + depth : 1 + depth * 0.5)  // leech loves edges, scales with depth
       : 0;
     const gkWeight = hasEnemies
       ? Math.max(0, (depth - 2) * 1.2) * (room.collapse > 0.5 ? 2 : 1)  // starts cluster 2+, steeper ramp
       : 0;
-    // White-Hat: rare overall, capped weight so it never dominates
+    // Sentry: rare overall, capped weight so it never dominates
     const whWeight = hasEnemies && inSafeRoom ? Math.min(0.5, 0.1 * depth) : 0;
     // Repair scrapper: low weight in cluster 1, slightly higher in clusters 4-5
     const rsWeight = id >= 4 ? 1.5 : id >= 2 ? 0.6 : 0.4;
@@ -249,7 +255,7 @@ function spawnClusterEntities(state: GameState, cluster: Cluster) {
       hasEnemies ? 6 + depth * 1.5 : 0,  // bit_mite: dominant, grows fast with depth
       leechWeight,                         // logic_leech: scales with depth, prefers edges
       hasEnemies ? 1.2 : 0,               // chronicler: constant low neutral presence
-      whWeight,                            // white_hat: rare sentry, capped
+      whWeight,                            // sentry: rare, capped
       gkWeight,                            // gate_keeper: scales from cluster 2+
       rsWeight,                            // repair_scrapper: all clusters 1+
     ];
@@ -264,7 +270,7 @@ function spawnClusterEntities(state: GameState, cluster: Cluster) {
     } else if (roll < w[0] + w[1] + w[2]) {
       entity = makeChronicler(pos, id);
     } else if (roll < w[0] + w[1] + w[2] + w[3]) {
-      entity = makeWhiteHat(pos, id);
+      entity = makeSentry(pos, id);
     } else if (roll < w[0] + w[1] + w[2] + w[3] + w[4]) {
       entity = makeGateKeeper(pos, id);
     } else {
@@ -291,6 +297,19 @@ function spawnClusterEntities(state: GameState, cluster: Cluster) {
       }
     }
     room.scenarioState!.pendingProps = []; // clear so we don't re-spawn
+  }
+
+  // Cluster 5: spawn 2–3 TitanSpawn in the highest-collapse rooms
+  if (id === 5) {
+    const highCollapse = allRooms
+      .filter(r => r.collapse > 0.6)
+      .sort((a, b) => b.collapse - a.collapse)
+      .slice(0, 3);
+    const titanCount = highCollapse.length >= 3 ? 3 : highCollapse.length >= 2 ? 2 : 1;
+    for (let ti = 0; ti < titanCount && ti < highCollapse.length; ti++) {
+      const pos = pickWalkableTile(highCollapse[ti]);
+      if (pos) spawned.push(makeTitanSpawn(pos, id));
+    }
   }
 
   // Don't spawn on player position
@@ -488,10 +507,12 @@ function tryMove(state: GameState, dx: number, dy: number): boolean {
     return false;
   }
 
-  // Bump-into-entity → melee (hostile), push (friendly), or examine (neutral)
+  // Bump-into-entity → melee (hostile), push (friendly/neutral titan), or examine
   const bumpedEntity = getEntityAt(state, cluster, nx, ny);
   if (bumpedEntity && bumpedEntity.id !== state.player.id) {
-    if (bumpedEntity.ai?.faction === 'aggressive') {
+    const targetFaction: Faction = bumpedEntity.ai?.faction ?? 'neutral';
+    const canAttack = FACTION_RELATIONS['player']?.[targetFaction] === 'attack';
+    if (canAttack) {
       if (bumpedEntity.coherence !== undefined) {
         bumpedEntity.coherence = Math.max(0, bumpedEntity.coherence - MELEE_DAMAGE);
         addMessage(state,
@@ -501,16 +522,19 @@ function tryMove(state: GameState, dx: number, dy: number): boolean {
           const _sf = bumpedEntity.ai?.faction;
           state.smokeEffects.push({
             x: bumpedEntity.position.x, y: bumpedEntity.position.y,
-            fg: _sf === 'aggressive' ? '#cc4444' : _sf === 'friendly' ? '#23d2a6' : '#aaaa66',
+            fg: _sf === 'aggressive' ? '#cc4444' : _sf === 'friendly' ? '#23d2a6' : _sf === 'titan' ? '#ff44ff' : '#aaaa66',
             spawnTime: performance.now(),
           });
-          if (bumpedEntity.ai) state.killedEntities.push({ name: bumpedEntity.name, kind: bumpedEntity.ai.kind });
+          if (bumpedEntity.ai) {
+            state.killedEntities.push({ name: bumpedEntity.name, kind: bumpedEntity.ai.kind });
+            checkNarrativeTriggers(state, 'entity_killed', { killedFaction: bumpedEntity.ai.faction });
+          }
           state.entities = state.entities.filter(e => e.id !== bumpedEntity.id);
           state.markedEntities.delete(bumpedEntity.id);
         }
       }
       return true; // costs a turn
-    } else if (bumpedEntity.ai?.faction === 'friendly') {
+    } else if (targetFaction === 'friendly') {
       // Try to push the friendly entity aside
       const pushed = tryPushEntity(state, cluster, bumpedEntity, state.player.position);
       if (pushed) {
@@ -634,6 +658,8 @@ function tryTransfer(state: GameState): boolean {
     addMessage(state, `Transferred to cluster ${iface.targetClusterId}.`, 'important');
   }
 
+  checkNarrativeTriggers(state, 'cluster_enter', { clusterId: iface.targetClusterId });
+
   computeFOV(targetCluster, state.player.position);
   return true;
 }
@@ -723,6 +749,7 @@ export function processAction(state: GameState, action: PlayerAction): boolean {
     const newRoom = getPlayerRoom(state);
     if (newRoom && (!prevRoom || prevRoom.id !== newRoom.id)) {
       onPlayerEnterRoom(state, newRoom);
+      checkNarrativeTriggers(state, 'room_enter', { room: newRoom });
     }
 
     // Update doors (auto-close), recompute FOV if any closed
@@ -733,6 +760,9 @@ export function processAction(state: GameState, action: PlayerAction): boolean {
     // Update hazards
     updateHazards(state);
     applyTileHazardToPlayer(state);
+
+    // Check coherence-low triggers after hazard damage
+    checkNarrativeTriggers(state, 'coherence_low');
     updateAlertModule(state);
 
     // Check if final terminal lockdown expired — unlock exit
@@ -936,12 +966,70 @@ function spawnCorruptionAtRoom(state: GameState, cluster: Cluster, roomId: numbe
   addMessage(state, 'Coherence field destabilised — corruption hazard spawned!', 'hazard');
 }
 
+// ── Narrative trigger evaluation ──
+
+export function checkNarrativeTriggers(
+  state: GameState,
+  event: NarrativeTriggerEvent,
+  ctx: {
+    clusterId?: number;
+    room?: { tags: { functional: string | null }; collapse: number };
+    killedFaction?: string;
+    alertLevel?: number;
+  } = {},
+): void {
+  for (const trigger of NARRATIVE_TRIGGERS) {
+    const c = trigger.condition;
+    if (c.event !== event) continue;
+    const once = c.once !== false; // default true
+    if (once && state.firedTriggerIds.has(trigger.id)) continue;
+
+    // Cluster filter
+    const cid = ctx.clusterId ?? state.currentClusterId;
+    if (c.clusterId !== undefined && c.clusterId !== cid) continue;
+    if (c.clusterIdMin !== undefined && cid < c.clusterIdMin) continue;
+    if (c.clusterIdMax !== undefined && cid > c.clusterIdMax) continue;
+
+    // Event-specific filters
+    if (event === 'room_enter') {
+      if (c.functionalTag && ctx.room?.tags.functional !== c.functionalTag) continue;
+      if (c.collapseMin !== undefined && (ctx.room?.collapse ?? 0) < c.collapseMin) continue;
+    }
+    if (event === 'entity_killed') {
+      if (c.killedFaction && c.killedFaction !== ctx.killedFaction) continue;
+    }
+    if (event === 'alert_threshold') {
+      const al = ctx.alertLevel ?? state.alertLevel;
+      if (c.alertMin !== undefined && al < c.alertMin) continue;
+      if (c.alertMax !== undefined && al > c.alertMax) continue;
+    }
+    if (event === 'coherence_low') {
+      if (c.coherencePct !== undefined) {
+        const pct = ((state.player.coherence ?? 100) / (state.player.maxCoherence ?? 100)) * 100;
+        if (pct > c.coherencePct) continue;
+      }
+    }
+
+    // Fire effects
+    for (const effect of trigger.effects) {
+      if (effect.kind === 'message') {
+        addMessage(state, effect.text, effect.style ?? 'normal');
+      } else if (effect.kind === 'alert_delta') {
+        state.alertLevel += effect.amount;
+        checkNarrativeTriggers(state, 'alert_threshold', { alertLevel: state.alertLevel });
+      }
+    }
+    if (once) state.firedTriggerIds.add(trigger.id);
+  }
+}
+
 /** Execute a dialog choice action for an interactable. Returns true if the overlay should close. */
 export function executeInteractableAction(
   state: GameState,
   itemId: string,
   clusterId: number,
   action: NonNullable<DialogChoice['action']>,
+  choice?: DialogChoice,
 ): boolean {
   if (action === 'close') return true;
 
@@ -986,6 +1074,7 @@ export function executeInteractableAction(
           addMessage(state, 'WARNING: Flagged as suspicious entity. Antivirus is tracking.', 'alert');
         else if (prev < ALERT_ENEMY && state.alertLevel >= ALERT_ENEMY)
           addMessage(state, 'CRITICAL: Designated hostile entity. Antivirus hunting.', 'alert');
+        checkNarrativeTriggers(state, 'alert_threshold', { alertLevel: state.alertLevel });
       }
       if (item.hasExitCode) {
         cluster.exitLocked = false;
@@ -1039,6 +1128,13 @@ export function executeInteractableAction(
     case 'hack_terminal': {
       // Handled separately via hackFinalTerminal() — should not reach here
       break;
+    }
+    case 'set_narrative_choice': {
+      if (choice?.narrativeChoiceValue) {
+        state.narrativeChoice = choice.narrativeChoiceValue as GameState['narrativeChoice'];
+        addMessage(state, `Choice recorded: ${choice.narrativeChoiceValue.toUpperCase()}.`, 'system');
+      }
+      return true;
     }
   }
   return false; // keep overlay open so player sees updated state

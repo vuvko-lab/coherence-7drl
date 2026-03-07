@@ -5,7 +5,7 @@ import {
 } from './types';
 import { addMessage } from './game';
 import { random, randInt } from './rng';
-import { makeWhiteHat, makeBitMite, makeGateKeeper } from './ai';
+import { makeSentry, makeBitMite, makeGateKeeper } from './ai';
 
 function roomInterior(room: Room): { x1: number; y1: number; x2: number; y2: number } {
   return { x1: room.x + 1, y1: room.y + 1, x2: room.x + room.w - 2, y2: room.y + room.h - 2 };
@@ -449,7 +449,7 @@ function updateFirewall(state: GameState, cluster: Cluster, room: Room) {
     if (hz.firewallCharge >= hz.firewallMaxCharge) {
       hz.firewallCharge = 0;
       hz.firewallLastSpawnTick = state.tick;
-      spawnEntityInRoom(state, cluster, room, 'white_hat');
+      spawnEntityInRoom(state, cluster, room, 'sentry');
       addMessage(state, 'FIREWALL: Defensive sentry deployed.', 'alert');
     }
   }
@@ -587,7 +587,7 @@ const GLITCH_WALL_CHARS = '╬╫╪▣▤▥▦▧▨▩';
 const GLITCH_COLORS = ['#cc4422', '#aa2244', '#cc6600', '#886622', '#aa4400'];
 let _nextSpawnId = 10000; // avoid collisions with game.ts entity IDs
 
-function spawnEntityInRoom(state: GameState, cluster: Cluster, room: Room, kind: 'white_hat' | 'bit_mite' | 'gate_keeper') {
+function spawnEntityInRoom(state: GameState, cluster: Cluster, room: Room, kind: 'sentry' | 'bit_mite' | 'gate_keeper') {
   // Soft cap: don't flood the cluster beyond a depth-scaled limit
   const entityCap = 15 + cluster.id * 5; // cluster 2→25, cluster 5→40
   const currentCount = state.entities.filter(e => e.clusterId === cluster.id).length;
@@ -606,8 +606,8 @@ function spawnEntityInRoom(state: GameState, cluster: Cluster, room: Room, kind:
   }
   if (candidates.length === 0) return;
   const pos = candidates[Math.floor(random() * candidates.length)];
-  const entity = kind === 'white_hat'
-    ? makeWhiteHat(pos, cluster.id)
+  const entity = kind === 'sentry'
+    ? makeSentry(pos, cluster.id)
     : kind === 'gate_keeper'
       ? makeGateKeeper(pos, cluster.id)
       : makeBitMite(pos, cluster.id);
@@ -662,8 +662,8 @@ function updateCollapseEffects(state: GameState, cluster: Cluster) {
       // Bit-Mite: every 60-80 ticks (down from 20-30 — spawning was too aggressive)
       const miteInterval = room.collapse > 0.7 ? 60 : 80;
       if (tick % miteInterval === (room.id % miteInterval)) spawnEntityInRoom(state, cluster, room, 'bit_mite');
-      // White-Hat sentry: every 100 ticks
-      if (tick % 100 === (room.id % 100)) spawnEntityInRoom(state, cluster, room, 'white_hat');
+      // Sentry: every 100 ticks
+      if (tick % 100 === (room.id % 100)) spawnEntityInRoom(state, cluster, room, 'sentry');
       // Gate-Keeper: every 120 ticks in very high-collapse rooms; at most one per room
       if (room.collapse > 0.7 && tick % 120 === (room.id % 120)) {
         const alreadyHasKeeper = state.entities.some(

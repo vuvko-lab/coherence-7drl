@@ -14,7 +14,7 @@ import { processAction } from './game';
 import { generateCluster, placeEntryPoint } from './cluster';
 import { computeFOV } from './fov';
 import { seed as seedRng } from './rng';
-import { makeChronicler, makeBitMite, makeLogicLeech, makeWhiteHat } from './ai';
+import { makeChronicler, makeBitMite, makeLogicLeech, makeSentry } from './ai';
 import { TileType, COLORS } from './types';
 import type { GameState, Entity, Cluster, Position } from './types';
 
@@ -91,7 +91,7 @@ function spawnEntities(state: GameState, cluster: Cluster) {
     const pool = safe.length > 0 ? safe : rooms;
     const room = pool[Math.floor(Math.random() * pool.length)];
     const pos = pickWalkable(room);
-    if (pos) spawned.push(makeWhiteHat(pos, id));
+    if (pos) spawned.push(makeSentry(pos, id));
   }
 
   const ppKey = `${state.player.position.x},${state.player.position.y}`;

@@ -8,6 +8,7 @@ import {
 import { generate, CellType, RoomDef, Hall } from './gen-halls';
 import { random, randInt, pick } from './rng';
 import { initNoise, collapseNoise } from './noise';
+import { NARRATIVE_TERMINAL_POOLS, GENERIC_TERMINAL_POOLS, NARRATIVE_ECHOES, NARRATIVE_WHISPERS } from './narrative';
 
 // ── Tile factories ──
 
@@ -738,10 +739,15 @@ const KEY_CONTENT_LINES: string[] = [
   'AUTH CODE: ████████-████ — Bearer may activate cluster egress.',
 ];
 
-function generateTerminalContent(functionalTag: string | null): string[] {
-  const pool = (functionalTag && TERMINAL_CONTENT_POOLS[functionalTag]) ?? FALLBACK_CONTENT;
+function generateTerminalContent(functionalTag: string | null, clusterId: number): string[] {
+  // Prefer cluster-specific narrative pool, then generic narrative pool, then old fallback
+  const narrativeCluster = NARRATIVE_TERMINAL_POOLS[clusterId];
+  const narrativePool = (functionalTag && narrativeCluster?.[functionalTag as FunctionalTag])
+    ?? (functionalTag && GENERIC_TERMINAL_POOLS[functionalTag as FunctionalTag])
+    ?? (functionalTag && TERMINAL_CONTENT_POOLS[functionalTag])
+    ?? FALLBACK_CONTENT;
   // Pick 2-3 random lines without repeating
-  const shuffled = [...pool].sort(() => random() - 0.5);
+  const shuffled = [...narrativePool].sort(() => random() - 0.5);
   return shuffled.slice(0, randInt(2, 3));
 }
 
@@ -787,7 +793,7 @@ function placeTerminals(tiles: Tile[][], allRooms: Room[], clusterId: number, do
 
     const id = `term-${clusterId}-${i}`;
     const label = TERMINAL_LABELS[room.tags.functional!] ?? 'ACCESS TERMINAL';
-    const content = generateTerminalContent(room.tags.functional);
+    const content = generateTerminalContent(room.tags.functional, clusterId);
 
     tiles[ty][tx].type = TileType.Terminal;
     tiles[ty][tx].glyph = '◈';
@@ -828,7 +834,7 @@ function placeTerminals(tiles: Tile[][], allRooms: Room[], clusterId: number, do
       terminals.push({
         id, roomId: room.id, label: 'SYSTEM TERMINAL',
         position: { x: cx, y: cy }, activated: false,
-        content: generateTerminalContent(null), hasKey: false,
+        content: generateTerminalContent(null, clusterId), hasKey: false,
       });
     }
   }
@@ -1174,6 +1180,112 @@ function buildArchiveEchoDialog(corrupted: boolean, alertCost: number): DialogNo
   ];
 }
 
+// ── Narrative echo placement ─────────────────────────────────────────────────
+
+/**
+ * Place scripted archive_echo entries from NARRATIVE_ECHOES[clusterId] into
+ * rooms that match the echo's functionalTag. Called from placeInteractables.
+ */
+function placeNarrativeEchoes(
+  tiles: Tile[][],
+  allRooms: Room[],
+  clusterId: number,
+  occupied: Set<string>,
+  result: Interactable[],
+  uid: { v: number },
+): void {
+  const defs = NARRATIVE_ECHOES[clusterId];
+  if (!defs || defs.length === 0) return;
+
+  const makeId = (kind: string) => `iac-${clusterId}-${kind}-${uid.v++}`;
+  const tryPlace = (pos: Position | null): Position | null => {
+    if (!pos) return null;
+    const k = `${pos.x},${pos.y}`;
+    if (occupied.has(k)) return null;
+    occupied.add(k);
+    return pos;
+  };
+
+  for (const def of defs) {
+    // Find a non-hall room matching the functional tag; prefer low-collapse rooms
+    const candidates = allRooms
+      .filter(r => !r.tags.geometric.has('hall') && r.tags.functional === def.functionalTag)
+      .sort((a, b) => a.collapse - b.collapse);
+    const room = candidates[0];
+    if (!room) continue;
+    const pos = tryPlace(findPlacementInRoom(tiles, room));
+    if (!pos) continue;
+
+    const id = makeId('narr');
+    const isTutorial = def.isTutorialEcho ?? false;
+    result.push({
+      id,
+      kind: 'archive_echo',
+      position: pos,
+      roomId: room.id,
+      corrupted: false,
+      dialog: def.dialog,
+      currentNodeId: 'root',
+      rewardTaken: false,
+      hidden: false,
+      hiddenUntilTick: 0,
+      isTutorialEcho: isTutorial,
+      alertCost: isTutorial ? 0 : 10,
+    });
+  }
+}
+
+/**
+ * Build a lost_echo dialog using cluster-specific whisper lines (if available).
+ */
+function buildLostEchoDialogWithWhispers(clusterId: number, hasExitCode: boolean): DialogNode[] {
+  const whispers = NARRATIVE_WHISPERS[clusterId];
+  if (!whispers || whispers.length < 4) return buildLostEchoDialog(hasExitCode);
+  const shuffled = [...whispers].sort(() => random() - 0.5);
+  const nodes: DialogNode[] = [
+    {
+      id: 'root',
+      lines: shuffled.slice(0, 2),
+      choices: [
+        { label: 'FOCUS ON THE SIGNAL', nodeId: 'fragment' },
+        { label: 'BACK AWAY', action: 'close' },
+      ],
+    },
+    {
+      id: 'fragment',
+      lines: shuffled.slice(2, 4),
+      choices: [
+        ...(hasExitCode
+          ? [{ label: 'TRY TO EXTRACT DATA', nodeId: 'warning' } as DialogChoice]
+          : [{ label: 'LISTEN LONGER', nodeId: 'deeper' } as DialogChoice]),
+        { label: 'LEAVE IT', action: 'close' },
+      ],
+    },
+    {
+      id: 'deeper',
+      lines: [shuffled[4] ?? '...', '...'],
+      choices: [{ label: 'LEAVE', action: 'close' }],
+    },
+  ];
+  if (hasExitCode) {
+    nodes.push({
+      id: 'warning',
+      lines: [
+        '[FRAGMENTED COHERENCE PATTERN DETECTED]',
+        '[CONTAINS: EXIT NODE ACCESS CODE]',
+        'WARNING: EXTRACTION WILL DESTABILIZE LOCAL COHERENCE FIELD.',
+        'WARNING: ANTIVIRUS PATTERN MATCH — ALERT LEVEL WILL INCREASE.',
+        'WARNING: HEAVY HAZARD WILL MANIFEST IN THIS SECTOR.',
+      ],
+      choices: [
+        { label: 'EXTRACT EXIT CODE  [!!! RISKY !!!]', action: 'extract_reward', requiresRewardAvailable: true },
+        { label: 'ABORT', action: 'close' },
+      ],
+    });
+  }
+  return nodes;
+}
+
 // Main placement function ─────────────────────────────────────────────────────
 
 function placeInteractables(
@@ -1184,8 +1296,8 @@ function placeInteractables(
 ): Interactable[] {
   const result: Interactable[] = [];
   const occupied = new Set<string>(existingTerminals.map(t => `${t.position.x},${t.position.y}`));
-  let uid = 0;
-  const makeId = (kind: string) => `iac-${clusterId}-${kind}-${uid++}`;
+  const uidRef = { v: 0 };
+  const makeId = (kind: string) => `iac-${clusterId}-${kind}-${uidRef.v++}`;
 
   function tryPlace(pos: Position | null): Position | null {
     if (!pos) return null;
@@ -1244,7 +1356,7 @@ function placeInteractables(
       result.push({
         id, kind: 'lost_echo', position: pos, roomId: room.id,
         corrupted: false,
-        dialog: buildLostEchoDialog(hasExitCode),
+        dialog: buildLostEchoDialogWithWhispers(clusterId, hasExitCode),
         currentNodeId: 'root', rewardTaken: false,
         hidden: false, hiddenUntilTick: 0,
         hasExitCode,
@@ -1280,6 +1392,9 @@ function placeInteractables(
       alertCost,
     });
   }
+
+  // Place scripted narrative echoes for this cluster
+  placeNarrativeEchoes(tiles, allRooms, clusterId, occupied, result, uidRef);
 
   return result;
 }

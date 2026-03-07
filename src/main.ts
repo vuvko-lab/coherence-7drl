@@ -5,6 +5,7 @@ import { InputHandler } from './input';
 import { PlayerAction, Position, TileType, SMOKE_DURATION_MS } from './types';
 import { generateSeed } from './rng';
 import { GLITCH_EFFECTS, initGlitch, glitchShake, glitchChromatic, glitchBarSweep, glitchStaticBurst, glitchHorizontalTear, glitchDataBleed } from './glitch';
+import { VICTORY_EPILOGUES } from './narrative';
 import { hasLOS } from './fov';
 import { canSee } from './ai';
 
@@ -598,7 +599,7 @@ function openInteractableOverlay() {
       } else if (choice.action) {
         const isScanAction = choice.action === 'reveal_terminals' || choice.action === 'reveal_exits';
         const shouldClose = executeInteractableAction(
-          state, item.id, openInteractable.clusterId, choice.action,
+          state, item.id, openInteractable.clusterId, choice.action, choice,
         );
         if (shouldClose) {
           closeInteractableOverlay();
@@ -801,7 +802,15 @@ function showVictoryOverlay() {
     killCounts[k.kind] = (killCounts[k.kind] ?? 0) + 1;
   }
 
+  const epilogueKey = state.narrativeChoice ?? 'none';
+  const epilogueLines = VICTORY_EPILOGUES[epilogueKey] ?? VICTORY_EPILOGUES['none'] ?? [];
+  const epilogueHtml = epilogueLines.length > 0
+    ? epilogueLines.map(l => l === '' ? '<div class="epilogue-spacer">&nbsp;</div>' : `<div class="epilogue-line">${l}</div>`).join('')
+      + '<div class="epilogue-sep">──────────────────────────────</div>'
+    : '';
+
   victoryStats.innerHTML =
+    epilogueHtml +
     `<div>Coherence: ${coherencePct}%</div>` +
     `<div>Turns: ${state.tick}</div>` +
     `<div>Privileges bound: ${state.rootPrivileges.length > 0 ? state.rootPrivileges.join(' · ') : 'none'}</div>` +

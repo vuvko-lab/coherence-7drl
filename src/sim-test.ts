@@ -793,7 +793,7 @@ async function main() {
   console.log(`\n${BOLD}=== Entity Spawn Analysis (t=0, ${SEED_COUNT} seeds each cluster) ===${RESET}`);
 
   const SPAWN_CLUSTER_IDS = [0, 1, 2, 3, 4, 5];
-  const ENTITY_KINDS = ['bit_mite', 'logic_leech', 'chronicler', 'white_hat', 'gate_keeper', 'repair_scrapper', 'prop'];
+  const ENTITY_KINDS = ['bit_mite', 'logic_leech', 'chronicler', 'sentry', 'gate_keeper', 'repair_scrapper', 'titan_spawn', 'prop'];
 
   // Header row
   const colW = 8;

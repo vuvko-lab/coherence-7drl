@@ -2,7 +2,7 @@ import { generateCluster, placeEntryPoint } from '../cluster';
 import { computeFOV } from '../fov';
 import { processAction } from '../game';
 import { seed as seedRng } from '../rng';
-import { makeChronicler, makeBitMite, makeLogicLeech, makeWhiteHat, makeGateKeeper, makeRepairScrapper } from '../ai';
+import { makeChronicler, makeBitMite, makeLogicLeech, makeSentry, makeGateKeeper, makeRepairScrapper, makeTitanSpawn } from '../ai';
 import { TileType, COLORS, CLUSTER_WIDTH, CLUSTER_HEIGHT } from '../types';
 import type {
   Cluster, Entity, GameState, Position, Room,
@@ -341,9 +341,10 @@ const entityFactories: Record<EntityKind, (pos: Position, clusterId: number) => 
   chronicler: makeChronicler,
   bit_mite: makeBitMite,
   logic_leech: makeLogicLeech,
-  white_hat: makeWhiteHat,
+  sentry: makeSentry,
   gate_keeper: makeGateKeeper,
   repair_scrapper: makeRepairScrapper,
+  titan_spawn: makeTitanSpawn,
 };
 
 function placeEntity(kind: EntityKind, pos: Position) {
@@ -427,6 +428,7 @@ function buildSimState(): GameState {
     collapseGlitchTiles: new Map(),
     selfPanelRevealed: true,
     smokeEffects: [],
+    firedTriggerIds: new Set(),
   };
 
   computeFOV(clusterClone, entryPos);

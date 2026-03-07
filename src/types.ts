@@ -206,7 +206,9 @@ export interface DialogChoice {
   label: string;
   nodeId?: string;                   // navigate to node; undefined = close
   action?: 'close' | 'extract_reward' | 'reveal_terminals' | 'reveal_exits'
-         | 'extract_root_part' | 'deactivate_hazard' | 'hack_terminal';
+         | 'extract_root_part' | 'deactivate_hazard' | 'hack_terminal'
+         | 'set_narrative_choice';
+  narrativeChoiceValue?: string;     // used with set_narrative_choice
   requiresRewardAvailable?: boolean; // hide choice if rewardTaken
   requiresExitLocked?: boolean;      // show choice only if cluster.exitLocked
   requiresRootPartAvailable?: boolean; // hide choice if root part already taken
@@ -255,6 +257,43 @@ export const SMOKE_DURATION_MS = 480; // total smoke animation time in ms (3 pha
 /** Ordered root privilege names granted by collecting root fragments */
 export const ROOT_PRIVILEGES = ['ROOT READ', 'ROOT WRITE', 'ROOT EXEC', 'ROOT ID', 'ROOT PASS'] as const;
 
+// ── Narrative Triggers ──
+
+export type NarrativeTriggerEvent =
+  | 'cluster_enter'     // player transitions to a new cluster
+  | 'room_enter'        // player steps into a room
+  | 'entity_killed'     // any entity is killed (check killedFaction)
+  | 'alert_threshold'   // alert level crosses alertMin/alertMax
+  | 'coherence_low'     // player coherence drops to/below coherencePct%
+  | 'terminal_activate' // player activates any terminal
+  | 'echo_interact'     // player interacts with any echo/interactable
+  ;
+
+export interface NarrativeTriggerCondition {
+  event: NarrativeTriggerEvent;
+  clusterId?: number;              // exact cluster; omit = any cluster
+  clusterIdMin?: number;           // cluster >= this
+  clusterIdMax?: number;           // cluster <= this
+  functionalTag?: FunctionalTag;   // room_enter: room must have this functional tag
+  collapseMin?: number;            // room_enter: room collapse intensity >= this (0–1)
+  killedFaction?: Faction;         // entity_killed: only trigger for this faction
+  alertMin?: number;               // alert_threshold: alertLevel must be >= this when event fires
+  alertMax?: number;               // alert_threshold: alertLevel must be <= this when event fires
+  coherencePct?: number;           // coherence_low: player.coherence / maxCoherence <= this
+  once?: boolean;                  // default true — fire at most once per run per trigger id
+}
+
+export type NarrativeTriggerEffect =
+  | { kind: 'message'; text: string; style?: GameMessage['type'] }
+  | { kind: 'alert_delta'; amount: number }
+  ;
+
+export interface NarrativeTrigger {
+  id: string;
+  condition: NarrativeTriggerCondition;
+  effects: NarrativeTriggerEffect[];
+}
+
 export interface SmokeEffect {
   x: number;
   y: number;
@@ -282,11 +321,25 @@ export type EntityKind =
   | 'chronicler'
   | 'bit_mite'
   | 'logic_leech'
-  | 'white_hat'
+  | 'sentry'
   | 'gate_keeper'
   | 'repair_scrapper'
+  | 'titan_spawn'
   ;
-export type Faction = 'neutral' | 'aggressive' | 'friendly';
+
+export type Faction = 'neutral' | 'aggressive' | 'friendly' | 'titan' | 'player';
+
+export type FactionRelation = 'attack' | 'ignore';
+
+/** Static faction relationship table. friendly→player is handled dynamically via alertLevel. */
+export const FACTION_RELATIONS: Record<Faction, Partial<Record<Faction, FactionRelation>>> = {
+  neutral:    {},
+  aggressive: { neutral: 'attack', friendly: 'attack', titan: 'attack', player: 'attack' },
+  friendly:   { aggressive: 'attack', titan: 'attack' }, // player: dynamic via alertLevel
+  titan:      { neutral: 'attack', aggressive: 'attack', friendly: 'attack', player: 'attack' },
+  player:     { aggressive: 'attack', titan: 'attack' },
+};
+
 export type AIState =
   | 'wander'     // random movement
   | 'patrol'     // follow waypoints (white_hat)
@@ -300,6 +353,7 @@ export type AIState =
   | 'rest'       // logic_leech: cooldown after charge
   | 'lockdown'   // gatekeeper: stay in place, and pull enemies
   | 'repair'     // repair_scrapper: moving toward / fixing a corrupted interactable
+  | 'hunt'       // titan_spawn: chase nearest entity of any faction
   ;
 
 export interface EntityAI {
@@ -410,6 +464,8 @@ export interface GameState {
   selfPanelRevealed: boolean;         // false until player interacts with tutorial echo (or skips cluster 0)
   smokeEffects: SmokeEffect[];        // transient death/dissolution smoke particles
   pendingGlitch?: string;             // set by game logic; consumed by main.ts to fire glitch effects
+  narrativeChoice?: 'purge' | 'preserve' | 'eject'; // final-room choice; shapes victory epilogue
+  firedTriggerIds: Set<string>;       // ids of once-only narrative triggers that have already fired
 }
 
 export interface GameMessage {
