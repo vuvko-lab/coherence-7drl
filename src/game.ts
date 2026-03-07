@@ -76,7 +76,7 @@ export function createGame(initialSeed?: number): GameState {
 
   const player: Entity = {
     id: 0x3A7F,
-    name: 'mesh id',
+    name: 'ego-fragment',
     glyph: '@',
     fg: '#00ff88',
     position: { ...entryPos },
@@ -194,12 +194,11 @@ function spawnClusterEntities(state: GameState, cluster: Cluster) {
       const { x: ix, y: iy } = iface.position;
       const nearby: Position[] = [];
       for (let dy2 = -3; dy2 <= 3; dy2++) {
-        for (let dx2 = -3; dx2 <= 3; dx2++) {
-          if (dx2 === 0 && dy2 === 0) continue;
-          const nx = ix + dx2, ny2 = iy + dy2;
-          if (nx < 0 || nx >= cluster.width || ny2 < 0 || ny2 >= cluster.height) continue;
-          const t = cluster.tiles[ny2]?.[nx];
-          if (t?.walkable && t.type !== TileType.InterfaceExit) nearby.push({ x: nx, y: ny2 });
+        for (let dx2 = -3; dx2 <= -1; dx2++) {
+          const nx2 = ix + dx2, ny2 = iy + dy2;
+          if (nx2 < 0 || nx2 >= cluster.width || ny2 < 0 || ny2 >= cluster.height) continue;
+          const t = cluster.tiles[ny2]?.[nx2];
+          if (t?.walkable && t.type !== TileType.InterfaceExit) nearby.push({ x: nx2, y: ny2 });
         }
       }
       nearby.sort(() => Math.random() - 0.5);
@@ -538,8 +537,10 @@ function tryMove(state: GameState, dx: number, dy: number): boolean {
   if (tile.type === TileType.InterfaceExit) {
     if (cluster.id === 0 && nx < 1) {
       addMessage(state, 'Infomorph sleeving facility. Status: [ERROR]', 'important');
-    } else {
+    } else if (nx < 1) {
       addMessage(state, 'Interface exit [CLOSED]. No way back now.', 'important');
+    } else {
+      addMessage(state, 'Interface exit located. Press `Enter` to transit.', 'important');
     }
   }
 

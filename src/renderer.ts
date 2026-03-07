@@ -580,7 +580,7 @@ export function renderSelfPanel(el: HTMLElement, player: Entity, debugMode = fal
     const indicator = isAlertActive ? '<span class="module-indicator"> ▲ </span>' : '';
     const baseStatusClass = mod.status === 'damaged' ? ' status-damaged' : mod.status === 'offline' ? ' status-offline' : '';
     const statusClass = baseStatusClass + extraClass + (isToggleActive ? ' status-active' : '');
-    const menuCursor = isSelected ? '<span class="module-cursor">›</span>' : '';
+    const menuCursor = '';
     return `<div class="module-row${activeClass}" data-module="${mod.id}">` +
       `${menuCursor}<span class="module-name stat-label">&gt; ${mod.id}</span>` +
       `${indicator}` +
