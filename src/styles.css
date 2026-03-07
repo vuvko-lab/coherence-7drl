@@ -171,13 +171,17 @@ body {
   50% { opacity: 0.5; }
 }
 
-#panel-self .module-row.module-row-selected {
+#panel-self .module-row.module-row-selected,
+#panel-self .module-row:hover {
   background: rgba(100, 180, 255, 0.08);
   outline: 1px solid rgba(100, 180, 255, 0.3);
+  cursor: pointer;
 }
 
 #panel-self .module-row.module-row-selected .module-name,
-#panel-self .module-row.module-row-selected .module-status {
+#panel-self .module-row.module-row-selected .module-status,
+#panel-self .module-row:hover .module-name,
+#panel-self .module-row:hover .module-status {
   color: #88ccff;
 }
 

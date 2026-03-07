@@ -1168,6 +1168,18 @@ function onModuleNav(dir: import('./input').ModuleNavDir) {
 const input = new InputHandler(onAction, onMapClick, toggleAim, onModuleNav);
 input.bind();
 
+// Wire up module row clicks in SELF panel
+panelEl.addEventListener('click', (e) => {
+  const row = (e.target as HTMLElement).closest<HTMLElement>('.module-row');
+  if (!row) return;
+  const moduleId = row.dataset.module;
+  const modules = state.player.modules ?? [];
+  const idx = modules.findIndex(m => m.id === moduleId);
+  if (idx === -1) return;
+  selectedModuleIdx = idx;
+  onModuleNav('activate');
+});
+
 // Wire up renderer click events
 renderer.onCellClick = (pos) => {
   input.handleMapClick(pos);
