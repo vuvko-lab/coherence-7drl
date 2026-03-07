@@ -9,7 +9,7 @@ const DIRS: Position[] = [
   { x: 1, y: 0 },
 ];
 
-export function findPath(cluster: Cluster, from: Position, to: Position): Position[] | null {
+export function findPath(cluster: Cluster, from: Position, to: Position, blocked?: Set<string>): Position[] | null {
   if (from.x === to.x && from.y === to.y) return [];
 
   const w = cluster.width;
@@ -47,6 +47,7 @@ export function findPath(cluster: Cluster, from: Position, to: Position): Positi
       if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
       const nk = key({ x: nx, y: ny });
       if (visited.has(nk)) continue;
+      if (blocked?.has(`${nx},${ny}`) && !(nx === to.x && ny === to.y)) continue;
       const tile = cluster.tiles[ny][nx];
       // Allow walking through walkable tiles and closed doors (player will bump-open them)
       if (!tile.walkable && tile.type !== TileType.Door) continue;

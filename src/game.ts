@@ -1246,6 +1246,26 @@ export function stepAutoPath(state: GameState): boolean {
     return false;
   }
 
+  // If a non-hostile entity occupies the next tile, reroute around all entities
+  const blockerEntity = state.entities.find(
+    e => e.clusterId === cluster.id && e.position.x === next.x && e.position.y === next.y
+  );
+  if (blockerEntity && FACTION_RELATIONS['player']?.[blockerEntity.ai?.faction ?? 'neutral'] !== 'attack') {
+    const dest = state.autoPath[state.autoPath.length - 1];
+    const entityBlocked = new Set(
+      state.entities
+        .filter(e => e.clusterId === cluster.id)
+        .map(e => `${e.position.x},${e.position.y}`)
+    );
+    const newPath = findPath(cluster, state.player.position, dest, entityBlocked);
+    if (newPath && newPath.length > 0) {
+      state.autoPath = newPath;
+    } else {
+      state.autoPath = [];
+    }
+    return false; // pause for one tick while rerouting
+  }
+
   const dx = next.x - state.player.position.x;
   const dy = next.y - state.player.position.y;
 
