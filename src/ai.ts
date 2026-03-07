@@ -191,6 +191,19 @@ function updateChronicler(state: GameState, entity: Entity, cluster: Cluster) {
 // ── Bit-Mite Swarm (aggressive) ──
 // Speed 12 (fast). Wanders (20% door bash) → chases any non-aggressive target → attacks adjacent
 
+function bitMiteAttack(state: GameState, entity: Entity, target: Entity) {
+  if (target.coherence !== undefined) {
+    target.coherence = Math.max(0, target.coherence - entity.attackValue);
+    addAiMessage(state, `Bit-Mite Swarm attacks ${target.name}! −${entity.attackValue} coherence. (${target.coherence}/${target.maxCoherence})`, 'combat');
+    if (target.coherence <= 0) {
+      addAiMessage(state, `Bit-Mite Swarm destroys ${target.name}!`, 'combat');
+      removeEntity(state, target);
+      entity.ai!.aiState = 'wander';
+      entity.ai!.targetId = undefined;
+    }
+  }
+}
+
 function updateBitMite(state: GameState, entity: Entity, cluster: Cluster) {
   const ai = entity.ai!;
 
@@ -239,12 +252,12 @@ function updateBitMite(state: GameState, entity: Entity, cluster: Cluster) {
         ai.lastTargetPos = { ...chaseTarget.position };
       }
 
-      // Adjacent attack
+      // Adjacent — attack immediately (no wasted state-transition turn)
       const dx = Math.abs(entity.position.x - chaseTarget.position.x);
       const dy = Math.abs(entity.position.y - chaseTarget.position.y);
       if (dx + dy <= 1) {
-        ai.aiState = 'attack';
-        return;
+        bitMiteAttack(state, entity, chaseTarget);
+        break;
       }
 
       // Lost sight — chase last known position then give up
@@ -274,22 +287,14 @@ function updateBitMite(state: GameState, entity: Entity, cluster: Cluster) {
       const dx = Math.abs(entity.position.x - attackTarget.position.x);
       const dy = Math.abs(entity.position.y - attackTarget.position.y);
       if (dx + dy > 1) {
+        // Target moved away — chase immediately instead of wasting turn
         ai.aiState = 'chase';
-        return;
+        ai.lastTargetPos = { ...attackTarget.position };
+        const step = stepToward(cluster, entity.position, attackTarget.position);
+        if (step) move(entity, cluster, step, state);
+        break;
       }
-      // Deal damage
-      if (attackTarget.coherence !== undefined) {
-        attackTarget.coherence = Math.max(0, attackTarget.coherence - entity.attackValue);
-        addAiMessage(state, `Bit-Mite Swarm attacks ${attackTarget.name}! −${entity.attackValue} coherence. (${attackTarget.coherence}/${attackTarget.maxCoherence})`, 'combat');
-        if (attackTarget.coherence <= 0) {
-          addAiMessage(state, `Bit-Mite Swarm destroys ${attackTarget.name}!`, 'combat');
-          removeEntity(state, attackTarget);
-          ai.aiState = 'wander';
-          ai.targetId = undefined;
-          return;
-        }
-      }
-      ai.aiState = 'chase';
+      bitMiteAttack(state, entity, attackTarget);
       break;
     }
   }
@@ -298,11 +303,36 @@ function updateBitMite(state: GameState, entity: Entity, cluster: Cluster) {
 // ── Logic Leech (aggressive) ──
 // Speed 30. Hugs walls → spots non-aggressive target → invisible stalk 3t → cardinal charge → rest 6t
 
+function leechMeleeAttack(state: GameState, entity: Entity, target: Entity): boolean {
+  if (target.coherence === undefined) return false;
+  target.coherence = Math.max(0, target.coherence - entity.attackValue);
+  addAiMessage(state, `Logic Leech strikes ${target.name}! −${entity.attackValue} coherence. (${target.coherence}/${target.maxCoherence})`, 'combat');
+  if (target.coherence <= 0) {
+    addAiMessage(state, `Logic Leech destroys ${target.name}!`, 'combat');
+    removeEntity(state, target);
+  }
+  return true;
+}
+
+/** Check if leech is adjacent to an attack target and melee if so. Returns true if attacked. */
+function leechTryMelee(state: GameState, entity: Entity, cluster: Cluster): boolean {
+  const target = findAttackTarget(state, entity, cluster);
+  if (!target) return false;
+  const dx = Math.abs(entity.position.x - target.position.x);
+  const dy = Math.abs(entity.position.y - target.position.y);
+  if (dx + dy > 1) return false;
+  leechMeleeAttack(state, entity, target);
+  return true;
+}
+
 function updateLogicLeech(state: GameState, entity: Entity, cluster: Cluster) {
   const ai = entity.ai!;
 
   switch (ai.aiState) {
     case 'wall_walk': {
+      // Adjacent target — melee attack immediately
+      if (leechTryMelee(state, entity, cluster)) break;
+
       const target = findAttackTarget(state, entity, cluster);
       if (target) {
         ai.targetId = target.id;
@@ -393,6 +423,9 @@ function updateLogicLeech(state: GameState, entity: Entity, cluster: Cluster) {
     }
 
     case 'rest': {
+      // Adjacent target — melee attack even during rest
+      if (leechTryMelee(state, entity, cluster)) break;
+
       ai.actionCooldown = (ai.actionCooldown ?? 1) - 1;
       if ((ai.actionCooldown ?? 0) <= 0) {
         ai.aiState = 'wall_walk';
@@ -406,6 +439,22 @@ function updateLogicLeech(state: GameState, entity: Entity, cluster: Cluster) {
 // ── Sentry (friendly) ──
 // Speed 20. Patrols room, 10% chance to switch to adjacent room.
 // Attacks aggressive+titan entities; attacks player when alertLevel >= ALERT_ENEMY.
+
+function sentryAttack(state: GameState, entity: Entity, target: Entity) {
+  if (target.coherence !== undefined) {
+    target.coherence = Math.max(0, target.coherence - entity.attackValue);
+    addAiMessage(state, `Sentry strikes ${target.name}! −${entity.attackValue}. (${target.coherence} left)`, 'combat');
+    shootingAnimation(state, entity.position, target.position, 'single');
+    if (target.coherence <= 0) {
+      addAiMessage(state, `Sentry destroys ${target.name}!`, 'combat');
+      removeEntity(state, target);
+      entity.ai!.aiState = 'patrol';
+      entity.ai!.targetId = undefined;
+      return;
+    }
+  }
+  entity.ai!.aiState = 'chase';
+}
 
 function updateSentry(state: GameState, entity: Entity, cluster: Cluster) {
   const ai = entity.ai!;
@@ -456,12 +505,13 @@ function updateSentry(state: GameState, entity: Entity, cluster: Cluster) {
         state.markedEntities.add(target.id);
       }
 
-      // Adjacent attack
+      // In range — attack immediately instead of wasting a turn on state transition
       const dx = Math.abs(entity.position.x - target.position.x);
       const dy = Math.abs(entity.position.y - target.position.y);
-      if (dx * dx + dy * dy <= entity.attackDistance * entity.attackDistance) {
-        ai.aiState = 'attack';
-        return;
+      if (dx * dx + dy * dy <= entity.attackDistance * entity.attackDistance
+          && canSee(cluster, entity.position, target.position, entity.attackDistance, 0)) {
+        sentryAttack(state, entity, target);
+        break;
       }
 
       const dest = ai.lastTargetPos ?? target.position;
@@ -478,28 +528,16 @@ function updateSentry(state: GameState, entity: Entity, cluster: Cluster) {
       }
       const dx = Math.abs(entity.position.x - target.position.x);
       const dy = Math.abs(entity.position.y - target.position.y);
-      if (dx * dx + dy * dy > entity.attackDistance * entity.attackDistance) {
+      if (dx * dx + dy * dy > entity.attackDistance * entity.attackDistance
+          || !canSee(cluster, entity.position, target.position, entity.attackDistance, 0)) {
+        // Target out of range or LOS — chase immediately
         ai.aiState = 'chase';
-        return;
+        ai.lastTargetPos = { ...target.position };
+        const step = stepToward(cluster, entity.position, target.position);
+        if (step) move(entity, cluster, step, state);
+        break;
       }
-      // Require clear LOS (wallPen=0) to fire — cannot shoot through walls or closed doors
-      if (!canSee(cluster, entity.position, target.position, entity.attackDistance, 0)) {
-        ai.aiState = 'chase';
-        return;
-      }
-      if (target.coherence !== undefined) {
-        target.coherence = Math.max(0, target.coherence - entity.attackValue);
-        addAiMessage(state, `Sentry strikes ${target.name}! −${entity.attackValue}. (${target.coherence} left)`, 'combat');
-        shootingAnimation(state, entity.position, target.position, 'single');
-        if (target.coherence <= 0) {
-          addAiMessage(state, `Sentry destroys ${target.name}!`, 'combat');
-          removeEntity(state, target);
-          ai.aiState = 'patrol';
-          ai.targetId = undefined;
-          return;
-        }
-      }
-      ai.aiState = 'chase';
+      sentryAttack(state, entity, target);
       break;
     }
   }

@@ -343,19 +343,22 @@ function clusterDamageScale(clusterId: number): number {
 const NOISE_SCALE       = 0.13;  // ← tune feature size here
 const NOISE_OCTAVES     = 3;     // ← tune spikiness here
 const NOISE_PERSISTENCE = 0.65;  // ← tune octave weight here
-const NOISE_CONTRAST    = 2.0;   // ← tune peak sharpness here (1.0 = off)
+const NOISE_CONTRAST_BASE = 2.0;  // ← contrast at cluster 0 (high = safe, squashes values down)
+const NOISE_CONTRAST_MIN  = 1.2;  // ← contrast at cluster 5 (low = more spread into HIGH/EXTREME)
 
 function generateCollapseMap(clusterId: number): number[][] {
   initNoise();
   const offsetX = clusterId * CLUSTER_WIDTH;
   const scale = clusterDamageScale(clusterId);
+  // Reduce contrast for later clusters so HIGH/EXTREME tiers become reachable
+  const contrast = NOISE_CONTRAST_BASE - (NOISE_CONTRAST_BASE - NOISE_CONTRAST_MIN) * Math.min(1.0, clusterId / 5);
   const map: number[][] = [];
   for (let y = 0; y < _activeH; y++) {
     map[y] = [];
     for (let x = 0; x < _activeW; x++) {
       const raw = collapseNoise(x + offsetX, y, NOISE_SCALE, NOISE_OCTAVES, NOISE_PERSISTENCE);
       // Apply contrast curve to create sharp peaks, then scale by cluster damage level
-      map[y][x] = Math.min(1.0, Math.pow(raw, NOISE_CONTRAST) * scale);
+      map[y][x] = Math.min(1.0, Math.pow(raw, contrast) * scale);
     }
   }
   return map;
@@ -402,10 +405,10 @@ function weightedPick(pool: HazardTier): RoomType {
 }
 
 function hazardTierForCollapse(c: number, clusterId = 0): HazardTier {
-  if (c < 0.3) return TIER_SAFE;
-  if (c < 0.5) return TIER_LOW;
-  if (c < 0.7) return TIER_MID;
-  if (c < 0.85) {
+  if (c < 0.1) return TIER_SAFE;
+  if (c < 0.3) return TIER_LOW;
+  if (c < 0.5) return TIER_MID;
+  if (c < 0.6) {
     // Clusters 4+: corruption can appear at HIGH collapse tier
     if (clusterId >= 4) return [...TIER_HIGH, { type: 'corrupted' as RoomType, weight: 1 }];
     return TIER_HIGH;
@@ -425,11 +428,10 @@ function assignHazardsByCollapse(allRooms: Room[], clusterId = 0) {
     .sort((a, b) => b.collapse - a.collapse);
 
   let hazardCount = 0;
-  const MAX_HAZARDS = 4;
-  const usedTypes = new Set<RoomType>();
+  const maxHazards = Math.max(1, Math.floor(allRooms.length * 0.25));
 
   for (const room of sorted) {
-    if (hazardCount >= MAX_HAZARDS) break;
+    if (hazardCount >= maxHazards) break;
 
     const isHall = room.tags.geometric.has('hall');
     const interior = isHall ? room.w * room.h : (room.w - 2) * (room.h - 2);
@@ -446,12 +448,7 @@ function assignHazardsByCollapse(allRooms: Room[], clusterId = 0) {
     const tier = hazardTierForCollapse(room.collapse, clusterId);
     if (tier.length === 0) continue;
 
-    // Filter out already-used types
-    const available = tier.filter(e => !usedTypes.has(e.type));
-    if (available.length === 0) continue;
-
-    const type = weightedPick(available);
-    usedTypes.add(type);
+    const type = weightedPick(tier);
     room.roomType = type;
     hazardCount++;
   }
@@ -2345,28 +2342,28 @@ function placeCorruptionRitual(tiles: Tile[][], rooms: Room[], interactables: In
 }
 
 function placeScenarios(tiles: Tile[][], rooms: Room[], interactables: Interactable[], clusterId: number) {
-  // Stuck Echo: clusters 2-3
-  if (clusterId >= 2 && clusterId <= 3) {
+  // Stuck Echo: clusters 1-3
+  if (clusterId >= 1 && clusterId <= 3) {
     placeStuckEcho(tiles, rooms, interactables);
   }
-  // Spooky Astronauts: clusters 3-4
-  if (clusterId >= 3 && clusterId <= 4) {
+  // Spooky Astronauts: clusters 2-4
+  if (clusterId >= 2 && clusterId <= 4) {
     if (random() < 0.7) placeSpookyAstronauts(tiles, rooms);
   }
-  // Broken Sleever: clusters 3-4
-  if (clusterId >= 3 && clusterId <= 4) {
+  // Broken Sleever: clusters 2-4
+  if (clusterId >= 2 && clusterId <= 4) {
     if (random() < 0.6) placeBrokenSleever(tiles, rooms);
   }
-  // Whispering Wall: clusters 2+
-  if (clusterId >= 2) {
+  // Whispering Wall: clusters 1+
+  if (clusterId >= 1) {
     if (random() < 0.6) placeWhisperingWall(tiles, rooms, interactables);
   }
-  // Lost Expedition: clusters 2+
-  if (clusterId >= 2) {
+  // Lost Expedition: clusters 1+
+  if (clusterId >= 1) {
     if (random() < 0.5) placeLostExpedition(tiles, rooms, interactables);
   }
-  // Silent Alarm: clusters 3+
-  if (clusterId >= 3) {
+  // Silent Alarm: clusters 2+
+  if (clusterId >= 2) {
     if (random() < 0.4) placeSilentAlarm(rooms);
   }
   // Corruption Ritual: clusters 3 and 5
@@ -2451,6 +2448,18 @@ export function generateCluster(id: number): Cluster {
   // Place terminals in eligible rooms (must happen after functional tag assignment)
   const terminals = placeTerminals(tiles, allRooms, id, doorAdjacency);
 
+  // Clusters 4-5: force key terminal room to be quarantine
+  if (id >= 4) {
+    const keyTerminal = terminals.find(t => t.hasKey);
+    if (keyTerminal) {
+      const keyRoom = allRooms.find(r => r.id === keyTerminal.roomId);
+      if (keyRoom && keyRoom.roomType !== 'quarantine') {
+        keyRoom.roomType = 'quarantine';
+        initRoomHazards(tiles, [keyRoom]);
+      }
+    }
+  }
+
   // Place interactable elements (info terminals, lost echos, archive echos)
   const interactables = placeInteractables(tiles, allRooms, id, terminals);
 
@@ -2461,8 +2470,8 @@ export function generateCluster(id: number): Cluster {
   // Tutorial zone: cluster 0 gets a fixed narrative terminal and lost echo near entry
   if (id === 0) placeTutorialEntities(tiles, interactables);
 
-  // Room scenarios: thematic vignettes for clusters 2+
-  if (id >= 2) placeScenarios(tiles, allRooms, interactables, id);
+  // Room scenarios: thematic vignettes for clusters 1+
+  if (id >= 1) placeScenarios(tiles, allRooms, interactables, id);
 
   const cluster: Cluster = { id, width: CLUSTER_WIDTH, height: CLUSTER_HEIGHT, tiles, rooms: allRooms, interfaces, wallAdjacency, doorAdjacency, collapseMap, terminals, interactables, exitLocked: true };
 

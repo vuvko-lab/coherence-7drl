@@ -162,6 +162,7 @@ export interface ScenarioState {
   triggered?: boolean;          // one-shot event has fired
   lastMessageTick?: number;     // throttle log messages
   pendingProps?: ScenarioPropDef[]; // prop entities to spawn on first visit
+  microEventFired?: boolean;    // micro-event already triggered for this room
 }
 
 export interface Room {

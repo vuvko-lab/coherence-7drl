@@ -905,8 +905,134 @@ export function updateHazards(state: GameState) {
 }
 
 /** Called when player moves to a new room */
+// ── Micro-events (clusters 2+, once per room) ──
+
+const MICRO_EVENT_CHANCE = 0.25; // 25% chance per room entry
+
+function tryFireMicroEvent(state: GameState, cluster: Cluster, room: Room) {
+  if (cluster.id < 2) return;
+  room.scenarioState ??= {};
+  if (room.scenarioState.microEventFired) return;
+  if (random() > MICRO_EVENT_CHANCE) return;
+
+  room.scenarioState.microEventFired = true;
+
+  const events = [
+    'door_slam', 'log_spam', 'light_flicker', 'entity_despawn',
+    'false_radar', 'hud_glitch', 'map_distortion', 'distant_scream',
+    'entity_teleport', 'footsteps',
+  ];
+  const pick = events[Math.floor(random() * events.length)];
+
+  if (state.debugMode) {
+    addMessage(state, `[DEBUG] Micro-event: ${pick} (room ${room.id})`, 'system');
+  }
+
+  switch (pick) {
+    case 'door_slam': {
+      // Close a random open door in or adjacent to the room
+      for (let y = room.y; y < room.y + room.h; y++) {
+        for (let x = room.x; x < room.x + room.w; x++) {
+          const tile = cluster.tiles[y]?.[x];
+          if (tile?.type === TileType.Door && tile.doorOpen) {
+            tile.doorOpen = false;
+            tile.walkable = false;
+            tile.transparent = false;
+            tile.glyph = '+';
+            addMessage(state, 'A door slams shut nearby.', 'system');
+            return;
+          }
+        }
+      }
+      // Fallback: just a message
+      addMessage(state, 'You hear a distant door slam.', 'system');
+      break;
+    }
+    case 'log_spam': {
+      const spamLines = [
+        '...PROCESS OVERFLOW — STACK CORRUPTED...',
+        '>>>ERR: MEMORY ADDR 0x7FFF OUT OF RANGE<<<',
+        '...unauthorized read attempt blocked...',
+        'WARN: ego-boundary integrity check FAILED',
+        '...fragment detected in sector [REDACTED]...',
+      ];
+      const count = randInt(3, 5);
+      for (let i = 0; i < count; i++) {
+        addMessage(state, spamLines[Math.floor(random() * spamLines.length)], 'system');
+      }
+      break;
+    }
+    case 'light_flicker':
+      state.pendingGlitch = 'flicker';
+      break;
+    case 'entity_despawn': {
+      const roomEntities = state.entities.filter(
+        e => e.clusterId === cluster.id && e.id !== state.player.id && posInRoom(e.position, room)
+      );
+      if (roomEntities.length > 0) {
+        const target = roomEntities[Math.floor(random() * roomEntities.length)];
+        target.coherence = 0;
+        addMessage(state, `${target.name} destabilises and vanishes.`, 'system');
+        state.smokeEffects.push({
+          x: target.position.x, y: target.position.y,
+          fg: '#aaaa66', spawnTime: performance.now(),
+        });
+      }
+      break;
+    }
+    case 'false_radar':
+      addMessage(state, 'alert.m: THREAT DETECTED — motion signature in adjacent sector.', 'alert');
+      addMessage(state, 'alert.m: ...signal lost. Possible false positive.', 'alert');
+      break;
+    case 'hud_glitch':
+      state.pendingGlitch = 'shake';
+      break;
+    case 'map_distortion':
+      state.pendingGlitch = 'tear';
+      break;
+    case 'distant_scream': {
+      const screams = [
+        '...a distorted cry echoes through the substrate.',
+        'Something screams in a register you cannot parse.',
+        'A sound like tearing data echoes from deeper in the ship.',
+        '...a voice, already fading: "—not like this—"',
+      ];
+      addMessage(state, screams[Math.floor(random() * screams.length)], 'hazard');
+      break;
+    }
+    case 'entity_teleport': {
+      const roomEntities = state.entities.filter(
+        e => e.clusterId === cluster.id && e.id !== state.player.id && posInRoom(e.position, room)
+      );
+      if (roomEntities.length > 0) {
+        const target = roomEntities[Math.floor(random() * roomEntities.length)];
+        // Find a random walkable tile in the room
+        const { x1, y1, x2, y2 } = roomInterior(room);
+        for (let attempt = 0; attempt < 20; attempt++) {
+          const nx = randInt(x1, x2);
+          const ny = randInt(y1, y2);
+          const tile = cluster.tiles[ny]?.[nx];
+          if (tile?.walkable && !(nx === state.player.position.x && ny === state.player.position.y)) {
+            target.position = { x: nx, y: ny };
+            addMessage(state, `${target.name} flickers and relocates.`, 'system');
+            break;
+          }
+        }
+      }
+      break;
+    }
+    case 'footsteps':
+      addMessage(state, 'Something moves nearby...', 'system');
+      break;
+  }
+}
+
 export function onPlayerEnterRoom(state: GameState, room: Room) {
   if (state.invisibleMode) return; // player doesn't trigger room events
+
+  // Micro-events (ambient dread, clusters 2+)
+  const cluster = state.clusters.get(state.currentClusterId);
+  if (cluster) tryFireMicroEvent(state, cluster, room);
 
   // Hazard-type entry hooks
   switch (room.roomType) {
@@ -958,6 +1084,25 @@ export function getPlayerRoom(state: GameState): Room | undefined {
   return playerRoom(state, cluster);
 }
 
+/** Pure damage lookup for a hazard overlay (no state mutation). */
+export function tileHazardDamage(overlay: { type: string; stage?: number } | undefined): number {
+  if (!overlay) return 0;
+  switch (overlay.type) {
+    case 'corruption':
+      if (overlay.stage === 0) return 1;
+      if (overlay.stage === 1) return 3;
+      return 0; // collapsed — impassable
+    case 'flood':
+      if (overlay.stage === 0) return 1;
+      return 2;
+    case 'gravity':
+      if (overlay.stage === 2) return 5;
+      return 0;
+    default:
+      return 0;
+  }
+}
+
 /** Apply per-tile hazard damage for standing on hazard tiles */
 export function applyTileHazardToPlayer(state: GameState) {
   if (state.invisibleMode) return; // player doesn't exist on the map
@@ -965,31 +1110,8 @@ export function applyTileHazardToPlayer(state: GameState) {
   if (!cluster) return;
 
   const { x, y } = state.player.position;
-  const overlay = cluster.tiles[y]?.[x]?.hazardOverlay;
-  if (!overlay) return;
-
-  switch (overlay.type) {
-    case 'corruption':
-      if (overlay.stage === 0) {
-        damageCoherence(state, 1);
-      } else if (overlay.stage === 1) {
-        damageCoherence(state, 3);
-      }
-      break;
-    case 'flood':
-      if (overlay.stage === 0) {
-        damageCoherence(state, 1);
-      } else {
-        damageCoherence(state, 2);
-      }
-      break;
-    case 'gravity':
-      if (overlay.stage === 2) {
-        damageCoherence(state, 5);
-      }
-      break;
-    // spark and collapse damage handled in their update functions
-  }
+  const dmg = tileHazardDamage(cluster.tiles[y]?.[x]?.hazardOverlay);
+  if (dmg > 0) damageCoherence(state, dmg);
 }
 
 // ── Alert flood-fill ──

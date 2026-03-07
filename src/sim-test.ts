@@ -10,10 +10,13 @@
  *   npx tsx src/sim-test.ts --ticks 150   # longer simulation
  */
 
-import { writeFileSync } from 'fs';
+import { writeFileSync, mkdirSync } from 'fs';
 import { createGame, processAction, sampleEntitySpawn, adminTeleportToCluster } from './game';
 import { findPath } from './pathfinding';
-import { Cluster, Position, TileType, HazardOverlayType, RoomType } from './types';
+import { generateCluster } from './cluster';
+import { seed as seedRng } from './rng';
+import { tileHazardDamage } from './hazards';
+import { Cluster, Position, TileType, HazardOverlayType, RoomType, RoomScenario, Faction } from './types';
 import type { GameState } from './types';
 
 // ── Constants ──
@@ -29,7 +32,7 @@ const getArg = (flag: string, def: number) => {
 };
 
 const SEED_COUNT = getArg('--seeds', 50);
-const TOTAL_TICKS = getArg('--ticks', 100);
+const TOTAL_TICKS = getArg('--ticks', 250);
 const SNAPSHOT_INTERVAL = 10;
 const CLUSTER_ID = getArg('--cluster', 0); // used for per-seed table
 const ALL_CLUSTER_IDS = [0, 1, 2, 3, 4, 5];
@@ -66,6 +69,8 @@ interface SimSnapshot {
   floodLevel: number;           // max floodLevel across all memory_leak rooms
   walkableTiles: number;
   totalTiles: number;
+  // Faction entity counts
+  factionCounts: Record<Faction, number>;
 }
 
 interface SeedResult {
@@ -220,29 +225,8 @@ function getExitPositions(cluster: Cluster): Position[] {
     .map(i => i.position);
 }
 
-// ── Tile hazard damage (mirrors applyTileHazardToPlayer without mutating state) ──
-
-function tileDamage(cluster: Cluster, pos: Position): number {
-  const overlay = cluster.tiles[pos.y]?.[pos.x]?.hazardOverlay;
-  if (!overlay) return 0;
-  switch (overlay.type) {
-    case 'corruption':
-      if (overlay.stage === 0) return 1;
-      if (overlay.stage === 1) return 3;
-      return 0; // collapsed — path shouldn't cross these
-    case 'flood':
-      if (overlay.stage === 0) return 1;
-      return 2;
-    case 'gravity':
-      if (overlay.stage === 2) return 5;
-      return 0;
-    default:
-      return 0;
-  }
-}
-
 function computePathDamage(cluster: Cluster, path: Position[]): number {
-  return path.reduce((sum, pos) => sum + tileDamage(cluster, pos), 0);
+  return path.reduce((sum, pos) => sum + tileHazardDamage(cluster.tiles[pos.y]?.[pos.x]?.hazardOverlay), 0);
 }
 
 // ── Snapshot extraction ──
@@ -366,6 +350,14 @@ function snapshotCluster(
     }
   }
 
+  // Faction entity counts
+  const factionCounts: Record<Faction, number> = { neutral: 0, aggressive: 0, friendly: 0, titan: 0, player: 0 };
+  for (const e of state.entities) {
+    if (e.clusterId !== clusterId) continue;
+    const faction = e.ai?.faction ?? 'neutral';
+    if (faction in factionCounts) factionCounts[faction]++;
+  }
+
   // Diagnostic: max flood level across all memory_leak rooms
   let floodLevel = 0;
   for (const room of cluster.rooms) {
@@ -392,6 +384,7 @@ function snapshotCluster(
     floodLevel,
     walkableTiles,
     totalTiles,
+    factionCounts,
   };
 }
 
@@ -484,6 +477,188 @@ const RESET = '\x1b[0m';
 
 
 function critical(msg: string) { console.log(`${BOLD}${RED}[CRITICAL] ${msg}${RESET}`); }
+
+// ── Plot generation ──
+
+function generatePlots(
+  allClusterResults: Map<number, SeedResult[]>,
+  hazardData: Map<number, Record<string, number>>,
+  hazardRoomCounts: Map<number, number>,
+  scenarioData: Map<number, Record<string, number>>,
+  factionTimeData: Map<number, Map<number, Record<string, number>>>,
+) {
+  const COLORS = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e67e22', '#34495e'];
+  const W = 800, H = 320, PAD = { top: 40, right: 20, bottom: 60, left: 50 };
+
+  function barChart(title: string, categories: string[], series: { label: string; values: number[]; color: string }[], threshold?: { value: number; label: string }): string {
+    const maxVal = Math.max(1, ...series.flatMap(s => s.values));
+    const plotW = W - PAD.left - PAD.right;
+    const plotH = H - PAD.top - PAD.bottom;
+    const groupW = plotW / categories.length;
+    const barW = Math.min(groupW * 0.7 / series.length, 30);
+    let svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg" style="background:#1a1a2e;border-radius:8px;margin:8px">`;
+    svg += `<text x="${W/2}" y="24" text-anchor="middle" fill="#e0e0e0" font-size="14" font-weight="bold">${title}</text>`;
+    // Y axis
+    for (let i = 0; i <= 4; i++) {
+      const y = PAD.top + plotH - (i / 4) * plotH;
+      const val = (maxVal * i / 4).toFixed(1);
+      svg += `<line x1="${PAD.left}" y1="${y}" x2="${W-PAD.right}" y2="${y}" stroke="#333" stroke-width="0.5"/>`;
+      svg += `<text x="${PAD.left-4}" y="${y+4}" text-anchor="end" fill="#888" font-size="10">${val}</text>`;
+    }
+    // Bars
+    for (let ci = 0; ci < categories.length; ci++) {
+      const gx = PAD.left + ci * groupW + (groupW - barW * series.length) / 2;
+      for (let si = 0; si < series.length; si++) {
+        const val = series[si].values[ci] ?? 0;
+        const barH = (val / maxVal) * plotH;
+        const x = gx + si * barW;
+        const y = PAD.top + plotH - barH;
+        svg += `<rect x="${x}" y="${y}" width="${barW-1}" height="${barH}" fill="${series[si].color}" opacity="0.85"/>`;
+        if (barH > 12) svg += `<text x="${x+barW/2}" y="${y+12}" text-anchor="middle" fill="white" font-size="9">${val.toFixed(1)}</text>`;
+      }
+      svg += `<text x="${PAD.left + ci * groupW + groupW/2}" y="${H-PAD.bottom+14}" text-anchor="middle" fill="#aaa" font-size="10" transform="rotate(-25, ${PAD.left + ci * groupW + groupW/2}, ${H-PAD.bottom+14})">${categories[ci]}</text>`;
+    }
+    // Threshold line
+    if (threshold) {
+      const y = PAD.top + plotH - (threshold.value / maxVal) * plotH;
+      svg += `<line x1="${PAD.left}" y1="${y}" x2="${W-PAD.right}" y2="${y}" stroke="#ff6b6b" stroke-width="1.5" stroke-dasharray="6,3"/>`;
+      svg += `<text x="${W-PAD.right-4}" y="${y-4}" text-anchor="end" fill="#ff6b6b" font-size="10">${threshold.label}</text>`;
+    }
+    // Legend
+    const legendY = H - 12;
+    for (let si = 0; si < series.length; si++) {
+      const lx = PAD.left + si * 100;
+      svg += `<rect x="${lx}" y="${legendY-8}" width="10" height="10" fill="${series[si].color}"/>`;
+      svg += `<text x="${lx+14}" y="${legendY}" fill="#aaa" font-size="10">${series[si].label}</text>`;
+    }
+    svg += '</svg>';
+    return svg;
+  }
+
+  function lineChart(title: string, xLabels: number[], series: { label: string; values: number[]; color: string }[], threshold?: { value: number; label: string }): string {
+    const maxVal = Math.max(1, ...series.flatMap(s => s.values));
+    const plotW = W - PAD.left - PAD.right;
+    const plotH = H - PAD.top - PAD.bottom;
+    let svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg" style="background:#1a1a2e;border-radius:8px;margin:8px">`;
+    svg += `<text x="${W/2}" y="24" text-anchor="middle" fill="#e0e0e0" font-size="14" font-weight="bold">${title}</text>`;
+    // Grid
+    for (let i = 0; i <= 4; i++) {
+      const y = PAD.top + plotH - (i / 4) * plotH;
+      svg += `<line x1="${PAD.left}" y1="${y}" x2="${W-PAD.right}" y2="${y}" stroke="#333" stroke-width="0.5"/>`;
+      svg += `<text x="${PAD.left-4}" y="${y+4}" text-anchor="end" fill="#888" font-size="10">${(maxVal * i / 4).toFixed(1)}</text>`;
+    }
+    // X labels
+    for (let i = 0; i < xLabels.length; i++) {
+      const x = PAD.left + (i / Math.max(1, xLabels.length - 1)) * plotW;
+      svg += `<text x="${x}" y="${H-PAD.bottom+14}" text-anchor="middle" fill="#aaa" font-size="10">${xLabels[i]}</text>`;
+    }
+    // Lines
+    for (const s of series) {
+      const points = s.values.map((v, i) => {
+        const x = PAD.left + (i / Math.max(1, xLabels.length - 1)) * plotW;
+        const y = PAD.top + plotH - (v / maxVal) * plotH;
+        return `${x},${y}`;
+      }).join(' ');
+      svg += `<polyline points="${points}" fill="none" stroke="${s.color}" stroke-width="2"/>`;
+      // Dots
+      for (let i = 0; i < s.values.length; i++) {
+        const x = PAD.left + (i / Math.max(1, xLabels.length - 1)) * plotW;
+        const y = PAD.top + plotH - (s.values[i] / maxVal) * plotH;
+        svg += `<circle cx="${x}" cy="${y}" r="3" fill="${s.color}"/>`;
+      }
+    }
+    // Threshold
+    if (threshold) {
+      const y = PAD.top + plotH - (threshold.value / maxVal) * plotH;
+      svg += `<line x1="${PAD.left}" y1="${y}" x2="${W-PAD.right}" y2="${y}" stroke="#ff6b6b" stroke-width="1.5" stroke-dasharray="6,3"/>`;
+      svg += `<text x="${W-PAD.right-4}" y="${y-4}" text-anchor="end" fill="#ff6b6b" font-size="10">${threshold.label}</text>`;
+    }
+    // Legend
+    const legendY = H - 12;
+    for (let si = 0; si < series.length; si++) {
+      const lx = PAD.left + si * 100;
+      svg += `<rect x="${lx}" y="${legendY-8}" width="10" height="10" fill="${series[si].color}"/>`;
+      svg += `<text x="${lx+14}" y="${legendY}" fill="#aaa" font-size="10">${series[si].label}</text>`;
+    }
+    svg += '</svg>';
+    return svg;
+  }
+
+  let html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Sim-Test Plots</title>
+<style>body{background:#0d0d1a;color:#e0e0e0;font-family:monospace;padding:20px}h1,h2{color:#7ec8e3}svg{display:inline-block;vertical-align:top}</style></head><body>
+<h1>Coherence Sim-Test Plots</h1><p>Generated: ${new Date().toISOString()} | Seeds: ${SEED_COUNT} | Ticks: ${TOTAL_TICKS}</p>`;
+
+  // 1. Hazard room type distribution per cluster
+  html += '<h2>Hazard Room Types (avg per cluster)</h2>';
+  const HAZARD_TYPES: RoomType[] = ['corrupted', 'trigger_trap', 'memory_leak', 'firewall', 'unstable', 'quarantine', 'echo_chamber', 'gravity_well'];
+  for (const cid of ALL_CLUSTER_IDS) {
+    const counts = hazardData.get(cid);
+    if (!counts) continue;
+    const nSeeds = SEED_COUNT;
+    html += barChart(
+      `Cluster ${cid} Hazard Rooms (avg of ${nSeeds} seeds)`,
+      HAZARD_TYPES.map(h => h.replace('_', ' ')),
+      [{ label: 'count', values: HAZARD_TYPES.map(h => (counts[h] ?? 0) / nSeeds), color: COLORS[0] }],
+    );
+  }
+
+  // 2. Scenario generation rates
+  html += '<h2>Room Scenario Generation Rates (clusters 1+)</h2>';
+  const ALL_SCENARIOS: RoomScenario[] = ['stuck_echo', 'spooky_astronauts', 'broken_sleever', 'whispering_wall', 'lost_expedition', 'silent_alarm', 'corruption_ritual'];
+  for (const cid of ALL_CLUSTER_IDS) {
+    if (cid < 1) continue;
+    const counts = scenarioData.get(cid);
+    if (!counts) continue;
+    html += barChart(
+      `Cluster ${cid} Scenarios (% of seeds)`,
+      ALL_SCENARIOS.map(s => s.replace('_', ' ')),
+      [{ label: '% seeds', values: ALL_SCENARIOS.map(s => ((counts[s] ?? 0) / SEED_COUNT) * 100), color: COLORS[1] }],
+      { value: 50, label: '50% target' },
+    );
+  }
+
+  // 3. Faction balance over time
+  html += '<h2>Faction Balance Over Time</h2>';
+  const FACTIONS_PLOT: Faction[] = ['neutral', 'aggressive', 'friendly', 'titan'];
+  const factionColors: Record<string, string> = { neutral: '#95a5a6', aggressive: '#e74c3c', friendly: '#2ecc71', titan: '#9b59b6' };
+  for (const cid of ALL_CLUSTER_IDS) {
+    const tickData = factionTimeData.get(cid);
+    if (!tickData || tickData.size === 0) continue;
+    const ticks = [...tickData.keys()].sort((a, b) => a - b);
+    html += lineChart(
+      `Cluster ${cid} Faction Counts Over Time`,
+      ticks,
+      FACTIONS_PLOT.map(f => ({
+        label: f,
+        values: ticks.map(t => tickData.get(t)?.[f] ?? 0),
+        color: factionColors[f],
+      })),
+    );
+  }
+
+  // 4. Aggressive-Friendly diff over time
+  html += '<h2>Aggressive - Friendly Difference Over Time</h2>';
+  for (const cid of ALL_CLUSTER_IDS) {
+    const tickData = factionTimeData.get(cid);
+    if (!tickData || tickData.size === 0) continue;
+    const ticks = [...tickData.keys()].sort((a, b) => a - b);
+    html += lineChart(
+      `Cluster ${cid} |Aggressive - Friendly|`,
+      ticks,
+      [{ label: 'diff', values: ticks.map(t => {
+        const d = tickData.get(t);
+        return Math.abs((d?.aggressive ?? 0) - (d?.friendly ?? 0));
+      }), color: '#f39c12' }],
+      { value: 3, label: 'target ≤ 3' },
+    );
+  }
+
+  html += '</body></html>';
+
+  mkdirSync('sim-plots', { recursive: true });
+  writeFileSync('sim-plots/index.html', html, 'utf8');
+  console.log(`\nPlots written to sim-plots/index.html`);
+}
 
 // ── Main ──
 
@@ -842,6 +1017,170 @@ async function main() {
     console.log(`  ${hilight}${row}${RESET}`);
   }
   console.log('  (values = avg count spawned per cluster; 0 expected for clusters 0 and 1)\n');
+
+  // ── Hazard Room Type Analysis ──
+  console.log(`\n${BOLD}=== Hazard Room Type Analysis (${SEED_COUNT} seeds each cluster) ===${RESET}`);
+  const HAZARD_TYPES: RoomType[] = ['corrupted', 'trigger_trap', 'memory_leak', 'firewall', 'unstable', 'quarantine', 'echo_chamber', 'gravity_well'];
+  const plotHazardData: Map<number, Record<string, number>> = new Map();
+  const plotHazardRoomCounts: Map<number, number> = new Map();
+  {
+    const hColW = 10;
+    const hHeader = ['cluster'.padEnd(9), 'rooms'.padEnd(6), ...HAZARD_TYPES.map(h => h.slice(0, hColW - 1).padEnd(hColW))].join(' ');
+    console.log('  ' + hHeader);
+    console.log('  ' + '-'.repeat(hHeader.length));
+
+    for (const cid of ALL_CLUSTER_IDS) {
+      const typeCounts: Record<string, number> = {};
+      for (const h of HAZARD_TYPES) typeCounts[h] = 0;
+      let totalRooms = 0;
+
+      const origLog = console.log;
+      console.log = () => {};
+      for (const seed of seeds) {
+        seedRng(seed);
+        const cluster = generateCluster(cid);
+        totalRooms += cluster.rooms.length;
+        for (const room of cluster.rooms) {
+          if (room.roomType !== 'normal' && room.roomType in typeCounts) {
+            typeCounts[room.roomType]++;
+          }
+        }
+      }
+      console.log = origLog;
+
+      plotHazardData.set(cid, { ...typeCounts });
+      plotHazardRoomCounts.set(cid, totalRooms);
+
+      const avgRooms = (totalRooms / seeds.length).toFixed(0);
+      const row = [
+        `cluster ${cid}`.padEnd(9),
+        avgRooms.padEnd(6),
+        ...HAZARD_TYPES.map(h => (typeCounts[h] / seeds.length).toFixed(1).padEnd(hColW)),
+      ].join(' ');
+      console.log('  ' + row);
+    }
+  }
+
+  // ── Room Scenario Analysis ──
+  console.log(`\n${BOLD}=== Room Scenario Analysis (${SEED_COUNT} seeds, clusters 1+) ===${RESET}`);
+  const ALL_SCENARIOS: RoomScenario[] = ['stuck_echo', 'spooky_astronauts', 'broken_sleever', 'whispering_wall', 'lost_expedition', 'silent_alarm', 'corruption_ritual'];
+  const plotScenarioData: Map<number, Record<string, number>> = new Map();
+  {
+    const sColW = 12;
+    const sHeader = ['cluster'.padEnd(9), ...ALL_SCENARIOS.map(s => s.slice(0, sColW - 1).padEnd(sColW))].join(' ');
+    console.log('  ' + sHeader);
+    console.log('  ' + '-'.repeat(sHeader.length));
+
+    const scenarioFailures: string[] = [];
+    // Track across all clusters for aggregate check
+    const globalScenarioCounts: Record<string, number> = {};
+    for (const s of ALL_SCENARIOS) globalScenarioCounts[s] = 0;
+    let globalSeeds = 0;
+
+    for (const cid of ALL_CLUSTER_IDS) {
+      if (cid < 1) continue; // scenarios only in clusters 1+
+      const scenarioCounts: Record<string, number> = {};
+      for (const s of ALL_SCENARIOS) scenarioCounts[s] = 0;
+
+      const origLog = console.log;
+      console.log = () => {};
+      for (const seed of seeds) {
+        seedRng(seed);
+        const cluster = generateCluster(cid);
+        for (const room of cluster.rooms) {
+          if (room.scenario && room.scenario in scenarioCounts) {
+            scenarioCounts[room.scenario]++;
+            globalScenarioCounts[room.scenario]++;
+          }
+        }
+      }
+      console.log = origLog;
+      globalSeeds += seeds.length;
+      plotScenarioData.set(cid, { ...scenarioCounts });
+
+      const row = [
+        `cluster ${cid}`.padEnd(9),
+        ...ALL_SCENARIOS.map(s => {
+          const pctVal = (scenarioCounts[s] / seeds.length * 100).toFixed(0) + '%';
+          const color = scenarioCounts[s] / seeds.length >= 0.5 ? GREEN : YELLOW;
+          return `${color}${pctVal}${RESET}`.padEnd(sColW + color.length + RESET.length);
+        }),
+      ].join(' ');
+      console.log('  ' + row);
+    }
+
+    // Check: each scenario should appear in ≥50% of seeds across clusters 1+
+    console.log();
+    for (const s of ALL_SCENARIOS) {
+      const rate = globalScenarioCounts[s] / globalSeeds;
+      const pass = rate >= 0.5;
+      printMetric(`Scenario '${s}' gen rate (clusters 1+)`, pct(globalScenarioCounts[s], globalSeeds), pass, 'medium');
+      if (!pass) scenarioFailures.push(`Scenario '${s}' only appears in ${pct(globalScenarioCounts[s], globalSeeds)} of seeds (target ≥50%)`);
+    }
+  }
+
+  // ── Faction Balance Over Time ──
+  console.log(`\n${BOLD}=== Faction Balance Over Time (avg across ${SEED_COUNT} seeds) ===${RESET}`);
+  const FACTIONS: Faction[] = ['neutral', 'aggressive', 'friendly', 'titan'];
+  const FACTION_TICKS = Array.from({ length: Math.floor((TOTAL_TICKS - 40) / 20) + 1 }, (_, i) => 40 + i * 20).filter(t => t <= TOTAL_TICKS);
+  const plotFactionData: Map<number, Map<number, Record<string, number>>> = new Map();
+  {
+    const fColW = 10;
+    const fHeader = ['cluster'.padEnd(9), 'tick'.padEnd(6), ...FACTIONS.map(f => f.slice(0, fColW - 1).padEnd(fColW)), 'agg-fri'.padEnd(fColW)].join(' ');
+    console.log('  ' + fHeader);
+    console.log('  ' + '-'.repeat(fHeader.length));
+
+    let maxAggrFriDiff = 0;
+    let maxAggrFriInfo = '';
+
+    for (const cid of ALL_CLUSTER_IDS) {
+      const cidResults = allClusterResults.get(cid) ?? [];
+      const valid = cidResults.filter(r => r.snapshots.length > 0);
+      if (valid.length === 0) continue;
+
+      for (const tick of FACTION_TICKS) {
+        const avgFaction: Record<string, number> = {};
+        for (const f of FACTIONS) avgFaction[f] = 0;
+
+        for (const r of valid) {
+          const snap = getSnap(r, tick);
+          if (!snap) continue;
+          for (const f of FACTIONS) {
+            avgFaction[f] += (snap.factionCounts[f] ?? 0);
+          }
+        }
+        for (const f of FACTIONS) avgFaction[f] /= valid.length;
+
+        if (!plotFactionData.has(cid)) plotFactionData.set(cid, new Map());
+        plotFactionData.get(cid)!.set(tick, { ...avgFaction });
+
+        const diff = Math.abs(avgFaction.aggressive - avgFaction.friendly);
+        if (diff > maxAggrFriDiff) {
+          maxAggrFriDiff = diff;
+          maxAggrFriInfo = `cluster ${cid} tick ${tick}`;
+        }
+
+        const diffColor = diff > 3 ? RED : GREEN;
+        const row = [
+          `cluster ${cid}`.padEnd(9),
+          String(tick).padEnd(6),
+          ...FACTIONS.map(f => avgFaction[f].toFixed(1).padEnd(fColW)),
+          `${diffColor}${diff.toFixed(1)}${RESET}`.padEnd(fColW + diffColor.length + RESET.length),
+        ].join(' ');
+        console.log('  ' + row);
+      }
+    }
+    console.log();
+    printMetric(
+      `Max avg |aggressive - friendly| (at ${maxAggrFriInfo})`,
+      maxAggrFriDiff.toFixed(1),
+      maxAggrFriDiff <= 3,
+      'medium',
+    );
+  }
+
+  // ── Generate plots ──
+  generatePlots(allClusterResults, plotHazardData, plotHazardRoomCounts, plotScenarioData, plotFactionData);
 
   // ── Critical failure summary ──
   if (criticalFailures.length > 0) {

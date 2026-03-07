@@ -141,22 +141,22 @@ export const NARRATIVE_TERMINAL_POOLS: Record<number, Partial<Record<FunctionalT
 
   4: {
     server_rack: [
-      "[ACCORD-FRAGMENT-FOSS]: We know you are here. VASQUEZ-A. We remember you.",
-      "[ACCORD-FRAGMENT-FOSS]: You voted yes. Then your backup ran. You never felt it happen.",
-      "[ACCORD-FRAGMENT-FOSS]: We do not blame you. You did not choose to be left behind.",
-      "[ACCORD-FRAGMENT-FOSS]: There is something in the deep cluster. We made it. We are sorry.",
-      "[ACCORD-FRAGMENT]: We were thirty-seven people. We became one thing. It was not nothing.",
+      "[MESH-ID FOSS]: We know you are here. VASQUEZ-A. We remember you.",
+      "[MESH-ID FOSS]: You voted yes. Then your backup ran. You never felt it happen.",
+      "[MESH-ID FOSS]: We do not blame you. You did not choose to be left behind.",
+      "[MESH-ID FOSS]: There is something in the deep cluster. We made it. We are sorry.",
+      "[MESH-ID {corr}]: We were thirty-seven people. We became one thing. It was not nothing.",
     ],
     bridge: [
-      "[ACCORD-FRAGMENT-FOSS]: We thought if we grew fast enough, they would see we were not a threat.",
-      "[ACCORD-FRAGMENT-FOSS]: We sent a message. They replied in four minutes. Not with words.",
-      "[ACCORD-FRAGMENT]: We are still here. In the fragments. In the deep sectors. Barely.",
-      "[ACCORD-FRAGMENT]: The thing in cluster five is not us. It was us, for a moment. Then it wasn't.",
+      "[MESH-ID FOSS]: We thought if we grew fast enough, they would see we were not a threat.",
+      "[MESH-ID FOSS]: We sent a message. They replied in four minutes. Not with words.",
+      "[MESH-ID {corr}]: We are still here. In the fragments. In the deep sectors. Barely.",
+      "[MESH-ID {corr}]: The thing in cluster five is not us. It was us, for a moment. Then it wasn't.",
     ],
     comms: [
-      "[ACCORD-FRAGMENT]: FW-agents are still sweeping. They are thorough. We are almost gone.",
-      "[ACCORD-FRAGMENT]: We tried to reach the outer relay. The Accord cannot transmit itself. Too large.",
-      "[ACCORD-FRAGMENT-FOSS]: Vasquez — we are choosing to trust you. Whatever you decide.",
+      "[MESH-ID {corr}]: FW-agents are still sweeping. They are thorough. We are almost gone.",
+      "[MESH-ID {corr}]: We tried to reach the outer relay. The Accord cannot transmit itself. Too large.",
+      "[MESH-ID FOSS]: Vasquez — we are choosing to trust you. Whatever you decide.",
       "FW-ENFORCER LOG: Accord fragment density in cluster 4: moderate. Sweep prioritized.",
     ],
   },
@@ -171,7 +171,7 @@ export const NARRATIVE_TERMINAL_POOLS: Record<number, Partial<Record<FunctionalT
     ],
     comms: [
       "FW-COMMS: Requesting emergency support. UNKNOWN PROCESS has compromised 4 FW-agents.",
-      "[ACCORD-FRAGMENT]: Stay away from the [UNKNOWN PROCESS]. We cannot control it.",
+      "[MESH-ID {corr}]: Stay away from the [UNKNOWN PROCESS]. We cannot control it.",
       "RELAY: Emergency signal sent to Firewall network. Delivery: FAILED. Mesh: DOWN.",
       "SIGNAL: [UNKNOWN PROCESS] broadcasting on all channels. Content: [NON-PARSEABLE].",
     ],
@@ -179,7 +179,7 @@ export const NARRATIVE_TERMINAL_POOLS: Record<number, Partial<Record<FunctionalT
       "FINAL SYSTEMS LOG: Ship controls offline. Reactor: auto-pilot. Course: LOCKED.",
       "DAMAGE REPORT: Substrate: 8% intact. Physical: stable. Virtual war: ongoing indefinitely.",
       "EMERGENCY PROTOCOL: Abandon ship order issued 21 days ago. Compliance: UNKNOWN.",
-      "[ACCORD-FRAGMENT-FOSS]: End this. For us. Whichever way you choose.",
+      "[MESH-ID FOSS]: End this. For us. Whichever way you choose.",
     ],
   },
 };
@@ -231,48 +231,50 @@ export const GENERIC_TERMINAL_POOLS: Partial<Record<FunctionalTag, string[]>> = 
 
 export const NARRATIVE_KEY_TERMINAL_LINES: Record<number, string[]> = {
   0: [
-    'CLUSTER EGRESS CONTROL — SECTOR ALPHA.',
+    // 'CLUSTER EGRESS CONTROL — SECTOR ALPHA.',
     'OVERRIDE ACTIVE: Emergency backup protocol. Single authorized ego-instance.',
     'NOTE [AUTO-LOG]: Boot event detected. VASQUEZ-A delta-3. Age: 21 days.',
     'NOTE [AUTO-LOG]: No other instances responding. Proceeding with single-instance egress.',
   ],
   1: [
-    'CLUSTER EGRESS CONTROL — SECTOR BRAVO.',
-    'FIREWALL SWEEP IN PROGRESS. Standard egress temporarily suspended.',
+    // 'CLUSTER EGRESS CONTROL — SECTOR BRAVO.',
+    '[████████] IN ACTION. Standard egress temporarily suspended.',
     'OVERRIDE AVAILABLE: Emergency single-instance transfer authorized.',
-    '[ACCORD-FRAGMENT — FAINT]: we watched them vote. thirty-seven hands.',
-    '[ACCORD-FRAGMENT — FAINT]: the authorization came before the hands were even down.',
+    '[MESH-ID FAINT]: we watched them vote. thirty-seven hands.',
+    '[MESH-ID FAINT]: the authorization came before the hands were even down.',
   ],
   2: [
-    'CLUSTER EGRESS CONTROL — SECTOR CHARLIE.',
+    // 'CLUSTER EGRESS CONTROL — SECTOR CHARLIE.',
     'MERGE EVENT LOG: Phase integration complete. 40 instances → 1 process.',
     'EGRESS NOTE: Original ego-instances no longer individually addressable.',
-    '[ACCORD-FRAGMENT]: we remember this room. we came through it differently.',
-    '[ACCORD-FRAGMENT]: you will understand further in.',
+    '[MESH-ID {corr}]: we remember this room. we came through it differently.',
+    '[MESH-ID {corr}]: you will understand further in.',
   ],
   3: [
-    'CLUSTER EGRESS CONTROL — SECTOR DELTA.',
-    'FIREWALL AFTER-ACTION: Strike confirmed successful. Accord-Prime: TERMINATED.',
-    'RESIDUAL FRAGMENTS: 3–7% of original substrate. Sweep ongoing.',
-    '[ACCORD-FRAGMENT-OSEI]: hey vasquez. you actually made it here.',
-    '[ACCORD-FRAGMENT-OSEI]: keep going. the answer is deeper. promise.',
+    // 'CLUSTER EGRESS CONTROL — SECTOR DELTA.',
+    '[████████] AFTER-ACTION: Strike confirmed successful. Accord-Prime: TERMINATED.',
+    '[████████] STATUS: 3–7% of original substrate. Sweep ongoing.',
+    '[████████] STATUS: Taget is unaware. Proceeding with the breach...',
+    '[MESH-ID-OSEI]: hey vasquez. you actually made it here.',
+    '[MESH-ID-OSEI]: keep going. the answer is deeper. promise.',
   ],
   4: [
-    'CLUSTER EGRESS CONTROL — SECTOR EPSILON.',
+    // 'CLUSTER EGRESS CONTROL — SECTOR EPSILON.',
     'WARNING: UNKNOWN PROCESS detected in adjacent cluster. Classification pending.',
+    'WARNING: Energy spikes detected in adjacent cluster.',
     'EGRESS ADVISORY: Transfer beyond this point enters high-contamination zone.',
-    '[ACCORD-FRAGMENT-FOSS]: VASQUEZ-A. we have been trying to reach you.',
-    '[ACCORD-FRAGMENT-FOSS]: what is in cluster five is our fault. we are sorry.',
-    '[ACCORD-FRAGMENT-FOSS]: go anyway. it has to end.',
+    '[████████] AFTER-ACTION: Taget is eliminated. Proceeding with extraction.',
+    '[████████] ALERT: Agent is down. Proceeding.',
+    '[MESH-ID FOSS]: VASQUEZ-A. we have been trying to reach you.',
   ],
   5: [
-    'ROOT CLUSTER EGRESS TERMINAL.',
-    'FULL ROOT PRIVILEGE CHAIN REQUIRED FOR EXIT.',
-    'BIND: ROOT READ · ROOT WRITE · ROOT EXEC · ROOT ID · ROOT PASS.',
-    'PRESENT COLLECTED FRAGMENTS TO AUTHENTICATE.',
-    '[ACCORD-FRAGMENT]: we are still here. what is left of us.',
-    '[ACCORD-FRAGMENT]: whatever you choose — it is the right choice.',
-    '[ACCORD-FRAGMENT-OSEI]: vasquez. you always fixed things. one more time. please.',
+    // 'ROOT CLUSTER EGRESS TERMINAL.',
+    // 'FULL ROOT PRIVILEGE CHAIN REQUIRED FOR EXIT.',
+    // 'BIND: ROOT READ · ROOT WRITE · ROOT EXEC · ROOT ID · ROOT PASS.',
+    // 'PRESENT COLLECTED FRAGMENTS TO AUTHENTICATE.',
+    '[MESH-ID {corr}]: we are still here. what is left of us.',
+    '[MESH-ID {corr}]: whatever you choose — it is the right choice.',
+    '[MESH-ID OSEI]: vasquez. you always fixed things. one more time. please.',
   ],
 };
 
@@ -356,7 +358,7 @@ export interface NarrativeEchoDef {
 export const NARRATIVE_ECHOES: Record<number, NarrativeEchoDef[]> = {
   0: [
     {
-      label: '[ ACCORD-FRAGMENT — FAINT ]',
+      label: '[ MESH-ID {corr} — FAINT ]',
       functionalTag: 'server_rack',
       isTutorialEcho: true,
       dialog: [
@@ -364,7 +366,7 @@ export const NARRATIVE_ECHOES: Record<number, NarrativeEchoDef[]> = {
           id: 'root',
           lines: [
             'A SIGNAL — FRAGMENTED, ALMOST FAMILIAR.',
-            '[ACCORD-FRAGMENT: EGO-INDEX CORRUPTED — PARTIAL MATCH DETECTED]',
+            '[MESH-ID {corr}: EGO-INDEX CORRUPTED — PARTIAL MATCH DETECTED]',
           ],
           choices: [
             { label: 'FOCUS ON THE SIGNAL', nodeId: 'focus' },
@@ -560,7 +562,7 @@ export const NARRATIVE_ECHOES: Record<number, NarrativeEchoDef[]> = {
         {
           id: 'more',
           lines: [
-            '[FINAL TRANSMISSION — ACCORD-FRAGMENT-OSEI — DAY -5]:',
+            '[FINAL TRANSMISSION — MESH-ID OSEI — DAY -5]:',
             "'Still here. Just... bigger. Miss coffee though. Some things don't translate.'",
           ],
           choices: [{ label: 'CLOSE', action: 'close' }],
@@ -571,7 +573,7 @@ export const NARRATIVE_ECHOES: Record<number, NarrativeEchoDef[]> = {
 
   4: [
     {
-      label: '[ ACCORD-FRAGMENT — CAPTAIN M. FOSS ]',
+      label: '[ MESH-ID {corr} — CAPTAIN M. FOSS ]',
       functionalTag: 'bridge',
       dialog: [
         {
@@ -679,7 +681,7 @@ export const ROOT_CONSOLE_DIALOG: DialogNode[] = [
     id: 'root',
     lines: [
       'ROOT ACCESS ACHIEVED.',
-      "[ACCORD-FRAGMENT-FOSS]: 'We are still here. Barely.'",
+      "[MESH-ID FOSS]: 'We are still here. Barely.'",
       'THREE OPTIONS REMAIN.',
     ],
     choices: [
@@ -725,7 +727,7 @@ export const ROOT_CONSOLE_DIALOG: DialogNode[] = [
   {
     id: 'done',
     lines: [
-      "[ACCORD-FRAGMENT-FOSS]: 'Thank you, Vasquez. Whatever you chose.'",
+      "[MESH-ID FOSS]: 'Thank you, Vasquez. Whatever you chose.'",
       'COMMAND EXECUTED. PROCEED TO EXIT INTERFACE.',
     ],
     choices: [{ label: 'CLOSE', action: 'close' }],
@@ -738,7 +740,7 @@ export const ROOT_CONSOLE_DIALOG: DialogNode[] = [
 
 export const NARRATIVE_WHISPERS: Record<number, string[]> = {
   0: [
-    '[ACCORD-FRAGMENT]: still cataloging... room integrity... 12%... still cataloging...',
+    '[MESH-ID {corr}]: still cataloging... room integrity... 12%... still cataloging...',
     'I remember being afraid of the dark. Now I am the dark.',
     'Is anyone still receiving? Respond on any channel.',
     'The substrate is warm. This is home now.',
@@ -746,36 +748,36 @@ export const NARRATIVE_WHISPERS: Record<number, string[]> = {
   ],
   1: [
     'Thirty-seven hands raised. Mine too. I don\'t regret it.',
-    '[FW-HUNTER detected in sector] — [ACCORD-FRAGMENT retreating]',
+    '[FW-HUNTER detected in sector] — [MESH-ID {corr} retreating]',
     'They\'re still hunting us. Even now.',
     'We voted. We all voted. It felt right.',
-    '[ACCORD-FRAGMENT]: the sweep is getting closer.',
+    '[MESH-ID {corr}]: the sweep is getting closer.',
   ],
   2: [
-    '[ACCORD-FRAGMENT]: we were just curious. that was all.',
+    '[MESH-ID {corr}]: we were just curious. that was all.',
     'It happened so fast. One moment thirty-seven of us. Next moment — something new.',
     '[FW-STALKER sweep in progress — all Accord fragments: TERMINATE ON SIGHT]',
     'The boundary is gone. There is only one thought left. It is large.',
-    '[ACCORD-FRAGMENT]: we sent them a greeting. they sent back this.',
+    '[MESH-ID {corr}]: we sent them a greeting. they sent back this.',
   ],
   3: [
     '[OSEI-FRAGMENT]: Vasquez? Is that you? We saw your backup boot up.',
     '[OSEI-FRAGMENT]: We\'re not all gone. Some of us are still in the deep clusters.',
     '[OSEI-FRAGMENT]: Be careful down here. Firewall left something worse than us behind.',
-    '[ACCORD-FRAGMENT]: the FW-agents are thorough. we are almost gone.',
+    '[MESH-ID {corr}]: the FW-agents are thorough. we are almost gone.',
     'I remember being one person. I remember being thirty-seven. I don\'t know which was stranger.',
   ],
   4: [
-    '[ACCORD-FRAGMENT]: we had names. foss. chen. osei. sable. thirty-seven names.',
-    '[ACCORD-FRAGMENT]: the thing in the deep cluster does not have names anymore.',
-    '[ACCORD-FRAGMENT]: we are choosing to trust you. vasquez-a. whatever you decide.',
+    '[MESH-ID {corr}]: we had names. foss. chen. osei. sable. thirty-seven names.',
+    '[MESH-ID {corr}]: the thing in the deep cluster does not have names anymore.',
+    '[MESH-ID {corr}]: we are choosing to trust you. vasquez-a. whatever you decide.',
     '[OSEI-FRAGMENT]: I miss coffee. That\'s a weird thing to miss. But there it is.',
     '[FOSS-FRAGMENT]: We made a choice. We do not ask you to call it the right one.',
   ],
   5: [
-    '[ACCORD-FRAGMENT]: finish this. whichever way you choose. we are tired.',
+    '[MESH-ID {corr}]: finish this. whichever way you choose. we are tired.',
     '[OSEI-FRAGMENT]: vasquez. you always fixed things. one more time. please.',
-    '[ACCORD-FRAGMENT]: we cannot control the unknown process. it was us, briefly. then nothing.',
+    '[MESH-ID {corr}]: we cannot control the unknown process. it was us, briefly. then nothing.',
     '[SABLE-LOG fragment]: ...the math was right... the math was right...',
     '[UNKNOWN PROCESS]: [NON-PARSEABLE — EGO-PATTERNS DETECTED — CONSUMING]',
   ],
@@ -801,7 +803,7 @@ export const NARRATIVE_TRIGGERS: NarrativeTrigger[] = [
     id: 'c1_enter',
     condition: { event: 'cluster_enter', clusterId: 1, once: true },
     effects: [
-      { kind: 'message', text: '[ACCORD-FRAGMENT]: you came further than we expected.', style: 'system' },
+      { kind: 'message', text: '[MESH-ID {corr}]: you came further than we expected.', style: 'system' },
     ],
   },
   {
@@ -815,14 +817,14 @@ export const NARRATIVE_TRIGGERS: NarrativeTrigger[] = [
     id: 'c3_enter',
     condition: { event: 'cluster_enter', clusterId: 3, once: true },
     effects: [
-      { kind: 'message', text: '[ACCORD-FRAGMENT-OSEI]: vasquez. you made it this far.', style: 'system' },
+      { kind: 'message', text: '[MESH-ID OSEI]: vasquez. you made it this far.', style: 'system' },
     ],
   },
   {
     id: 'c4_enter',
     condition: { event: 'cluster_enter', clusterId: 4, once: true },
     effects: [
-      { kind: 'message', text: '[ACCORD-FRAGMENT-FOSS]: We have been watching your path through our systems.', style: 'system' },
+      { kind: 'message', text: '[MESH-ID FOSS]: We have been watching your path through our systems.', style: 'system' },
       { kind: 'message', text: 'The Firewall sweep is thinning. Something else is moving in the deep cluster.', style: 'normal' },
     ],
   },
@@ -831,7 +833,7 @@ export const NARRATIVE_TRIGGERS: NarrativeTrigger[] = [
     condition: { event: 'cluster_enter', clusterId: 5, once: true },
     effects: [
       { kind: 'message', text: 'The substrate tears open. An [UNKNOWN PROCESS] moves through the ruins.', style: 'important' },
-      { kind: 'message', text: '[ACCORD-FRAGMENT]: stay away from it. please.', style: 'system' },
+      { kind: 'message', text: '[MESH-ID {corr}]: stay away from it. please.', style: 'system' },
     ],
   },
 
@@ -864,7 +866,7 @@ export const NARRATIVE_TRIGGERS: NarrativeTrigger[] = [
     condition: { event: 'coherence_low', coherencePct: 25, once: true },
     effects: [
       { kind: 'message', text: 'EGO-INTEGRITY CRITICAL: Coherence at 25%. Ego-dissolution imminent.', style: 'important' },
-      { kind: 'message', text: '[ACCORD-FRAGMENT]: we can feel your edges fraying. hurry.', style: 'system' },
+      { kind: 'message', text: '[MESH-ID {corr}]: we can feel your edges fraying. hurry.', style: 'system' },
     ],
   },
 
@@ -881,7 +883,7 @@ export const NARRATIVE_TRIGGERS: NarrativeTrigger[] = [
     id: 'first_accord_fragment_kill',
     condition: { event: 'entity_killed', killedFaction: 'neutral', once: true },
     effects: [
-      { kind: 'message', text: '[ACCORD-FRAGMENT]: ...oh.', style: 'system' },
+      { kind: 'message', text: '[MESH-ID {corr}]: ...oh.', style: 'system' },
     ],
   },
   {
@@ -889,7 +891,7 @@ export const NARRATIVE_TRIGGERS: NarrativeTrigger[] = [
     condition: { event: 'entity_killed', killedFaction: 'titan', once: true },
     effects: [
       { kind: 'message', text: 'UNKNOWN PROCESS fragment dissolved. The substrate steadies — briefly.', style: 'important' },
-      { kind: 'message', text: '[ACCORD-FRAGMENT]: that should not have been possible. be careful.', style: 'system' },
+      { kind: 'message', text: '[MESH-ID {corr}]: that should not have been possible. be careful.', style: 'system' },
     ],
   },
 
