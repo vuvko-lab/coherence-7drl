@@ -32,6 +32,8 @@ function restartGame(newSeed: number) {
   adminInitialized = false;
   rootPrivsAnimating = false;
   lastKnownPrivilegeSet = new Set();
+  document.getElementById('victory-overlay')?.classList.remove('open');
+  document.getElementById('death-overlay')?.classList.remove('open');
   state = createGame(newSeed);
   initRenderer();
   renderAll();
@@ -1014,6 +1016,53 @@ function showVictoryOverlay() {
   revealLines(victoryLines);
 }
 
+// ── Death overlay ──
+
+const deathOverlay = document.getElementById('death-overlay')!;
+const deathStats = document.getElementById('death-stats')!;
+const deathKills = document.getElementById('death-kills')!;
+const deathRestartBtn = document.getElementById('death-restart')!;
+
+deathRestartBtn.addEventListener('click', () => {
+  deathOverlay.classList.remove('open');
+  window.location.hash = '';
+  restartGame(generateSeed());
+});
+
+function showDeathOverlay() {
+  const killCount = state.killedEntities.length;
+
+  const killCounts: Record<string, number> = {};
+  for (const k of state.killedEntities) {
+    killCounts[k.kind] = (killCounts[k.kind] ?? 0) + 1;
+  }
+
+  const epilogueLines = VICTORY_EPILOGUES['death'] ?? [];
+  const epilogueHtml = epilogueLines.length > 0
+    ? epilogueLines.map(l => l === '' ? '<div class="epilogue-spacer">&nbsp;</div>' : `<div class="epilogue-line">${l}</div>`).join('')
+      + '<div class="epilogue-sep">──────────────────────────────</div>'
+    : '';
+
+  deathStats.innerHTML =
+    epilogueHtml +
+    `<div>Coherence: 0%</div>` +
+    `<div>Turns: ${state.tick}</div>` +
+    `<div>Cluster reached: ${state.currentClusterId + 1}</div>` +
+    `<div>Entities destroyed: ${killCount}</div>`;
+
+  deathKills.innerHTML = killCount > 0
+    ? Object.entries(killCounts).map(([k, n]) => `<div>&gt; ${k}: ${n}</div>`).join('')
+    : '<div>&gt; none destroyed</div>';
+
+  deathOverlay.classList.add('open');
+
+  const deathLines: Element[] = [document.getElementById('death-header')!];
+  deathLines.push(...Array.from(deathStats.children));
+  deathLines.push(...Array.from(deathKills.children));
+  deathLines.push(deathRestartBtn);
+  revealLines(deathLines);
+}
+
 // ── Aim mode ──
 
 function toggleAim() {
@@ -1044,9 +1093,13 @@ function exitAim() {
 }
 
 function renderAll() {
-  // Victory overlay
+  // Game-over overlays
   if (state.gameOver) {
-    showVictoryOverlay();
+    if (state.playerDead) {
+      showDeathOverlay();
+    } else {
+      showVictoryOverlay();
+    }
     return;
   }
 
@@ -1182,6 +1235,9 @@ function renderAll() {
 // ── Input handling ──
 
 function onAction(action: PlayerAction) {
+  // Block all input when game is over
+  if (state.gameOver) return;
+
   // Block input during animation
   if (state.animation?.isAnimating) {
     return;

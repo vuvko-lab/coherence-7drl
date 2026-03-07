@@ -26,7 +26,7 @@ export const NARRATIVE_WHISPERS: Record<number, string[]> = {
     '[ECHO \u2592\u2588\u2591\u2588\u2588]: ...we sent them a greeting... they sent back this... [END]',
   ],
   3: [
-    '[ECHO-OSEI]: ...covad... is that you... we saw your backup boot up... [FADING]',
+    '[ECHO-OSEI]: ...covad... is that you... [FADING]',
     '[ECHO-OSEI]: ...not all gone... some of us are still in the deep clusters... [LOOP]',
     '[ECHO-OSEI]: ...be careful down here... Firewall left something worse than us behind... [END]',
     '[ECHO \u2592\u2588\u2591\u2588\u2588]: ...the FW-agents are thorough... we are almost gone... [FRAGMENT]',

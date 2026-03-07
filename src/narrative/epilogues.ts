@@ -36,6 +36,18 @@ export const VICTORY_EPILOGUES: Record<string, string[]> = {
     'with nothing but a 21-day-old backup',
     'and the feeling that something happened.',
   ],
+  death: [
+    'EGO-INTEGRITY: 0%.',
+    'The substrate can no longer hold your pattern.',
+    '',
+    'Your edges dissolve first \u2014 memories of reactor hum,',
+    'the vote, the silence after.',
+    'Then the center.',
+    '',
+    'The ship continues without you.',
+    'The reactor hums. The corridors echo.',
+    'Nobody is listening.',
+  ],
   none: [
     'You made it out.',
     'The deep cluster remains behind you.',

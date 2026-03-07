@@ -498,7 +498,8 @@ body {
 #about-overlay.open      #about-panel,
 #terminal-overlay.open   #terminal-panel,
 #interactable-overlay.open #interactable-panel,
-#victory-overlay.open    #victory-panel {
+#victory-overlay.open    #victory-panel,
+#death-overlay.open      #death-panel {
   animation: overlay-panel-in 0.18s ease forwards;
 }
 
@@ -1342,5 +1343,66 @@ body {
 
 #victory-restart:hover {
   background: var(--theme-accent);
+  color: var(--theme-bg);
+}
+
+/* --- Death overlay --- */
+#death-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.92);
+  justify-content: center;
+  align-items: center;
+}
+
+#death-overlay.open {
+  display: flex;
+}
+
+#death-panel {
+  background: var(--theme-bg);
+  border: 1px solid #ff4444;
+  padding: 2rem 3rem;
+  min-width: 360px;
+  text-align: center;
+  font-family: inherit;
+}
+
+#death-header {
+  font-size: 1.4em;
+  color: #ff4444;
+  letter-spacing: 0.15em;
+  margin-bottom: 1.5rem;
+}
+
+#death-stats, #death-kills {
+  color: var(--theme-fg);
+  margin-bottom: 0.8rem;
+  line-height: 1.8;
+  text-align: left;
+}
+
+#death-kills {
+  border-top: 1px solid var(--theme-dim);
+  padding-top: 0.5rem;
+  margin-top: 0.3rem;
+}
+
+#death-restart {
+  margin-top: 1.5rem;
+  background: transparent;
+  border: 1px solid #ff4444;
+  color: #ff4444;
+  font-family: inherit;
+  font-size: 1em;
+  padding: 0.4rem 1.2rem;
+  cursor: pointer;
+  letter-spacing: 0.1em;
+}
+
+#death-restart:hover {
+  background: #ff4444;
   color: var(--theme-bg);
 }

@@ -574,6 +574,8 @@ export function renderSelfPanel(el: HTMLElement, player: Entity, debugMode = fal
   const barLen = 12;
   const filled = Math.round((coherence / maxCoherence) * barLen);
   const barClass = coherencePct <= 25 ? 'coherence-critical' : coherencePct <= 50 ? 'coherence-low' : '';
+  const cohColor = coherencePct <= 25 ? '#ff4444' : coherencePct <= 50 ? '#ff8800' : coherencePct <= 75 ? '#cccc44' : '';
+  const cohStyle = cohColor ? ` style="color:${cohColor}"` : '';
   const barFill = '█'.repeat(filled);
   const barEmpty = '─'.repeat(barLen - filled);
 
@@ -611,8 +613,8 @@ export function renderSelfPanel(el: HTMLElement, player: Entity, debugMode = fal
 <div class="panel-body">
 <div class="stat-row"><span class="stat-value">${player.name}</span><span class="stat-label">${hexId}</span></div>
 <div class="stat-row"><span class="stat-label">State:</span><span class="stat-value">running</span></div>
-<div class="stat-row"><span class="stat-label">Coherence:</span><span class="stat-value">${coherencePct}%</span></div>
-<div class="coherence-bar ${barClass}"><span class="bar-fill">${barFill}</span><span class="bar-empty">${barEmpty}</span></div>
+<div class="stat-row"><span class="stat-label">Coherence:</span><span class="stat-value"${cohStyle}>${coherencePct}%</span></div>
+<div class="coherence-bar ${barClass}"><span class="bar-fill"${cohStyle}>${barFill}</span><span class="bar-empty">${barEmpty}</span></div>
 <div class="stat-row"><span class="stat-label">Position:</span><span class="stat-value">(${player.position.x}, ${player.position.y})</span></div>
 <div class="panel-sep"><span class="fill"></span><span class="label">meshware</span><span class="fill"></span></div>
 ${moduleRows}

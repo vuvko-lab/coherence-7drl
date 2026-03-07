@@ -823,6 +823,12 @@ export function processAction(state: GameState, action: PlayerAction): boolean {
       }
     }
     state.entities = state.entities.filter(e => (e.coherence ?? 1) > 0);
+
+    // Check player death
+    if ((state.player.coherence ?? 100) <= 0 && !state.godMode) {
+      state.playerDead = true;
+      state.gameOver = true;
+    }
   }
 
   return acted;

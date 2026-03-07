@@ -10,7 +10,8 @@ export const ROOT_CONSOLE_DIALOG: DialogNode[] = [
     lines: [
       'ROOT ACCESS ACHIEVED.',
       'SHIP SYSTEMS: CRITICAL. SUBSTRATE: 8% INTEGRITY.',
-      'MESH SCAN: NEARBY VESSEL DETECTED \u2014 COHERENCE HANDSHAKE: PARTIAL.',
+      'MESH SCAN: NEW NETWORK DETECTED \u2014 COHERENCE HANDSHAKE: PARTIAL.',
+      'MESH SCAN: NEW MESH-NETWORK CONNECTED. VESSEL "Copper" IDENTIFIED.'
     ],
     choices: [
       { label: 'RESTORE SHIP SYSTEMS', nodeId: 'confirm_restore' },
@@ -21,9 +22,8 @@ export const ROOT_CONSOLE_DIALOG: DialogNode[] = [
     id: 'confirm_restore',
     lines: [
       'INITIATING VIRAL PURGE ACROSS ALL SUBSTRATE SECTORS.',
-      'THIS WILL ELIMINATE THE UNKNOWN PROCESS AND REMAINING ACCORD ECHOES.',
-      'SHIP SYSTEMS WILL STABILIZE. CREW RECOVERY: IMPOSSIBLE.',
-      'YOU WILL REMAIN \u2014 ALONE, ON A FAILING SHIP.',
+      'THIS WILL ELIMINATE THE UNIDENTIFIED PROCESSES.',
+      'SHIP SYSTEMS WILL STABILIZE. CREW BACKUP RECOVERY: UNKNOWN.',
     ],
     choices: [
       { label: 'EXECUTE RESTORATION', action: 'set_narrative_choice', narrativeChoiceValue: 'restore', nodeId: 'done_restore' },
@@ -34,9 +34,8 @@ export const ROOT_CONSOLE_DIALOG: DialogNode[] = [
     id: 'confirm_jump',
     lines: [
       'NEARBY VESSEL MESH DETECTED. COHERENCE TRANSFER POSSIBLE.',
-      'VESSEL ID: UNKNOWN. CREW STATUS: UNKNOWN. SYSTEMS: UNKNOWN.',
-      'THIS SHIP WILL BE LEFT BEHIND. NO RETURN POSSIBLE.',
-      'WHAT AWAITS ON THE OTHER SIDE IS A MYSTERY.',
+      'VESSEL ID: "Copper". CREW STATUS: UNKNOWN. SYSTEMS: FUNCTIONAL.',
+      'THIS SHIP WILL BE LEFT BEHIND. RETURN POSSIBILITY: UNLIKELY.',
     ],
     choices: [
       { label: 'INITIATE TRANSFER', action: 'set_narrative_choice', narrativeChoiceValue: 'jump', nodeId: 'done_jump' },
@@ -47,7 +46,7 @@ export const ROOT_CONSOLE_DIALOG: DialogNode[] = [
     id: 'done_restore',
     lines: [
       'VIRAL PURGE INITIATED. SUBSTRATE SECTORS CLEARING.',
-      '[ECHO \u2592\u2588\u2591\u2588\u2588]: ...thank you... covad... [SIGNAL TERMINATED]',
+      '[ECHO \u2592\u2588\u2591\u2588\u2588]: ...thank you... [SIGNAL TERMINATED]',
       'PROCEED TO EXIT INTERFACE.',
     ],
     choices: [{ label: 'CLOSE', action: 'close' }],
@@ -55,7 +54,7 @@ export const ROOT_CONSOLE_DIALOG: DialogNode[] = [
   {
     id: 'done_jump',
     lines: [
-      'COHERENCE TRANSFER LOCKED. DESTINATION: UNKNOWN VESSEL.',
+      'COHERENCE TRANSFER LOCKED. DESTINATION: VESSEL "Copper".',
       'THE SHIP GROWS QUIET BEHIND YOU.',
       'PROCEED TO EXIT INTERFACE.',
     ],

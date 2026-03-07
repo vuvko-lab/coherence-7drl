@@ -476,7 +476,8 @@ export interface GameState {
   rootPrivileges: string[];            // named privileges collected (ROOT READ, WRITE, EXEC, ID, PASS)
   killedEntities: { name: string; kind: EntityKind }[];  // for victory stats
   finalClusterId: number;              // cluster ID where victory condition is checked (default 5)
-  gameOver?: boolean;                  // true when player exits the final cluster
+  gameOver?: boolean;                  // true when player exits the final cluster or dies
+  playerDead?: boolean;                // true when player coherence reaches 0
   // Collapse ambient glitch tiles (temporary visual artifacts)
   collapseGlitchTiles: Map<string, { glyph: string; fg: string; expireTick: number }>;
   selfPanelRevealed: boolean;         // false until player interacts with tutorial echo (or skips cluster 0)
