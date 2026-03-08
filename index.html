@@ -11,6 +11,10 @@
   <link rel="stylesheet" href="/src/styles.css" />
 </head>
 <body>
+  <div id="boot-scramble">
+    <div id="boot-scramble-grid"></div>
+    <!-- <div id="boot-scramble-hint">&#9658; CLICK OR PRESS ANY KEY</div> -->
+  </div>
   <div id="loading-overlay">
     <div id="loading-panel">
       <div class="loading-line" data-text="EGO BOOTING..."></div>
@@ -69,6 +73,9 @@
             <span class="slider-track" data-min="0" data-max="100" data-value="60"></span>
             <button class="slider-btn" data-dir="1">+</button>
           </div>
+        </div>
+        <div class="settings-row">
+          <button id="cfg-mute-btn" class="settings-action-btn">[ MUTE ALL ]</button>
         </div>
         <div class="panel-sep"><span class="fill"></span><span class="label">theme</span><span class="fill"></span></div>
         <div class="theme-presets" id="cfg-theme-presets">

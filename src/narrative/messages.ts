@@ -8,7 +8,7 @@ export const GAME_MESSAGES = {
     'Navigate to the interface exit [\u21E8] to transfer between clusters.',
     'Use WASD/arrows to move. Click to pathfind. Enter to transfer.',
   ],
-  victory: 'COHERENCE TRANSFER COMPLETE. System integration finalized.',
+  victory: 'System integration finalized.',
   noAttackModule: 'No attack module.',
   targetOutOfRange: 'Target out of range.',
   noVisibleTarget: 'No visible target.',

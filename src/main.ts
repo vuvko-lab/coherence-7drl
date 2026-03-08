@@ -617,7 +617,7 @@ function openTerminalOverlay() {
     jumpBtn.textContent = '> [EGOCAST] transfer to nearby vessel — leave this ship behind';
     jumpBtn.addEventListener('click', () => {
       state.narrativeChoice = 'jump';
-      addMessage(state, 'COHERENCE TRANSFER LOCKED. Proceed to exit interface.', 'important');
+      addMessage(state, 'INITIALIZING EGO CASTING. Proceed to exit interface.', 'important');
       showFinalTerminalConfirmation('jump');
       renderAll();
     });
@@ -664,7 +664,8 @@ function openTerminalOverlay() {
 
   revealLines(terminalOptions.querySelectorAll('.terminal-opt-btn'), contentEls.length * 40 + 20);
   terminalOverlay.classList.add('open');
-  soundManager.startAmbientOnce('terminal_open');
+  soundManager.duckAmbient(0.2);
+  soundManager.play('terminal_open', { debounceMs: 0 });
 }
 
 function showFinalTerminalConfirmation(choice: 'restore' | 'jump') {
@@ -689,7 +690,8 @@ function showFinalTerminalConfirmation(choice: 'restore' | 'jump') {
 function closeTerminalOverlay() {
   terminalOverlay.classList.remove('open');
   soundManager.play('ui_close');
-  soundManager.stopAmbient(500);
+  soundManager.unduckAmbient();
+  startRoomAmbient();
   state.openTerminal = undefined;
 }
 
@@ -807,7 +809,8 @@ function renderDataArchive(item: import('./types').Interactable) {
         item.archiveCurrentLines = sampleLines(pool, 3 + Math.floor(Math.random() * 2));
         item.archiveCurrentCategory = catKey;
         item.archiveDecayAccum = (item.archiveDecayAccum ?? 0) + 1;
-        glitchBarSweep().then(() => { renderDataArchive(item); });
+        void glitchDataBleed();
+        renderDataArchive(item);
       });
       iaChoices.appendChild(btn);
     }
@@ -855,8 +858,9 @@ function openInteractableOverlay() {
   if (!item) return;
 
   if (item.isDataArchive) {
-    if (item.corrupted) glitchHorizontalTear().then(() => glitchBarSweep());
-    soundManager.startAmbientOnce('archive_open');
+    void glitchDataBleed();
+    soundManager.duckAmbient(0.2);
+    soundManager.play('archive_open', { debounceMs: 0 });
     renderDataArchive(item);
     return;
   }
@@ -868,8 +872,9 @@ function openInteractableOverlay() {
   if (item.kind === 'lost_echo' || item.corrupted) {
     glitchHorizontalTear().then(() => glitchBarSweep());
   }
+  soundManager.duckAmbient(0.2);
   if (item.kind === 'lost_echo') {
-    soundManager.startAmbientOnce('echo_appear');
+    soundManager.play('echo_appear', { debounceMs: 0 });
   } else {
     soundManager.play('ui_open', { category: 'ui', volume: 0.5 });
   }
@@ -952,7 +957,8 @@ function closeInteractableOverlay() {
   const closedRef = state.openInteractable;
   interactableOverlay.classList.remove('open');
   soundManager.play('ui_close');
-  soundManager.stopAmbient(500);
+  soundManager.unduckAmbient();
+  startRoomAmbient();
   state.openInteractable = undefined;
 
   // Tutorial echo close → trigger SELF panel reveal
@@ -1415,6 +1421,42 @@ function renderAll() {
   }
 }
 
+// ── Room ambient ──
+
+function startRoomAmbient(fadeInMs = 300): void {
+  const cluster = state.clusters.get(state.currentClusterId)!;
+  const px = state.player.position.x;
+  const py = state.player.position.y;
+  const playerRoom = cluster.rooms.find(r =>
+    px >= r.x && px < r.x + r.w && py >= r.y && py < r.y + r.h);
+
+  const hazardType = playerRoom?.roomType;
+  const hazardAmbientKey = hazardType ? `ambient_${hazardType}` : null;
+  if (hazardAmbientKey && soundManager.hasSound(hazardAmbientKey)) {
+    soundManager.startAmbient(hazardAmbientKey, fadeInMs);
+  } else {
+    const scenario = playerRoom?.scenario;
+    const functional = playerRoom?.tags.functional;
+    let pool: string[];
+
+    if (scenario === 'spooky_astronauts' || scenario === 'broken_sleever') {
+      pool = ['room_spooky_1', 'room_spooky_2', 'room_spooky_3'];
+    } else if (functional === 'engine_room' || functional === 'reactor') {
+      pool = ['room_geodrone_1', 'room_geodrone_2', 'room_geodrone_3', 'room_industrial_1'];
+    } else if (functional === 'maintenance') {
+      pool = ['room_geodrone_1', 'room_geodrone_2', 'room_geodrone_3'];
+    } else if (functional === 'bridge' || functional === 'barracks') {
+      pool = ['room_bridge_1'];
+    } else if (functional === 'server_rack' || functional === 'lab') {
+      pool = ['room_server_1'];
+    } else {
+      pool = ['room_general_1', 'room_general_2', 'room_general_3', 'room_general_4', 'room_general_5'];
+    }
+
+    soundManager.startAmbientFromPool(pool, fadeInMs);
+  }
+}
+
 // ── Input handling ──
 
 function onAction(action: PlayerAction) {
@@ -1480,40 +1522,7 @@ function onAction(action: PlayerAction) {
   state.pendingSounds = [];
 
   // Ambient loop management — functional room tag takes priority, then hazard, then general
-  {
-    const cluster = state.clusters.get(state.currentClusterId)!;
-    const px = state.player.position.x;
-    const py = state.player.position.y;
-    const playerRoom = cluster.rooms.find(r =>
-      px >= r.x && px < r.x + r.w && py >= r.y && py < r.y + r.h);
-
-    const hazardType = playerRoom?.roomType;
-    const hazardAmbientKey = hazardType ? `ambient_${hazardType}` : null;
-    if (hazardAmbientKey && soundManager.hasSound(hazardAmbientKey)) {
-      soundManager.startAmbient(hazardAmbientKey);
-    } else {
-      // Pick pool by scenario first, then functional tag, then general fallback
-      const scenario = playerRoom?.scenario;
-      const functional = playerRoom?.tags.functional;
-      let pool: string[];
-
-      if (scenario === 'spooky_astronauts' || scenario === 'broken_sleever') {
-        pool = ['room_spooky_1', 'room_spooky_2', 'room_spooky_3'];
-      } else if (functional === 'engine_room' || functional === 'reactor') {
-        pool = ['room_geodrone_1', 'room_geodrone_2', 'room_geodrone_3', 'room_industrial_1'];
-      } else if (functional === 'maintenance') {
-        pool = ['room_geodrone_1', 'room_geodrone_2', 'room_geodrone_3'];
-      } else if (functional === 'bridge' || functional === 'barracks') {
-        pool = ['room_bridge_1'];
-      } else if (functional === 'server_rack' || functional === 'lab') {
-        pool = ['room_server_1'];
-      } else {
-        pool = ['room_general_1', 'room_general_2', 'room_general_3', 'room_general_4', 'room_general_5'];
-      }
-
-      soundManager.startAmbientFromPool(pool);
-    }
-  }
+  startRoomAmbient();
 
   // Hazard tile entry glitch
   if (action.kind === 'move') {
@@ -1917,6 +1926,27 @@ for (const { id, cat } of [
   }
 }
 
+// Mute button
+{
+  const muteBtn = document.getElementById('cfg-mute-btn') as HTMLButtonElement | null;
+  const masterSliderEl = document.getElementById('cfg-vol-master')!;
+  let savedVolBeforeMute: number | null = null;
+  muteBtn?.addEventListener('click', () => {
+    soundManager.init();
+    if (savedVolBeforeMute === null) {
+      savedVolBeforeMute = soundManager.getVolume('master');
+      soundManager.setVolume('master', 0);
+      setSliderValue(masterSliderEl, 0);
+      muteBtn.textContent = '[ UNMUTE ]';
+    } else {
+      soundManager.setVolume('master', savedVolBeforeMute);
+      setSliderValue(masterSliderEl, Math.round(savedVolBeforeMute * 100));
+      savedVolBeforeMute = null;
+      muteBtn.textContent = '[ MUTE ALL ]';
+    }
+  });
+}
+
 const aboutBtn = document.getElementById('about-btn')!;
 const aboutOverlay = document.getElementById('about-overlay')!;
 
@@ -2059,6 +2089,10 @@ logAreaEl.querySelectorAll('.log-expand-btn').forEach(btn => {
 // ── Loading screen ──
 
 const loadingOverlay = document.getElementById('loading-overlay')!;
+loadingOverlay.style.backgroundImage = `url('${import.meta.env.BASE_URL}coherence-back.png')`;
+loadingOverlay.style.backgroundSize = 'cover';
+loadingOverlay.style.backgroundPosition = 'center';
+loadingOverlay.style.backgroundRepeat = 'no-repeat';
 const loadingLines = Array.from(loadingOverlay.querySelectorAll<HTMLElement>('.loading-line'));
 
 function runLoadingScreen() {
@@ -2069,13 +2103,13 @@ function runLoadingScreen() {
   });
 
   let animDone = false;
-  let audioDone = false;
+  let dismissed = false;
   // Duration of the first scramble: (lines-1)*lineDelay + ticks*tickMs = 1*300 + 5*60 = 600ms
   const firstScrambleDurationMs = (loadingLines.length - 1) * 300 + 5 * 60;
-  const scrambleStartTime = performance.now();
 
   const tryDismiss = () => {
-    if (!animDone || !audioDone) return;
+    if (!animDone || dismissed) return;
+    dismissed = true;
     // Append [COMPLETE] suffix spans and scramble-reveal only those
     const suffixes: HTMLElement[] = [];
     loadingLines.forEach(el => {
@@ -2096,37 +2130,75 @@ function runLoadingScreen() {
           scrambleReveal(Array.from(document.querySelectorAll<HTMLElement>(
             '#map-container, #map-status-bar, #log-general, #log-alert',
           )), () => {}, 120, 4, 50);
+          // Start room ambient with a slow fade-in after the reveal
+          startRoomAmbient(2000);
         }, 500);
       }, 300);
     }, 200, 4, 50);
   };
 
-  // Scramble-reveal the loading lines
-  scrambleReveal(loadingLines, () => { animDone = true; tryDismiss(); }, 300, 5, 60);
-
-  // Start audio loading; play boot_glitch when ready, synced to remaining scramble time
+  // Load boot_glitch first, then start animation and sound together
   soundManager.init().then(() => {
-    const elapsed = performance.now() - scrambleStartTime;
-    const remaining = Math.max(50, firstScrambleDurationMs - elapsed);
-    soundManager.play('boot_glitch', { debounceMs: 0, stopAfterMs: remaining, fadeOutMs: 200 });
-    audioDone = true;
-    tryDismiss();
+    soundManager.play('boot_glitch', { debounceMs: 0, stopAfterMs: firstScrambleDurationMs, fadeOutMs: 200 });
+    scrambleReveal(loadingLines, () => { animDone = true; tryDismiss(); }, 300, 5, 60);
   });
 }
 
-// Start loading on first user interaction (needed for AudioContext)
+// ── Pre-gesture boot scramble ──
+
+const bootScrambleEl = document.getElementById('boot-scramble')!;
+const bootScrambleGrid = document.getElementById('boot-scramble-grid')!;
+const BOOT_CHARS = '█▓▒░╬║═╔╗╚╝╠╣╦╩┼─│┌┐└┘▪·';
+const BOOT_ROWS = 7, BOOT_COLS = 32;
+
+const bootScrambleTimer = setInterval(() => {
+  let text = '';
+  for (let r = 0; r < BOOT_ROWS; r++) {
+    for (let c = 0; c < BOOT_COLS; c++) {
+      text += Math.random() < 0.12
+        ? BOOT_CHARS[Math.floor(Math.random() * BOOT_CHARS.length)]
+        : ' ';
+    }
+    if (r < BOOT_ROWS - 1) text += '\n';
+  }
+  bootScrambleGrid.textContent = text;
+}, 80);
+
+// Fade out boot scramble (idempotent — safe to call from both image-ready and gesture)
+let bootScrambleDone = false;
+function fadeBootScramble() {
+  if (bootScrambleDone) return;
+  bootScrambleDone = true;
+  clearInterval(bootScrambleTimer);
+  bootScrambleEl.classList.add('fade-out');
+  setTimeout(() => { bootScrambleEl.remove(); }, 500);
+}
+
+// Auto-fade when cover image is loaded (or after 3s timeout)
+Promise.race([
+  new Promise<void>(resolve => {
+    const img = new Image();
+    img.onload = () => resolve();
+    img.onerror = () => resolve();
+    img.src = import.meta.env.BASE_URL + 'coherence-back.png';
+  }),
+  new Promise<void>(resolve => setTimeout(resolve, 3000)),
+]).then(fadeBootScramble);
+
+// Start boot sequence on first user interaction
 let loadingStarted = false;
 function startLoadOnGesture() {
   if (loadingStarted) return;
   loadingStarted = true;
   document.removeEventListener('click', startLoadOnGesture);
   document.removeEventListener('keydown', startLoadOnGesture);
+  fadeBootScramble(); // fade immediately if image not ready yet
   runLoadingScreen();
 }
 document.addEventListener('click', startLoadOnGesture);
 document.addEventListener('keydown', startLoadOnGesture);
 
-// Show initial state — prompt user to interact
+// Restore click prompt in loading panel (visible once scramble fades)
 loadingLines[0].textContent = '[ CLICK OR PRESS ANY KEY ]';
 for (let i = 1; i < loadingLines.length; i++) loadingLines[i].textContent = '';
 

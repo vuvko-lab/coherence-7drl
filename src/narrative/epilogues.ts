@@ -21,7 +21,7 @@ export const VICTORY_EPILOGUES: Record<string, string[]> = {
     'that is waiting to be seen.',
   ],
   jump: [
-    'Coherence transfer initiated.',
+    'Ego casting initiated.',
     'The ship fell away behind you \u2014 a fading signal,',
     'a catalog of ghosts, a warzone of programms.',
     '',

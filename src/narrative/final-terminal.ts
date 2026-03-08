@@ -10,7 +10,7 @@ export const FINAL_TERMINAL_CONFIRM: Record<'restore' | 'jump', string[]> = {
     'PROCEED TO EXIT INTERFACE.',
   ],
   jump: [
-    'COHERENCE TRANSFER LOCKED.',
+    'EGO CASTING LOCKED. LOCKED.',
     'DESTINATION: NEARBY VESSEL "COPPER".',
     '',
     'PROCEED TO EXIT INTERFACE.',

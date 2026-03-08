@@ -642,6 +642,21 @@ body {
   border-color: var(--theme-accent);
 }
 
+.settings-action-btn {
+  background: none;
+  border: 1px solid var(--theme-dim);
+  color: var(--theme-dim);
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  padding: 3px 8px;
+}
+
+.settings-action-btn:hover {
+  border-color: var(--theme-accent);
+  color: var(--theme-accent);
+}
+
 .cfg-reboot-btn {
   background: none;
   border: 1px solid var(--theme-dim);
@@ -1447,12 +1462,51 @@ body {
   color: var(--theme-bg);
 }
 
+/* --- Boot scramble (pre-gesture) --- */
+#boot-scramble {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: var(--theme-bg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2.5rem;
+  transition: opacity 0.5s ease;
+  pointer-events: all;
+}
+
+#boot-scramble.fade-out {
+  opacity: 0;
+  pointer-events: none;
+}
+
+#boot-scramble-grid {
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--theme-dim);
+  line-height: 1.5;
+  white-space: pre;
+  letter-spacing: 0.1em;
+}
+
+#boot-scramble-hint {
+  color: var(--theme-accent);
+  animation: boot-hint-blink 1.4s step-end infinite;
+}
+
+@keyframes boot-hint-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
 /* --- Loading overlay --- */
 #loading-overlay {
   position: fixed;
   inset: 0;
   z-index: 999;
-  background: var(--theme-bg) url('coherence-back.png') center/cover no-repeat;
+  background: var(--theme-bg);
   display: flex;
   justify-content: center;
   align-items: center;
@@ -1465,6 +1519,7 @@ body {
 }
 
 #loading-panel {
+  background: var(--theme-bg);
   border: 1px solid var(--theme-dim);
   padding: 1.5rem 3rem;
   min-width: 320px;

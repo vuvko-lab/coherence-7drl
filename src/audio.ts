@@ -129,26 +129,34 @@ class SoundManager {
 
       this.loadVolumes();
 
-      // Preload all buffers in parallel
-      const entries = Object.entries(SOUND_REGISTRY);
-      const results = await Promise.allSettled(
-        entries.map(async ([id, def]) => {
-          try {
-            const resp = await fetch(import.meta.env.BASE_URL + def.path);
-            if (!resp.ok) return;
-            const arrayBuf = await resp.arrayBuffer();
-            const audioBuf = await this.ctx!.decodeAudioData(arrayBuf);
-            this.buffers.set(id, audioBuf);
-          } catch {
-            // Silently skip missing/invalid files
-          }
-        })
-      );
-      void results; // consumed by allSettled
+      // Load boot_glitch first so the loading screen animation can start immediately
+      await this._loadOne('boot_glitch');
       this._ready = true;
+
+      // Load all remaining sounds in the background
+      void this._loadRemaining();
     } catch {
       // AudioContext not available (headless, old browser, etc.)
     }
+  }
+
+  private async _loadOne(id: string): Promise<void> {
+    const def = SOUND_REGISTRY[id];
+    if (!def || !this.ctx) return;
+    try {
+      const resp = await fetch(import.meta.env.BASE_URL + def.path);
+      if (!resp.ok) return;
+      const arrayBuf = await resp.arrayBuffer();
+      const audioBuf = await this.ctx.decodeAudioData(arrayBuf);
+      this.buffers.set(id, audioBuf);
+    } catch {
+      // Silently skip missing/invalid files
+    }
+  }
+
+  private async _loadRemaining(): Promise<void> {
+    const remaining = Object.keys(SOUND_REGISTRY).filter(id => !this.buffers.has(id));
+    await Promise.allSettled(remaining.map(id => this._loadOne(id)));
   }
 
   isReady(): boolean { return this._ready; }
@@ -209,8 +217,8 @@ class SoundManager {
     this.play(id, { pitchVariation: 0.1, debounceMs: 60 });
   }
 
-  /** Start an ambient loop with crossfade. */
-  startAmbient(id: string): void {
+  /** Start an ambient loop with crossfade. fadeInMs controls the fade-in duration. */
+  startAmbient(id: string, fadeInMs = 300): void {
     if (!this.ctx || !this.masterGain) return;
     // Already playing the same loop
     if (this.activeAmbient?.key === id) return;
@@ -231,7 +239,7 @@ class SoundManager {
     // Start new ambient loop
     const gainNode = this.ctx.createGain();
     gainNode.gain.setValueAtTime(0, now);
-    gainNode.gain.linearRampToValueAtTime(1, now + 0.3);
+    gainNode.gain.linearRampToValueAtTime(1, now + fadeInMs / 1000);
     gainNode.connect(this.categoryGains.ambient!);
 
     const source = this.ctx.createBufferSource();
@@ -246,7 +254,7 @@ class SoundManager {
   /** Start an ambient loop chosen randomly from a pool.
    *  If the currently playing ambient is already in the pool, keeps it playing.
    *  Filters to only loaded sounds before picking. */
-  startAmbientFromPool(ids: string[]): void {
+  startAmbientFromPool(ids: string[], fadeInMs = 300): void {
     const available = ids.filter(id => this.buffers.has(id));
     if (available.length === 0) return;
     // Keep current if it's already in this pool
@@ -259,7 +267,7 @@ class SoundManager {
       ? this.roomAmbientKey
       : available[Math.floor(Math.random() * available.length)];
     this.roomAmbientKey = resume;
-    this.startAmbient(resume);
+    this.startAmbient(resume, fadeInMs);
   }
 
   /** Start a non-looping sound on the ambient channel (crossfades like ambient). */
@@ -299,6 +307,20 @@ class SoundManager {
         if (this.roomAmbientKey) this.startAmbient(this.roomAmbientKey);
       }
     };
+  }
+
+  /** Duck the ambient to a low level during dialog (fade over fadeMs). */
+  duckAmbient(level = 0.2, fadeMs = 400): void {
+    if (!this.ctx || !this.activeAmbient) return;
+    const now = this.ctx.currentTime;
+    this.activeAmbient.gain.gain.linearRampToValueAtTime(level, now + fadeMs / 1000);
+  }
+
+  /** Restore ambient to full level after dialog (fade over fadeMs). */
+  unduckAmbient(fadeMs = 600): void {
+    if (!this.ctx || !this.activeAmbient) return;
+    const now = this.ctx.currentTime;
+    this.activeAmbient.gain.gain.linearRampToValueAtTime(1, now + fadeMs / 1000);
   }
 
   /** Stop the current ambient loop with fade-out. */
