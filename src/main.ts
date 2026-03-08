@@ -1479,19 +1479,39 @@ function onAction(action: PlayerAction) {
   }
   state.pendingSounds = [];
 
-  // Ambient loop management — track player room hazard type
+  // Ambient loop management — functional room tag takes priority, then hazard, then general
   {
     const cluster = state.clusters.get(state.currentClusterId)!;
     const px = state.player.position.x;
     const py = state.player.position.y;
     const playerRoom = cluster.rooms.find(r =>
       px >= r.x && px < r.x + r.w && py >= r.y && py < r.y + r.h);
+
     const hazardType = playerRoom?.roomType;
-    const ambientKey = hazardType ? `ambient_${hazardType}` : null;
-    if (ambientKey && soundManager.hasSound(ambientKey)) {
-      soundManager.startAmbient(ambientKey);
+    const hazardAmbientKey = hazardType ? `ambient_${hazardType}` : null;
+    if (hazardAmbientKey && soundManager.hasSound(hazardAmbientKey)) {
+      soundManager.startAmbient(hazardAmbientKey);
     } else {
-      soundManager.stopAmbient(500);
+      // Pick pool by scenario first, then functional tag, then general fallback
+      const scenario = playerRoom?.scenario;
+      const functional = playerRoom?.tags.functional;
+      let pool: string[];
+
+      if (scenario === 'spooky_astronauts' || scenario === 'broken_sleever') {
+        pool = ['room_spooky_1', 'room_spooky_2', 'room_spooky_3'];
+      } else if (functional === 'engine_room' || functional === 'reactor') {
+        pool = ['room_geodrone_1', 'room_geodrone_2', 'room_geodrone_3', 'room_industrial_1'];
+      } else if (functional === 'maintenance') {
+        pool = ['room_geodrone_1', 'room_geodrone_2', 'room_geodrone_3'];
+      } else if (functional === 'bridge' || functional === 'barracks') {
+        pool = ['room_bridge_1'];
+      } else if (functional === 'server_rack' || functional === 'lab') {
+        pool = ['room_server_1'];
+      } else {
+        pool = ['room_general_1', 'room_general_2', 'room_general_3', 'room_general_4', 'room_general_5'];
+      }
+
+      soundManager.startAmbientFromPool(pool);
     }
   }
 

@@ -15,42 +15,57 @@ type SoundCategory = 'sfx' | 'ui' | 'ambient';
 
 const SOUND_REGISTRY: Record<string, { path: string; category: SoundCategory }> = {
   // Movement
-  step1:              { path: '/sounds/movement/step1.wav', category: 'sfx' },
-  step2:              { path: '/sounds/movement/step2.wav', category: 'sfx' },
-  step3:              { path: '/sounds/movement/step3.wav', category: 'sfx' },
-  door_open:          { path: '/sounds/movement/door_open.wav', category: 'sfx' },
-  door_close:         { path: '/sounds/movement/door_close.wav', category: 'sfx' },
-  transfer:           { path: '/sounds/movement/transfer.wav', category: 'sfx' },
+  step1:              { path: 'sounds/movement/step1.wav', category: 'sfx' },
+  step2:              { path: 'sounds/movement/step2.wav', category: 'sfx' },
+  step3:              { path: 'sounds/movement/step3.wav', category: 'sfx' },
+  door_open:          { path: 'sounds/movement/door_open.wav', category: 'sfx' },
+  door_close:         { path: 'sounds/movement/door_close.wav', category: 'sfx' },
+  transfer:           { path: 'sounds/movement/transfer.wav', category: 'sfx' },
   // Combat
-  shoot:              { path: '/sounds/combat/shoot.wav', category: 'sfx' },
-  shoot_alt:          { path: '/sounds/combat/shoot_alt.wav', category: 'sfx' },
-  beam:               { path: '/sounds/combat/beam.wav', category: 'sfx' },
-  hit:                { path: '/sounds/combat/hit.wav', category: 'sfx' },
-  melee:              { path: '/sounds/combat/melee.wav', category: 'sfx' },
-  entity_destroy:     { path: '/sounds/combat/destroy.wav', category: 'sfx' },
+  shoot:              { path: 'sounds/combat/shoot.wav', category: 'sfx' },
+  shoot_alt:          { path: 'sounds/combat/shoot_alt.wav', category: 'sfx' },
+  beam:               { path: 'sounds/combat/beam.wav', category: 'sfx' },
+  hit:                { path: 'sounds/combat/hit.wav', category: 'sfx' },
+  melee:              { path: 'sounds/combat/melee.wav', category: 'sfx' },
+  entity_destroy:     { path: 'sounds/combat/destroy.wav', category: 'sfx' },
   // UI
-  ui_click:           { path: '/sounds/ui/click.wav', category: 'ui' },
-  ui_open:            { path: '/sounds/ui/open.wav', category: 'ui' },
-  ui_close:           { path: '/sounds/ui/close.wav', category: 'ui' },
-  ui_select:          { path: '/sounds/ui/click.wav', category: 'ui' },
+  ui_click:           { path: 'sounds/ui/click.wav', category: 'ui' },
+  ui_open:            { path: 'sounds/ui/open.wav', category: 'ui' },
+  ui_close:           { path: 'sounds/ui/close.wav', category: 'ui' },
+  ui_select:          { path: 'sounds/ui/click.wav', category: 'ui' },
   // Hazard one-shots
-  hazard_enter:       { path: '/sounds/hazard/enter.wav', category: 'sfx' },
-  explosion:          { path: '/sounds/hazard/explosion.wav', category: 'sfx' },
-  seal:               { path: '/sounds/hazard/seal.wav', category: 'sfx' },
+  hazard_enter:       { path: 'sounds/hazard/enter.wav', category: 'sfx' },
+  explosion:          { path: 'sounds/hazard/explosion.wav', category: 'sfx' },
+  seal:               { path: 'sounds/hazard/seal.wav', category: 'sfx' },
   // Hazard ambient loops
-  ambient_firewall:       { path: '/sounds/hazard/firewall_loop.ogg', category: 'ambient' },
-  ambient_memory_leak:    { path: '/sounds/hazard/memory_leak_loop.ogg', category: 'ambient' },
-  ambient_corrupted:      { path: '/sounds/hazard/corruption_loop.ogg', category: 'ambient' },
-  ambient_gravity_well:   { path: '/sounds/hazard/gravity_well_loop.ogg', category: 'ambient' },
-  ambient_echo_chamber:   { path: '/sounds/hazard/echo_chamber_loop.ogg', category: 'ambient' },
-  ambient_cascade:        { path: '/sounds/hazard/cascade_loop.ogg', category: 'ambient' },
-  ambient_unstable:       { path: '/sounds/hazard/unstable_loop.ogg', category: 'ambient' },
+  ambient_firewall:       { path: 'sounds/hazard/firewall_loop.ogg', category: 'ambient' },
+  ambient_memory_leak:    { path: 'sounds/hazard/memory_leak_loop.ogg', category: 'ambient' },
+  ambient_corrupted:      { path: 'sounds/hazard/corruption_loop.ogg', category: 'ambient' },
+  ambient_gravity_well:   { path: 'sounds/hazard/gravity_well_loop.ogg', category: 'ambient' },
+  ambient_echo_chamber:   { path: 'sounds/hazard/echo_chamber_loop.ogg', category: 'ambient' },
+  ambient_cascade:        { path: 'sounds/hazard/cascade_loop.ogg', category: 'ambient' },
+  ambient_unstable:       { path: 'sounds/hazard/unstable_loop.ogg', category: 'ambient' },
+  // Room functional ambients
+  room_geodrone_1:    { path: 'sounds/room/geodrone_1.ogg', category: 'ambient' },
+  room_geodrone_2:    { path: 'sounds/room/geodrone_2.ogg', category: 'ambient' },
+  room_geodrone_3:    { path: 'sounds/room/geodrone_3.ogg', category: 'ambient' },
+  room_general_1:     { path: 'sounds/room/general_1.ogg', category: 'ambient' },
+  room_general_2:     { path: 'sounds/room/general_2.ogg', category: 'ambient' },
+  room_general_3:     { path: 'sounds/room/general_3.ogg', category: 'ambient' },
+  room_general_4:     { path: 'sounds/room/general_4.ogg', category: 'ambient' },
+  room_general_5:     { path: 'sounds/room/general_5.ogg', category: 'ambient' },
+  room_industrial_1:  { path: 'sounds/room/industrial_1.ogg', category: 'ambient' },
+  room_bridge_1:      { path: 'sounds/room/bridge_1.ogg', category: 'ambient' },
+  room_server_1:      { path: 'sounds/room/server_1.ogg', category: 'ambient' },
+  room_spooky_1:      { path: 'sounds/room/spooky_1.ogg', category: 'ambient' },
+  room_spooky_2:      { path: 'sounds/room/spooky_2.ogg', category: 'ambient' },
+  room_spooky_3:      { path: 'sounds/room/spooky_3.ogg', category: 'ambient' },
   // Narrative (played as non-looping ambient)
-  echo_appear:        { path: '/sounds/narrative/echo_appear.ogg', category: 'ambient' },
-  terminal_open:      { path: '/sounds/narrative/terminal_open.ogg', category: 'ambient' },
-  archive_open:       { path: '/sounds/narrative/archive_open.ogg', category: 'ambient' },
+  echo_appear:        { path: 'sounds/narrative/echo_appear.ogg', category: 'ambient' },
+  terminal_open:      { path: 'sounds/narrative/terminal_open.ogg', category: 'ambient' },
+  archive_open:       { path: 'sounds/narrative/archive_open.ogg', category: 'ambient' },
   // System
-  module_toggle:      { path: '/sounds/system/module_toggle.wav', category: 'ui' },
+  module_toggle:      { path: 'sounds/system/module_toggle.wav', category: 'ui' },
 };
 
 // ── Volume persistence keys ──
@@ -115,7 +130,7 @@ class SoundManager {
       const results = await Promise.allSettled(
         entries.map(async ([id, def]) => {
           try {
-            const resp = await fetch(def.path);
+            const resp = await fetch(import.meta.env.BASE_URL + def.path);
             if (!resp.ok) return;
             const arrayBuf = await resp.arrayBuffer();
             const audioBuf = await this.ctx!.decodeAudioData(arrayBuf);
@@ -211,6 +226,18 @@ class SoundManager {
     source.start();
 
     this.activeAmbient = { key: id, source, gain: gainNode };
+  }
+
+  /** Start an ambient loop chosen randomly from a pool.
+   *  If the currently playing ambient is already in the pool, keeps it playing.
+   *  Filters to only loaded sounds before picking. */
+  startAmbientFromPool(ids: string[]): void {
+    const available = ids.filter(id => this.buffers.has(id));
+    if (available.length === 0) return;
+    // Keep current if it's already in this pool
+    if (this.activeAmbient && available.includes(this.activeAmbient.key)) return;
+    const chosen = available[Math.floor(Math.random() * available.length)];
+    this.startAmbient(chosen);
   }
 
   /** Start a non-looping sound on the ambient channel (crossfades like ambient). */
