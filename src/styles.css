@@ -1160,6 +1160,19 @@ body {
   background: #0f2a1a;
 }
 
+.ia-choice-btn:disabled {
+  color: #446655;
+  border-color: #1a2a22;
+  cursor: default;
+  opacity: 0.5;
+}
+
+.ia-choice-btn:disabled:hover {
+  color: #446655;
+  border-color: #1a2a22;
+  background: transparent;
+}
+
 /* lost echo — ghostly teal tint */
 #interactable-panel.kind-lost-echo {
   border-color: #226644;

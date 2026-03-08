@@ -773,7 +773,7 @@ function openInteractableOverlay() {
   if (item.kind === 'lost_echo') {
     soundManager.startAmbientOnce('echo_appear');
   } else {
-    soundManager.play('ui_open', { category: 'ui' });
+    soundManager.play('ui_open', { category: 'ui', volume: 0.5 });
   }
 
   iaKindBadge.textContent = IA_KIND_LABELS[item.kind] ?? '[ UNKNOWN ]';
@@ -790,9 +790,36 @@ function openInteractableOverlay() {
     if (choice.requiresExitLocked && !cluster.exitLocked) continue;
     if (choice.requiresRootPartAvailable && item.rootPartTaken) continue;
 
+    // Check if this choice targets a hazard that's already been overridden
+    const isDeactivatedHazard = (() => {
+      // Direct deactivate action on already-cleared room
+      if (choice.action === 'deactivate_hazard') {
+        const rid = choice.deactivatesHazardRoomId;
+        if (rid != null) {
+          const room = cluster.rooms.find(r => r.id === rid);
+          return room?.roomType === 'normal';
+        }
+      }
+      // Navigation choice pointing to a deactivate_ node whose room is already normal
+      if (choice.nodeId?.startsWith('deactivate_')) {
+        const targetNode = item.dialog.find(n => n.id === choice.nodeId);
+        const deactChoice = targetNode?.choices.find(c => c.action === 'deactivate_hazard');
+        if (deactChoice?.deactivatesHazardRoomId != null) {
+          const room = cluster.rooms.find(r => r.id === deactChoice.deactivatesHazardRoomId);
+          return room?.roomType === 'normal';
+        }
+      }
+      return false;
+    })();
+
     const btn = document.createElement('button');
     btn.className = 'ia-choice-btn';
-    btn.textContent = `> ${choice.label}`;
+    if (isDeactivatedHazard) {
+      btn.textContent = `> ${choice.label} [OVERRIDDEN]`;
+      btn.disabled = true;
+    } else {
+      btn.textContent = `> ${choice.label}`;
+    }
     btn.addEventListener('click', () => {
       if (choice.nodeId) {
         item.currentNodeId = choice.nodeId;
@@ -1268,12 +1295,12 @@ function renderAll() {
     overviewEl.classList.remove('visible');
   }
 
-  // Open terminal overlay if requested
-  if (state.openTerminal) {
+  // Open terminal overlay if requested (skip if already showing)
+  if (state.openTerminal && !terminalOverlay.classList.contains('open')) {
     openTerminalOverlay();
   }
-  // Open interactable overlay if requested
-  if (state.openInteractable) {
+  // Open interactable overlay if requested (skip if already showing)
+  if (state.openInteractable && !interactableOverlay.classList.contains('open')) {
     openInteractableOverlay();
   }
 }

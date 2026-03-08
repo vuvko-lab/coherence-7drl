@@ -32,24 +32,24 @@ const SOUND_REGISTRY: Record<string, { path: string; category: SoundCategory }> 
   ui_click:           { path: '/sounds/ui/click.wav', category: 'ui' },
   ui_open:            { path: '/sounds/ui/open.wav', category: 'ui' },
   ui_close:           { path: '/sounds/ui/close.wav', category: 'ui' },
-  ui_select:          { path: '/sounds/ui/select.wav', category: 'ui' },
+  ui_select:          { path: '/sounds/ui/click.wav', category: 'ui' },
   // Hazard one-shots
   hazard_enter:       { path: '/sounds/hazard/enter.wav', category: 'sfx' },
   explosion:          { path: '/sounds/hazard/explosion.wav', category: 'sfx' },
   seal:               { path: '/sounds/hazard/seal.wav', category: 'sfx' },
   // Hazard ambient loops
-  ambient_firewall:       { path: '/sounds/hazard/firewall_loop.wav', category: 'ambient' },
-  ambient_memory_leak:    { path: '/sounds/hazard/memory_leak_loop.wav', category: 'ambient' },
-  ambient_corrupted:      { path: '/sounds/hazard/corruption_loop.wav', category: 'ambient' },
-  ambient_gravity_well:   { path: '/sounds/hazard/gravity_well_loop.wav', category: 'ambient' },
-  ambient_quarantine:     { path: '/sounds/hazard/quarantine_loop.wav', category: 'ambient' },
-  ambient_echo_chamber:   { path: '/sounds/hazard/echo_chamber_loop.wav', category: 'ambient' },
-  ambient_cascade:        { path: '/sounds/hazard/cascade_loop.wav', category: 'ambient' },
-  ambient_unstable:       { path: '/sounds/hazard/unstable_loop.wav', category: 'ambient' },
+  ambient_firewall:       { path: '/sounds/hazard/firewall_loop.ogg', category: 'ambient' },
+  ambient_memory_leak:    { path: '/sounds/hazard/memory_leak_loop.ogg', category: 'ambient' },
+  ambient_corrupted:      { path: '/sounds/hazard/corruption_loop.ogg', category: 'ambient' },
+  ambient_gravity_well:   { path: '/sounds/hazard/gravity_well_loop.ogg', category: 'ambient' },
+  ambient_quarantine:     { path: '/sounds/hazard/quarantine_loop.ogg', category: 'ambient' },
+  ambient_echo_chamber:   { path: '/sounds/hazard/echo_chamber_loop.ogg', category: 'ambient' },
+  ambient_cascade:        { path: '/sounds/hazard/cascade_loop.ogg', category: 'ambient' },
+  ambient_unstable:       { path: '/sounds/hazard/unstable_loop.ogg', category: 'ambient' },
   // Narrative (played as non-looping ambient)
-  echo_appear:        { path: '/sounds/narrative/echo_appear.wav', category: 'ambient' },
-  terminal_open:      { path: '/sounds/narrative/terminal_open.wav', category: 'ambient' },
-  archive_open:       { path: '/sounds/narrative/archive_open.wav', category: 'ambient' },
+  echo_appear:        { path: '/sounds/narrative/echo_appear.ogg', category: 'ambient' },
+  terminal_open:      { path: '/sounds/narrative/terminal_open.ogg', category: 'ambient' },
+  archive_open:       { path: '/sounds/narrative/archive_open.ogg', category: 'ambient' },
   // System
   module_toggle:      { path: '/sounds/system/module_toggle.wav', category: 'ui' },
 };
@@ -136,7 +136,7 @@ class SoundManager {
   isReady(): boolean { return this._ready; }
 
   /** Play a one-shot sound. */
-  play(id: string, opts?: { category?: SoundCategory; pitchVariation?: number; debounceMs?: number }): void {
+  play(id: string, opts?: { category?: SoundCategory; pitchVariation?: number; debounceMs?: number; volume?: number }): void {
     if (!this.ctx || !this.masterGain) return;
     const buf = this.buffers.get(id);
     if (!buf) return;
@@ -159,6 +159,7 @@ class SoundManager {
       source.playbackRate.value = 1 + (Math.random() * 2 - 1) * opts.pitchVariation;
     }
     const envGain = this.ctx.createGain();
+    if (opts?.volume != null) envGain.gain.value = opts.volume;
     envGain.connect(gainNode);
     source.connect(envGain);
     source.start();
