@@ -202,7 +202,7 @@ export class Renderer {
       shootingEffects?: ShootingEffect[];
       hazardFogMarks?: Map<string, HazardOverlayType>;
       markedEntities?: Set<number>;
-      aimOverlay?: { origin: Position; radius: number; target?: Position };
+      aimOverlay?: { origin: Position; radius: number; target?: Position; showCursor?: boolean };
       enemyVision?: Set<string>; // "x,y" keys of tiles visible to hovered entity
       enemyVisionColor?: string; // tint color for the vision overlay
       collapseGlitchTiles?: Map<string, { glyph: string; fg: string; expireTick: number }>;
@@ -340,10 +340,11 @@ export class Renderer {
             // Ring edge: brighter
             if (dist > ao.radius - 1.2) bg = '#252500';
           }
-          // Aimed target cell: bright highlight
+          // Aimed target cell: bright highlight + cursor glyph
           if (ao.target && ao.target.x === x && ao.target.y === y) {
             bg = '#3a2a00';
             fg = '#ffcc00';
+            if (ao.showCursor) glyph = '◎';
           }
         }
 

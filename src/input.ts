@@ -28,6 +28,10 @@ export class InputHandler {
   private onModuleNav: ModuleNavCallback;
   private bound = false;
   moduleMenuOpen = false;
+  private _aimMode = false;
+  onAimMove?: (dx: number, dy: number) => void;
+
+  setAimMode(active: boolean) { this._aimMode = active; }
 
   constructor(onAction: ActionCallback, onMapClick: ClickCallback, onAimToggle: AimToggleCallback, onModuleNav: ModuleNavCallback) {
     this.onAction = onAction;
@@ -89,7 +93,13 @@ export class InputHandler {
     const dir = KEY_MAP[e.key];
     if (dir) {
       e.preventDefault();
-      this.onAction({ kind: 'move', dir });
+      if (this._aimMode) {
+        const dx = dir === 'left' ? -1 : dir === 'right' ? 1 : 0;
+        const dy = dir === 'up' ? -1 : dir === 'down' ? 1 : 0;
+        this.onAimMove?.(dx, dy);
+      } else {
+        this.onAction({ kind: 'move', dir });
+      }
       return;
     }
 
@@ -114,12 +124,6 @@ export class InputHandler {
       return;
     }
 
-    // Debug toggle
-    if (e.key === '`') {
-      e.preventDefault();
-      this.onAction({ kind: 'debug_toggle' });
-      return;
-    }
   };
 
   handleMapClick(pos: Position) {

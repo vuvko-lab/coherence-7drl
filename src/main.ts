@@ -57,6 +57,7 @@ const overviewEl = document.getElementById('panel-overview')!;
 let hoveredPos: Position | null = null;
 let lastTargetPanelKey: string | null = null;
 let aimMode = false;
+let aimCursor: Position | null = null;
 let showRangePreview = false; // corrupt.m module hover
 let moduleMenuOpen = false;
 let selectedModuleIdx = 0;
@@ -1036,6 +1037,17 @@ function triggerSelfReveal() {
 
 // ── Target panel ──
 
+const GLITCH_TARGET_CHARS = '█▓▒░╬║═╔╗╚╝╠╣╦╩┼─│┌┐└┘▪·';
+function glitchTargetText(s: string, x: number, y: number): string {
+  let r = (x * 73856093 ^ y * 19349663 ^ state.tick * 2246822519) >>> 0;
+  return Array.from(s).map(c => {
+    r = Math.imul(r ^ (r >>> 16), 0x45d9f3b);
+    r = (r ^ (r >>> 16)) >>> 0;
+    const frac = r / 0xffffffff;
+    return c === ' ' ? c : (frac < 0.4 ? GLITCH_TARGET_CHARS[r % GLITCH_TARGET_CHARS.length] : c);
+  }).join('');
+}
+
 function renderTargetPanel(pos: Position | null) {
   if (!pos) { targetPanelEl.innerHTML = ''; return; }
   const cluster = state.clusters.get(state.currentClusterId)!;
@@ -1092,20 +1104,88 @@ function renderTargetPanel(pos: Position | null) {
     html += `<div class="target-name">@ ${entity.name}</div>`;
     html += `<div class="stat-row"><span class="stat-label">that's you</span></div>`;
   } else {
-    // Tile info
-    const tileLabel = tile.type === TileType.Door ? (tile.doorOpen ? 'Door (open)' : 'Door')
-      : tile.type === TileType.Wall ? 'Wall'
-      : tile.type === TileType.Floor ? 'Floor'
-      : tile.type === TileType.InterfaceExit ? 'Interface Exit'
-      : tile.type === TileType.Terminal ? 'Terminal'
-      : 'Void';
-    html += `<div class="target-name">${tileLabel}</div>`;
-    if (tile.hazardOverlay) {
-      html += `<div class="stat-row"><span class="stat-label">hazard:</span><span class="stat-value target-faction-aggressive">${tile.hazardOverlay.type}</span></div>`;
-    }
-    const room = cluster.rooms.find(r => pos.x >= r.x && pos.x < r.x + r.w && pos.y >= r.y && pos.y < r.y + r.h);
-    if (room?.tags.functional) {
-      html += `<div class="stat-row"><span class="stat-label">room:</span><span class="stat-value">${room.tags.functional}</span></div>`;
+    const room = cluster.rooms.find(r => pos.x >= r.x && pos.x < r.x + r.w && pos.y >= r.y && pos.y < r.h + r.y);
+
+    // Interactable at position (shown over the tile)
+    const ia = tile.visible
+      ? cluster.interactables.find(i => i.position.x === pos.x && i.position.y === pos.y && !i.hidden)
+      : null;
+
+    if (ia) {
+      let iaGlyph: string;
+      let iaName: string;
+      let iaType: string;
+      if (ia.kind === 'lost_echo') {
+        iaGlyph = '◌'; iaName = 'Lost Echo'; iaType = 'echo';
+      } else if (ia.kind === 'info_terminal') {
+        iaGlyph = ia.corrupted ? '⌧' : '⊕';
+        iaName = ia.corrupted ? glitchTargetText('Terminal', pos.x, pos.y) : 'Terminal';
+        iaType = 'interface';
+      } else if (ia.isDataArchive) {
+        iaGlyph = ia.corrupted ? '≢' : '≡';
+        iaName = ia.corrupted ? glitchTargetText('Data Archive', pos.x, pos.y) : 'Data Archive';
+        iaType = 'archive';
+      } else {
+        iaGlyph = '◉'; iaName = 'Echo Fragment'; iaType = 'echo';
+      }
+      const nameColor = ia.corrupted ? 'color:var(--theme-dim)' : '';
+      html += `<div class="target-name" style="${nameColor}">${iaGlyph} ${iaName}</div>`;
+      html += `<div class="stat-row"><span class="stat-label">type:</span><span class="stat-value">${iaType}</span></div>`;
+      if (ia.corrupted) {
+        html += `<div class="stat-row"><span class="stat-label">status:</span><span class="stat-value target-faction-aggressive">corrupted</span></div>`;
+      } else if (ia.rewardTaken) {
+        html += `<div class="stat-row"><span class="stat-label">status:</span><span class="stat-value" style="color:var(--theme-dim)">accessed</span></div>`;
+      }
+    } else {
+      // Non-floor tiles and hazard-overlaid floors
+      const overlay = tile.hazardOverlay;
+      const isCorruption = overlay?.type === 'corruption';
+      const CORRUPTION_STAGE_NAMES = ['Degrading', 'Corrupted', 'Collapsed', 'Dissolved'];
+      const HAZARD_DISPLAY: Record<string, string> = {
+        flood: 'Memory Leak', spark: 'Firewall', scorch: 'Cascade',
+        beam: 'Echo Chamber', gravity: 'Gravity Well',
+      };
+
+      let tileGlyph = tile.glyph;
+      let tileName: string;
+      let nameStyle = '';
+
+      if (isCorruption) {
+        const stage = overlay!.stage ?? 0;
+        const stageName = CORRUPTION_STAGE_NAMES[stage] ?? 'Corrupted';
+        tileName = glitchTargetText(stageName, pos.x, pos.y);
+        nameStyle = stage >= 2 ? 'color:#cc1111' : 'color:#884444';
+      } else if (tile.type === TileType.Wall) {
+        tileName = 'Bulkhead';
+      } else if (tile.type === TileType.Door) {
+        if (!tile.walkable) { tileName = 'Sealed Door'; nameStyle = 'color:var(--theme-accent)'; }
+        else tileName = tile.doorOpen ? 'Door (open)' : 'Door';
+      } else if (tile.type === TileType.InterfaceExit) {
+        const isEntry = tile.glyph === '⇏';
+        tileName = isEntry ? 'Entry Interface' : 'Exit Interface';
+      } else if (tile.type === TileType.Terminal) {
+        tileName = 'Terminal';
+      } else if (tile.type === TileType.Floor) {
+        tileName = 'Floor';
+      } else {
+        tileName = 'Void';
+      }
+
+      html += `<div class="target-name" style="${nameStyle}">${tileGlyph} ${tileName}</div>`;
+
+      if (isCorruption) {
+        const stage = overlay!.stage ?? 0;
+        html += `<div class="stat-row"><span class="stat-label">stage:</span><span class="stat-value target-faction-aggressive">${CORRUPTION_STAGE_NAMES[stage]?.toLowerCase() ?? 'corrupted'}</span></div>`;
+      } else if (overlay) {
+        html += `<div class="stat-row"><span class="stat-label">hazard:</span><span class="stat-value target-faction-aggressive">${HAZARD_DISPLAY[overlay.type] ?? overlay.type}</span></div>`;
+      }
+
+      if (tile.type === TileType.InterfaceExit && tile.glyph === '⇨' && cluster.exitLocked) {
+        html += `<div class="stat-row"><span class="stat-label">status:</span><span class="stat-value target-faction-aggressive">LOCKED</span></div>`;
+      }
+      if (room?.tags.functional) {
+        html += `<div class="stat-row"><span class="stat-label">room:</span><span class="stat-value">${room.tags.functional}</span></div>`;
+      }
     }
   }
 
@@ -1249,28 +1329,34 @@ function showDeathOverlay() {
 // ── Aim mode ──
 
 function toggleAim() {
-  aimMode = !aimMode;
-  mapGridWrap.classList.toggle('aim-mode', aimMode);
-
-  // Show/hide aim banner
-  let banner = mapContainer.querySelector('.aim-banner');
   if (aimMode) {
-    if (!banner) {
-      banner = document.createElement('div');
-      banner.className = 'aim-banner';
-      // Insert before the grid wrap
-      mapContainer.insertBefore(banner, mapGridWrap);
-    }
-    banner.textContent = `── AIM MODE ── F/RMB to shoot · Esc to cancel ──`;
-  } else {
-    banner?.remove();
+    // Already in aim mode: shoot at cursor and exit
+    if (aimCursor) tryShootAt(aimCursor);
+    exitAim();
+    renderAll();
+    return;
   }
+  aimMode = true;
+  // Initialize cursor at player position
+  aimCursor = { ...state.player.position };
+  input.setAimMode(true);
+  mapGridWrap.classList.add('aim-mode');
+
+  let banner = mapContainer.querySelector('.aim-banner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.className = 'aim-banner';
+    mapContainer.insertBefore(banner, mapGridWrap);
+  }
+  banner.textContent = `── AIM MODE ── Arrows/WASD move cursor · F/click to shoot · Esc cancel ──`;
   renderAll();
 }
 
 function exitAim() {
   if (!aimMode) return;
   aimMode = false;
+  aimCursor = null;
+  input.setAimMode(false);
   mapGridWrap.classList.remove('aim-mode');
   mapContainer.querySelector('.aim-banner')?.remove();
 }
@@ -1303,8 +1389,9 @@ function renderAll() {
     ? { fill: state.alertFill, threats: state.alertThreats, budget: 15 }
     : undefined;
   const collapseOverlay = state.showCollapseOverlay ? currentCluster.collapseMap : undefined;
+  const aimTarget = aimMode ? (aimCursor ?? hoveredPos ?? undefined) : (hoveredPos ?? undefined);
   const aimOverlay = (aimMode || showRangePreview)
-    ? { origin: state.player.position, radius: CORRUPT_M_RANGE, target: hoveredPos ?? undefined }
+    ? { origin: state.player.position, radius: CORRUPT_M_RANGE, target: aimTarget, showCursor: aimMode }
     : undefined;
 
   // Compute enemy vision overlay for hovered entity
@@ -1383,8 +1470,9 @@ function renderAll() {
         }
       }
     }
-    renderTargetPanel(hoveredPos);
-    const targetKey = hoveredPos ? `${hoveredPos.x},${hoveredPos.y}` : null;
+    const targetPanelPos = aimMode ? aimCursor : hoveredPos;
+    renderTargetPanel(targetPanelPos);
+    const targetKey = targetPanelPos ? `${targetPanelPos.x},${targetPanelPos.y}` : null;
     if (targetKey !== lastTargetPanelKey) {
       lastTargetPanelKey = targetKey;
       scrambleReveal(Array.from(targetPanelEl.querySelectorAll<HTMLElement>(':scope > .panel-edge, .panel-body > *')), () => {}, 40, 3, 40);
@@ -1656,6 +1744,15 @@ function onModuleNav(dir: import('./input').ModuleNavDir) {
 
 const input = new InputHandler(onAction, onMapClick, toggleAim, onModuleNav);
 input.bind();
+
+input.onAimMove = (dx, dy) => {
+  if (!aimCursor) return;
+  const cluster = state.clusters.get(state.currentClusterId)!;
+  const nx = Math.max(0, Math.min(cluster.width - 1, aimCursor.x + dx));
+  const ny = Math.max(0, Math.min(cluster.height - 1, aimCursor.y + dy));
+  aimCursor = { x: nx, y: ny };
+  renderAll();
+};
 
 // Wire up module row clicks in SELF panel
 panelEl.addEventListener('click', (e) => {
