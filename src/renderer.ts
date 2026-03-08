@@ -201,6 +201,7 @@ export class Renderer {
       enemyVisionColor?: string; // tint color for the vision overlay
       collapseGlitchTiles?: Map<string, { glyph: string; fg: string; expireTick: number }>;
       smokeEffects?: SmokeEffect[];
+      invisibleMode?: boolean;
     },
   ) {
     if (!this.display) return;
@@ -474,7 +475,8 @@ export class Renderer {
     // Player on top
     const { x: px, y: py } = playerPos;
     if (px >= 0 && px < this.width && py >= 0 && py < this.height) {
-      this.display.draw(px, py, '@', COLORS.player, this.bgCache[py][px]);
+      const playerColor = extras?.invisibleMode ? COLORS.rememberedFg : COLORS.player;
+      this.display.draw(px, py, '@', playerColor, this.bgCache[py][px]);
     }
 
     // Shooting effects — only if within 20 tiles of player

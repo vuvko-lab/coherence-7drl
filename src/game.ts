@@ -1,5 +1,5 @@
 import {
-  GameState, Entity, Cluster, Position, PlayerAction, Tile,
+  GameState, Entity, Cluster, Position, PlayerAction, Tile, PlayerModule,
   TileType, DIR_DELTA, GameMessage, Direction, DebugLogEntry,
   Interactable, DialogChoice, Faction,
   ALERT_SUSPICIOUS, ALERT_ENEMY, ROOT_PRIVILEGES, COLORS,
@@ -91,7 +91,7 @@ export function createGame(initialSeed?: number): GameState {
     attackValue: 3,
     modules: [
       { id: 'alert.m', status: 'loaded' },
-      { id: 'overclock.m', status: 'loaded' },
+      { id: 'cloak.m', status: 'loaded' },
       { id: 'corrupt.m', status: 'loaded' },
     ],
   };
@@ -401,6 +401,10 @@ const CORRUPT_M_DAMAGE   = 40;
 const CORRUPT_M_COOLDOWN = 10; // ticks between shots
 const CORRUPT_M_FREE_SHOTS = 2; // shots per cluster with no coherence drain
 
+const CLOAK_DURATION   = 10; // ticks of invisibility
+const CLOAK_COOLDOWN   = 25; // ticks before can reactivate
+const CLOAK_FREE_USES  = 2;  // free activations per cluster
+
 function tryShoot(state: GameState, target: Position): boolean {
   const cluster = getCurrentCluster(state);
   const corrupt = state.player.modules?.find(m => m.id === 'corrupt.m' && m.status === 'loaded');
@@ -462,6 +466,9 @@ function tryShoot(state: GameState, target: Position): boolean {
     addMessage(state,
       `Corrupt shot hits ${targetEntity.name} for ${CORRUPT_M_DAMAGE}. (${targetEntity.coherence}/${targetEntity.maxCoherence})`,
       'combat');
+    if (targetEntity.coherence <= 0 && targetEntity.ai) {
+      state.killedEntities.push({ name: targetEntity.name, kind: targetEntity.ai.kind });
+    }
   }
 
   // Warn when the NEXT shot will start draining coherence
@@ -471,6 +478,60 @@ function tryShoot(state: GameState, target: Position): boolean {
   }
 
   return true;
+}
+
+// ── Cloak module ──
+
+export function activateCloak(state: GameState, cloak: PlayerModule): boolean {
+  if (cloak.status !== 'loaded') {
+    addMessage(state, 'cloak.m is offline.', 'alert');
+    return false;
+  }
+  if (cloak.active) {
+    addMessage(state, 'cloak.m already active.', 'alert');
+    return false;
+  }
+  if (cloak.cooldownUntilTick && state.tick < cloak.cooldownUntilTick) {
+    const remaining = cloak.cooldownUntilTick - state.tick;
+    addMessage(state, `cloak.m reloading... ${remaining} ticks remaining.`, 'alert');
+    return false;
+  }
+
+  const useCount = cloak.clusterUseCount ?? 0;
+  const overQuota = useCount - CLOAK_FREE_USES + 1; // >0 means this use drains
+  if (overQuota > 0 && state.player.coherence != null && !state.godMode) {
+    const drain = overQuota * 5;
+    state.player.coherence = Math.max(0, state.player.coherence - drain);
+    const rolledState = pick(['signal leak', 'phase drift', 'sync loss', 'buffer underrun', 'echo bleed']);
+    addMessage(state, `[LEAK] ${rolledState} in cloak.m — coherence drain: −${drain} (${state.player.coherence}/${state.player.maxCoherence}).`, 'hazard');
+  }
+
+  cloak.clusterUseCount = useCount + 1;
+  cloak.active = true;
+  cloak.cloakExpiresAtTick = state.tick + CLOAK_DURATION;
+  cloak.cooldownUntilTick = state.tick + CLOAK_COOLDOWN;
+  state.invisibleMode = true;
+
+  addMessage(state, `cloak.m engaged — invisible for ${CLOAK_DURATION} ticks.`, 'important');
+
+  if (useCount + 1 === CLOAK_FREE_USES) {
+    addMessage(state, 'cloak.m: next activation will drain coherence.', 'alert');
+  }
+
+  dlog(state, 'player', 'cloak_activate', `use#=${cloak.clusterUseCount} expires=${cloak.cloakExpiresAtTick}`);
+  return true;
+}
+
+function updateCloak(state: GameState): void {
+  const cloak = state.player.modules?.find(m => m.id === 'cloak.m');
+  if (!cloak?.active) return;
+  if (cloak.cloakExpiresAtTick && state.tick >= cloak.cloakExpiresAtTick) {
+    cloak.active = false;
+    cloak.cloakExpiresAtTick = undefined;
+    state.invisibleMode = false;
+    addMessage(state, 'cloak.m disengaged — you are visible again.', 'alert');
+    dlog(state, 'player', 'cloak_expire', `tick=${state.tick}`);
+  }
 }
 
 // ── Player actions ──
@@ -665,6 +726,17 @@ function tryTransfer(state: GameState): boolean {
   // Reset corrupt.m shot quota (two free shots per cluster)
   const corruptM = state.player.modules?.find(m => m.id === 'corrupt.m');
   if (corruptM) corruptM.clusterShotCount = 0;
+  // Reset cloak.m on transfer: end cloak, reset uses, clear cooldown
+  const cloakM = state.player.modules?.find(m => m.id === 'cloak.m');
+  if (cloakM) {
+    if (cloakM.active) {
+      cloakM.active = false;
+      cloakM.cloakExpiresAtTick = undefined;
+      state.invisibleMode = false;
+    }
+    cloakM.clusterUseCount = 0;
+    cloakM.cooldownUntilTick = undefined;
+  }
 
   state.pendingSounds.push('transfer');
   if (cluster.id === 0) {
@@ -781,6 +853,7 @@ export function processAction(state: GameState, action: PlayerAction): boolean {
     // Check coherence-low triggers after hazard damage
     checkNarrativeTriggers(state, 'coherence_low');
     updateAlertModule(state);
+    updateCloak(state);
 
     // Check if final terminal lockdown expired — unlock exit
     checkFinalTerminalLockExpiry(state, cluster);
@@ -1276,6 +1349,7 @@ export function stepAutoPath(state: GameState): boolean {
     updateHazards(state);
     applyTileHazardToPlayer(state);
     updateAlertModule(state);
+    updateCloak(state);
     return true;
   }
 
@@ -1337,6 +1411,7 @@ export function stepAutoPath(state: GameState): boolean {
     updateHazards(state);
     applyTileHazardToPlayer(state);
     updateAlertModule(state);
+    updateCloak(state);
 
     return true;
   }

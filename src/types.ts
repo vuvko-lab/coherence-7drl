@@ -412,11 +412,13 @@ export type ModuleId = 'alert.m' | 'overclock.m' | 'corrupt.m' | 'cloak.m' | 'sp
 export interface PlayerModule {
   id: ModuleId;
   status: ModuleStatus;
-  active?: boolean;              // overclock.m, cloak.m: toggled on/off
+  active?: boolean;              // cloak.m: toggled on/off
   alertActive?: boolean;         // alert.m only: currently detecting a threat?
   lastAlertTicks?: Map<string, number>; // alert.m: throttle per threat source
-  cooldownUntilTick?: number;    // corrupt.m: cannot fire until this tick
+  cooldownUntilTick?: number;    // corrupt.m, cloak.m: cannot activate until this tick
   clusterShotCount?: number;     // corrupt.m: shots fired this cluster (2 free, then drains coherence)
+  cloakExpiresAtTick?: number;   // cloak.m: tick when invisibility wears off
+  clusterUseCount?: number;      // cloak.m: activations this cluster (2 free, then drains coherence)
 }
 
 // ── Entity ──

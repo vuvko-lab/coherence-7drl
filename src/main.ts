@@ -1,4 +1,4 @@
-import { createGame, processAction, handleMapClick, stepAutoPath, addMessage, exportSave, exportDebugLog, loadSave, adminRegenCluster, adminTeleportToCluster, grantExitAccess, activateTerminal, executeInteractableAction, getEntityAt, CORRUPT_M_RANGE, hackFinalTerminal, makeDamagedBitMite } from './game';
+import { createGame, processAction, handleMapClick, stepAutoPath, addMessage, exportSave, exportDebugLog, loadSave, adminRegenCluster, adminTeleportToCluster, grantExitAccess, activateTerminal, executeInteractableAction, getEntityAt, CORRUPT_M_RANGE, hackFinalTerminal, makeDamagedBitMite, activateCloak } from './game';
 import { setDamageParams, getDamageParams, setGenSizeOverride, clearGenSizeOverride, getGenSizeOverride, clusterScaleForId } from './cluster';
 import { Renderer, renderSelfPanel, renderLogs, renderOverviewPanel, renderMapStatusBar } from './renderer';
 import { InputHandler } from './input';
@@ -1242,6 +1242,7 @@ function renderAll() {
     enemyVisionColor,
     collapseGlitchTiles: state.collapseGlitchTiles,
     smokeEffects: state.smokeEffects,
+    invisibleMode: state.invisibleMode,
   });
   if (state.selfPanelRevealed) {
     panelEl.style.display = '';
@@ -1499,11 +1500,11 @@ function onModuleNav(dir: import('./input').ModuleNavDir) {
       moduleMenuOpen = false;
       input.moduleMenuOpen = false;
       toggleAim();
-    } else if (mod.id === 'overclock.m' || mod.id === 'cloak.m') {
-      mod.active = !mod.active;
-      soundManager.play('module_toggle', { category: 'ui' });
+    } else if (mod.id === 'cloak.m') {
       moduleMenuOpen = false;
       input.moduleMenuOpen = false;
+      activateCloak(state, mod);
+      soundManager.play('module_toggle', { category: 'ui' });
       renderAll();
     } else {
       // passive modules (alert.m, spoof.m): no toggle
@@ -1982,7 +1983,7 @@ for (let i = 1; i < loadingLines.length; i++) loadingLines[i].textContent = '';
 
 loadSettings();
 renderAll();
-addMessage(state, 'Ready.', 'system');
+// addMessage(state, 'Ready.', 'debug');
 renderAll();
 
 scrambleReveal(Array.from(document.querySelectorAll<HTMLElement>(

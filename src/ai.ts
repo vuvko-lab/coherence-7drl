@@ -244,7 +244,8 @@ function updateBitMite(state: GameState, entity: Entity, cluster: Cluster) {
 
     case 'chase': {
       const chaseTarget = getEntityById(state, ai.targetId);
-      if (!chaseTarget || chaseTarget.clusterId !== entity.clusterId) {
+      if (!chaseTarget || chaseTarget.clusterId !== entity.clusterId
+        || (chaseTarget.id === state.player.id && state.invisibleMode)) {
         ai.aiState = 'wander';
         ai.targetId = undefined;
         return;
@@ -282,7 +283,8 @@ function updateBitMite(state: GameState, entity: Entity, cluster: Cluster) {
 
     case 'attack': {
       const attackTarget = getEntityById(state, ai.targetId);
-      if (!attackTarget || attackTarget.clusterId !== entity.clusterId) {
+      if (!attackTarget || attackTarget.clusterId !== entity.clusterId
+        || (attackTarget.id === state.player.id && state.invisibleMode)) {
         ai.aiState = 'wander';
         ai.targetId = undefined;
         return;
@@ -354,7 +356,8 @@ function updateLogicLeech(state: GameState, entity: Entity, cluster: Cluster) {
 
     case 'stalk': {
       const stalkTarget = getEntityById(state, ai.targetId);
-      if (!stalkTarget || stalkTarget.clusterId !== entity.clusterId) {
+      if (!stalkTarget || stalkTarget.clusterId !== entity.clusterId
+        || (stalkTarget.id === state.player.id && state.invisibleMode)) {
         ai.aiState = 'wall_walk'; ai.invisible = false; ai.actionCooldown = undefined; return;
       }
       const visible = canSee(cluster, entity.position, stalkTarget.position, ai.sightRadius, ai.wallPenetration);
@@ -401,8 +404,9 @@ function updateLogicLeech(state: GameState, entity: Entity, cluster: Cluster) {
 
       // Check for entity hit at charge destination
       const hitTarget = findEntityAt(state, cluster.id, nx, ny);
+      const hitIsInvisiblePlayer = hitTarget?.id === state.player.id && state.invisibleMode;
       const hitTargetFaction: Faction = hitTarget?.id === state.player.id ? 'player' : (hitTarget?.ai?.faction ?? 'neutral');
-      if (hitTarget && getRelation('aggressive', hitTargetFaction, state.alertLevel) === 'attack') {
+      if (hitTarget && !hitIsInvisiblePlayer && getRelation('aggressive', hitTargetFaction, state.alertLevel) === 'attack') {
         if (hitTarget.coherence !== undefined) {
           const pi = hitTarget.id === state.player.id;
           hitTarget.coherence = Math.max(0, hitTarget.coherence - entity.attackValue);
@@ -495,7 +499,8 @@ function updateSentry(state: GameState, entity: Entity, cluster: Cluster) {
 
     case 'chase': {
       const target = getEntityById(state, ai.targetId);
-      if (!target || target.clusterId !== entity.clusterId) {
+      if (!target || target.clusterId !== entity.clusterId
+        || (target.id === state.player.id && state.invisibleMode)) {
         ai.aiState = 'patrol';
         ai.targetId = undefined;
         return;
@@ -530,7 +535,8 @@ function updateSentry(state: GameState, entity: Entity, cluster: Cluster) {
 
     case 'attack': {
       const target = getEntityById(state, ai.targetId);
-      if (!target || target.clusterId !== entity.clusterId) {
+      if (!target || target.clusterId !== entity.clusterId
+        || (target.id === state.player.id && state.invisibleMode)) {
         ai.aiState = 'patrol';
         return;
       }
@@ -605,6 +611,7 @@ function findAttackTarget(state: GameState, entity: Entity, cluster: Cluster): E
   let bestDist = Infinity;
   for (const t of all) {
     if (t.id === entity.id) continue;
+    if (t.id === state.player.id && state.invisibleMode) continue; // cloaked player is undetectable
     const targetFaction: Faction = t.id === state.player.id ? 'player' : (t.ai?.faction ?? 'neutral');
     if (getRelation(attackerFaction, targetFaction, state.alertLevel) !== 'attack') continue;
     if (!canSee(cluster, entity.position, t.position, ai.sightRadius, ai.wallPenetration)) continue;
@@ -638,7 +645,6 @@ function removeEntity(state: GameState, target: Entity) {
     fg: factionSmokeColor(target.ai?.faction),
     spawnTime: performance.now(),
   });
-  if (target.ai) state.killedEntities.push({ name: target.name, kind: target.ai.kind });
   state.entities = state.entities.filter(e => e.id !== target.id);
   state.markedEntities.delete(target.id);
 }
@@ -735,6 +741,7 @@ function updateTitanSpawn(state: GameState, entity: Entity, cluster: Cluster) {
   const targets: Entity[] = [];
   for (const t of all) {
     if (t.id === entity.id) continue;
+    if (t.id === state.player.id && state.invisibleMode) continue;
     if (t.coherence === undefined) continue;
     const tFaction: Faction = t.id === state.player.id ? 'player' : (t.ai?.faction ?? 'neutral');
     if (getRelation(ai.faction, tFaction, state.alertLevel) !== 'attack') continue;
@@ -798,6 +805,7 @@ function updateGateKeeper(state: GameState, entity: Entity, cluster: Cluster) {
   // Pull all visible attack-targets one step toward self each turn
   for (const target of all) {
     if (target.id === entity.id) continue;
+    if (target.id === state.player.id && state.invisibleMode) continue;
     const tFaction: Faction = target.id === state.player.id ? 'player' : (target.ai?.faction ?? 'neutral');
     if (getRelation('friendly', tFaction, state.alertLevel) !== 'attack') continue;
     if (!canSee(cluster, entity.position, target.position, ai.sightRadius, ai.wallPenetration)) continue;
@@ -833,6 +841,7 @@ function updateGateKeeper(state: GameState, entity: Entity, cluster: Cluster) {
 
   for (const target of all) {
     if (target.id === entity.id) continue;
+    if (target.id === state.player.id && state.invisibleMode) continue;
     const beamTargetFaction: Faction = target.id === state.player.id ? 'player' : (target.ai?.faction ?? 'neutral');
     if (getRelation('friendly', beamTargetFaction, state.alertLevel) !== 'attack') continue;
     const dx = Math.abs(entity.position.x - target.position.x);
@@ -1032,7 +1041,7 @@ export function makeTitanSpawn(pos: Position, clusterId: number): Entity {
     position: { ...pos },
     clusterId,
     speed: 15,
-    energy: 0,
+    energy: -400,  // dormant for ~40 turns before activating
     coherence: 60,
     maxCoherence: 60,
     attackDistance: 4,
