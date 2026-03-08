@@ -202,12 +202,19 @@ export class Renderer {
       collapseGlitchTiles?: Map<string, { glyph: string; fg: string; expireTick: number }>;
       smokeEffects?: SmokeEffect[];
       invisibleMode?: boolean;
+      alertThreats?: { x: number; y: number; desc: string }[];
     },
   ) {
     if (!this.display) return;
 
     const tick = extras?.tick ?? 0;
     const hazardFogMarks = extras?.hazardFogMarks;
+
+    // Build alert threat tile lookup
+    const alertThreatKeys = new Set<string>();
+    if (extras?.alertThreats) {
+      for (const t of extras.alertThreats) alertThreatKeys.add(`${t.x},${t.y}`);
+    }
 
     // Build room functional tag map for lighting
     const roomFuncTag = new Map<number, FunctionalTag | null>();
@@ -284,6 +291,11 @@ export class Renderer {
             glyph = '?';
             fg = HAZARD_FOG_COLORS[fogMark] ?? '#333333';
             bg = COLORS.bg;
+          } else if (alertThreatKeys.has(tileKey)) {
+            // Alert threat in unexplored area
+            glyph = '!';
+            fg = '#cc2222';
+            bg = COLORS.bg;
           } else {
             glyph = ' ';
             fg = COLORS.unexplored;
@@ -297,6 +309,16 @@ export class Renderer {
           if (fogMark) {
             fg = HAZARD_FOG_COLORS[fogMark] ?? COLORS.rememberedFg;
           }
+          // Alert threat in remembered (out-of-sight) area
+          if (alertThreatKeys.has(tileKey)) {
+            glyph = '!';
+            fg = '#cc2222';
+          }
+        }
+
+        // Alert threat on visible tiles — tint background
+        if (isVisible && alertThreatKeys.has(tileKey)) {
+          bg = '#2a0a0a';
         }
 
         // Aim range overlay

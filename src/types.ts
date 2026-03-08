@@ -528,16 +528,12 @@ export interface ActionDebugToggle {
   kind: 'debug_toggle';
 }
 
-export interface ActionInteract {
-  kind: 'interact';
-}
-
 export interface ActionShoot {
   kind: 'shoot';
   target: Position;
 }
 
-export type PlayerAction = ActionMove | ActionTransfer | ActionWait | ActionDebugToggle | ActionInteract | ActionShoot;
+export type PlayerAction = ActionMove | ActionTransfer | ActionWait | ActionDebugToggle | ActionShoot;
 
 // ── Constants ──
 

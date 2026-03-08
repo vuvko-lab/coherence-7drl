@@ -9,7 +9,7 @@ import { generateCluster, placeEntryPoint } from './cluster';
 import { computeFOV, floodFillReveal, hasLOS } from './fov';
 import { findPath } from './pathfinding';
 import { updateHazards, onPlayerEnterRoom, getPlayerRoom, applyTileHazardToPlayer, updateAlertModule } from './hazards';
-import { seed as seedRng, generateSeed, randInt, pick } from './rng';
+import { seed as seedRng, generateSeed, random, randInt, pick, shuffle } from './rng';
 import {
   updateEntityAI, makeChronicler, makeBitMite, makeLogicLeech, makeSentry, makePropEntity, makeGateKeeper, makeRepairScrapper, makeTitanSpawn,
 } from './ai';
@@ -189,8 +189,8 @@ function spawnClusterEntities(state: GameState, cluster: Cluster) {
 
   function pickWalkableTile(room: typeof allRooms[number]): Position | null {
     for (let attempt = 0; attempt < 30; attempt++) {
-      const x = room.x + 1 + Math.floor(Math.random() * (room.w - 2));
-      const y = room.y + 1 + Math.floor(Math.random() * (room.h - 2));
+      const x = room.x + 1 + Math.floor(random() * (room.w - 2));
+      const y = room.y + 1 + Math.floor(random() * (room.h - 2));
       if (cluster.tiles[y]?.[x]?.walkable) return { x, y };
     }
     return null;
@@ -213,7 +213,7 @@ function spawnClusterEntities(state: GameState, cluster: Cluster) {
           if (t?.walkable && t.type !== TileType.InterfaceExit) nearby.push({ x: nx2, y: ny2 });
         }
       }
-      nearby.sort(() => Math.random() - 0.5);
+      shuffle(nearby);
       for (let i = 0; i < Math.min(guardCount, nearby.length); i++) {
         spawned.push(makeBitMite(nearby[i], id));
       }
@@ -226,7 +226,7 @@ function spawnClusterEntities(state: GameState, cluster: Cluster) {
   // Spawn chance scales with room collapse + cluster depth.
   // Entity kind is weighted by room geometry; functional tag modifies entity stats.
 
-  const shuffled = [...allRooms].sort(() => Math.random() - 0.5);
+  const shuffled = shuffle([...allRooms]);
   const baseChance = 0.05 + depth * 0.025; // 0.10 at depth 2, 0.175 at depth 5
   let cooldown = 0;
 
@@ -234,7 +234,7 @@ function spawnClusterEntities(state: GameState, cluster: Cluster) {
     if (cooldown > 0) { cooldown--; continue; }
 
     const spawnChance = Math.min(0.75, baseChance + room.collapse * 0.35);
-    if (Math.random() >= spawnChance) continue;
+    if (random() >= spawnChance) continue;
 
     const pos = pickWalkableTile(room);
     if (!pos) continue;
@@ -266,7 +266,7 @@ function spawnClusterEntities(state: GameState, cluster: Cluster) {
       rsWeight,                            // repair_scrapper: all clusters 1+
     ];
     const total = w[0] + w[1] + w[2] + w[3] + w[4] + w[5];
-    const roll = Math.random() * total;
+    const roll = random() * total;
 
     let entity: Entity;
     if (roll < w[0]) {
@@ -343,7 +343,7 @@ function applyFunctionalTagModifiers(entity: Entity, tag: import('./types').Func
     entity.attackValue  = Math.max(0, Math.ceil(entity.attackValue   * dmgMult));
     if (alreadyDamaged) {
       // Start at 40-70% HP to simulate a battle-worn entity
-      const frac = 0.4 + Math.random() * 0.3;
+      const frac = 0.4 + random() * 0.3;
       entity.coherence = Math.max(1, Math.ceil(entity.maxCoherence! * frac));
     }
   };
@@ -447,7 +447,7 @@ function tryShoot(state: GameState, target: Position): boolean {
   if (overQuota > 0 && state.player.coherence != null && !state.godMode) {
     const drain = overQuota * 3;
     state.player.coherence = Math.max(0, state.player.coherence - drain);
-    const rolledState = pick(['heap corruption', 'memmory corruption', 'buffer overflow', 'stack overflow', 'BUG', 'error'])
+    const rolledState = pick(['heap corruption', 'memory corruption', 'buffer overflow', 'stack overflow', 'BUG', 'error'])
     addMessage(state, `[LEAK] ${rolledState} in corrupt.m — coherence drain: −${drain} (${state.player.coherence}/${state.player.maxCoherence}).`, 'hazard');
   }
 
@@ -803,22 +803,6 @@ export function processAction(state: GameState, action: PlayerAction): boolean {
     case 'shoot':
       acted = tryShoot(state, action.target);
       break;
-    case 'interact': {
-      // Check adjacent tiles for terminals
-      const cluster = getCurrentCluster(state);
-      const pp = state.player.position;
-      const dirs = [[-1,0],[1,0],[0,-1],[0,1]] as const;
-      for (const [dx, dy] of dirs) {
-        const t = cluster.tiles[pp.y + dy]?.[pp.x + dx];
-        if (t?.type === TileType.Terminal && t.terminalId) {
-          state.openTerminal = { terminalId: t.terminalId, clusterId: state.currentClusterId };
-          break;
-        }
-      }
-      // interact doesn't cost a turn (opening terminal is a menu action)
-      acted = false;
-      break;
-    }
   }
 
   if (acted) {
@@ -873,7 +857,7 @@ export function processAction(state: GameState, action: PlayerAction): boolean {
       if (item.hidden && state.tick >= item.hiddenUntilTick) {
         item.hidden = false;
       } else if (!item.hidden && state.openInteractable?.id !== item.id) {
-        if (Math.random() < 0.004) {
+        if (random() < 0.004) {
           item.hidden = true;
           item.hiddenUntilTick = state.tick + randInt(6, 22);
         }
@@ -1004,7 +988,7 @@ export function hackFinalTerminal(state: GameState, terminalId: string, clusterI
   for (let i = 0; i < hackNum && i < candidates.length; i++) {
     const pos = candidates[i];
     const enemy = makeBitMite(pos, clusterId);
-    enemy.id = Date.now() % 100000 + Math.floor(Math.random() * 1000) + i;
+    enemy.id = Date.now() % 100000 + Math.floor(random() * 1000) + i;
     state.entities.push(enemy);
     spawned++;
   }
@@ -1190,7 +1174,7 @@ export function executeInteractableAction(
       if (item.revealTerminals) {
         const unvisited = cluster.terminals.filter(t => !t.activated);
         if (unvisited.length > 0) {
-          const t = unvisited[Math.floor(Math.random() * unvisited.length)];
+          const t = pick(unvisited);
           applyReveal(state, cluster, floodFillReveal(cluster, t.position, 2), 10);
           addMessage(state, GAME_MESSAGES.dataFragment, 'normal');
         }

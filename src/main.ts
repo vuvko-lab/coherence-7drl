@@ -54,6 +54,7 @@ const logAlertEl = document.getElementById('log-alert')!;
 const adminEl = document.getElementById('panel-admin')!;
 const overviewEl = document.getElementById('panel-overview')!;
 let hoveredPos: Position | null = null;
+let lastTargetPanelKey: string | null = null;
 let aimMode = false;
 let showRangePreview = false; // corrupt.m module hover
 let moduleMenuOpen = false;
@@ -431,7 +432,7 @@ ${soundManager.getAllSoundIds().map(id => `<button class="admin-btn admin-sound-
   });
 
   // Wire up glitch effect buttons
-  adminEl.querySelectorAll('.admin-btn:not(.admin-toggle)').forEach(btn => {
+  adminEl.querySelectorAll('.admin-btn[data-effect]').forEach(btn => {
     btn.addEventListener('click', () => {
       const name = (btn as HTMLElement).dataset.effect;
       const effect = GLITCH_EFFECTS.find(e => e.name === name);
@@ -1243,6 +1244,7 @@ function renderAll() {
     collapseGlitchTiles: state.collapseGlitchTiles,
     smokeEffects: state.smokeEffects,
     invisibleMode: state.invisibleMode,
+    alertThreats: state.alertThreats,
   });
   if (state.selfPanelRevealed) {
     panelEl.style.display = '';
@@ -1273,7 +1275,11 @@ function renderAll() {
       }
     }
     renderTargetPanel(hoveredPos);
-    scrambleReveal(Array.from(targetPanelEl.querySelectorAll<HTMLElement>(':scope > .panel-edge, .panel-body > *')), () => {}, 40, 3, 40);
+    const targetKey = hoveredPos ? `${hoveredPos.x},${hoveredPos.y}` : null;
+    if (targetKey !== lastTargetPanelKey) {
+      lastTargetPanelKey = targetKey;
+      scrambleReveal(Array.from(targetPanelEl.querySelectorAll<HTMLElement>(':scope > .panel-edge, .panel-body > *')), () => {}, 40, 3, 40);
+    }
   } else {
     panelEl.style.display = 'none';
     targetPanelEl.style.display = 'none';

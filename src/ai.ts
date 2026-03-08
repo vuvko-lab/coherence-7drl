@@ -6,6 +6,7 @@ import { shootingAnimation } from './combat_animations';
 import { findPath } from './pathfinding';
 import { floodFillReveal } from './fov';
 import { tryPushEntity } from './game';
+import { random, pick, shuffle } from './rng';
 
 // ── Helpers ──
 
@@ -44,7 +45,7 @@ function stepToward(cluster: Cluster, from: Position, to: Position): Position | 
 
 function randomWalkStep(cluster: Cluster, pos: Position): Position | null {
   const dirs = [{ x: 0, y: -1 }, { x: 0, y: 1 }, { x: -1, y: 0 }, { x: 1, y: 0 }];
-  const shuffled = [...dirs].sort(() => Math.random() - 0.5);
+  const shuffled = shuffle([...dirs]);
   for (const d of shuffled) {
     const nx = pos.x + d.x;
     const ny = pos.y + d.y;
@@ -69,8 +70,8 @@ function wallWalkStep(cluster: Cluster, pos: Position): Position | null {
     });
   });
   if (wallDirs.length > 0) {
-    const pick = wallDirs[Math.floor(Math.random() * wallDirs.length)];
-    return { x: pos.x + pick.x, y: pos.y + pick.y };
+    const picked = wallDirs[Math.floor(random() * wallDirs.length)];
+    return { x: pos.x + picked.x, y: pos.y + picked.y };
   }
   return randomWalkStep(cluster, pos);
 }
@@ -222,9 +223,9 @@ function updateBitMite(state: GameState, entity: Entity, cluster: Cluster) {
         return;
       }
       // Sporadic movement with 20% chance to bash a door
-      if (Math.random() < 0.2) {
+      if (random() < 0.2) {
         const dirs = [{ x: 0, y: -1 }, { x: 0, y: 1 }, { x: -1, y: 0 }, { x: 1, y: 0 }];
-        const dir = dirs[Math.floor(Math.random() * dirs.length)];
+        const dir = pick(dirs);
         const nx = entity.position.x + dir.x;
         const ny = entity.position.y + dir.y;
         const tile = cluster.tiles[ny]?.[nx];
@@ -281,27 +282,6 @@ function updateBitMite(state: GameState, entity: Entity, cluster: Cluster) {
       break;
     }
 
-    case 'attack': {
-      const attackTarget = getEntityById(state, ai.targetId);
-      if (!attackTarget || attackTarget.clusterId !== entity.clusterId
-        || (attackTarget.id === state.player.id && state.invisibleMode)) {
-        ai.aiState = 'wander';
-        ai.targetId = undefined;
-        return;
-      }
-      const dx = Math.abs(entity.position.x - attackTarget.position.x);
-      const dy = Math.abs(entity.position.y - attackTarget.position.y);
-      if (dx + dy > 1) {
-        // Target moved away — chase immediately instead of wasting turn
-        ai.aiState = 'chase';
-        ai.lastTargetPos = { ...attackTarget.position };
-        const step = stepToward(cluster, entity.position, attackTarget.position);
-        if (step) move(entity, cluster, step, state);
-        break;
-      }
-      bitMiteAttack(state, entity, attackTarget);
-      break;
-    }
   }
 }
 
@@ -486,7 +466,7 @@ function updateSentry(state: GameState, entity: Entity, cluster: Cluster) {
       if (!wp || (entity.position.x === wp.x && entity.position.y === wp.y)) {
         ai.patrolWaypoint = pickPatrolWaypoint(cluster, entity);
         // 10% chance to leave current room
-        if (Math.random() < 0.1) {
+        if (random() < 0.1) {
           ai.patrolWaypoint = pickAdjacentRoomWaypoint(cluster, entity);
         }
       }
@@ -568,8 +548,8 @@ function pickPatrolWaypoint(cluster: Cluster, entity: Entity): Position | undefi
   if (!room) return undefined;
   // Pick a random walkable tile in the room
   for (let attempt = 0; attempt < 20; attempt++) {
-    const rx = room.x + Math.floor(Math.random() * room.w);
-    const ry = room.y + Math.floor(Math.random() * room.h);
+    const rx = room.x + Math.floor(random() * room.w);
+    const ry = room.y + Math.floor(random() * room.h);
     if (cluster.tiles[ry]?.[rx]?.walkable) return { x: rx, y: ry };
   }
   return undefined;
@@ -583,12 +563,12 @@ function pickAdjacentRoomWaypoint(cluster: Cluster, entity: Entity): Position | 
   if (!room) return undefined;
   const adjIds = cluster.doorAdjacency.get(room.id) ?? [];
   if (adjIds.length === 0) return undefined;
-  const adjId = adjIds[Math.floor(Math.random() * adjIds.length)];
+  const adjId = pick(adjIds);
   const adjRoom = cluster.rooms.find(r => r.id === adjId);
   if (!adjRoom) return undefined;
   for (let attempt = 0; attempt < 20; attempt++) {
-    const rx = adjRoom.x + Math.floor(Math.random() * adjRoom.w);
-    const ry = adjRoom.y + Math.floor(Math.random() * adjRoom.h);
+    const rx = adjRoom.x + Math.floor(random() * adjRoom.w);
+    const ry = adjRoom.y + Math.floor(random() * adjRoom.h);
     if (cluster.tiles[ry]?.[rx]?.walkable) return { x: rx, y: ry };
   }
   return undefined;
@@ -711,7 +691,7 @@ function updateRepairScrapper(state: GameState, entity: Entity, cluster: Cluster
         if (step) move(entity, cluster, step, state);
       } else {
         // Adjacent — attempt repair
-        if (Math.random() < 0.4) {
+        if (random() < 0.4) {
           ia.corrupted = false;
           addAiMessage(state, '[SCRAPPER] Signal fragment stabilized.', 'system');
         } else {

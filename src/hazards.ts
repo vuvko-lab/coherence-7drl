@@ -4,7 +4,7 @@ import {
   HazardOverlayType, ALERT_SUSPICIOUS,
 } from './types';
 import { addMessage } from './game';
-import { random, randInt } from './rng';
+import { random, randInt, shuffle } from './rng';
 import { makeSentry, makeBitMite, makeGateKeeper } from './ai';
 
 function roomInterior(room: Room): { x1: number; y1: number; x2: number; y2: number } {
@@ -114,7 +114,7 @@ function updateCorruption(state: GameState, cluster: Cluster, room: Room) {
     // Spread to adjacent tile (floor, wall, or door)
     const [cx, cy] = key.split(',').map(Number);
     const dirs = [[-1, 0], [1, 0], [0, -1], [0, 1]];
-    const shuffled = dirs.sort(() => random() - 0.5);
+    const shuffled = shuffle([...dirs]);
     for (const [dx, dy] of shuffled) {
       const nx = cx + dx;
       const ny = cy + dy;
@@ -580,15 +580,13 @@ function updateEchoChamber(state: GameState, cluster: Cluster, room: Room) {
     const { x1, y1, x2, y2 } = roomInterior(room);
     // Pick a random wall tile on the room border
     const wallTiles: { x: number; y: number }[] = [];
+    const glitchKeys = new Set(hz.wallGlitches.map(g => `${g.x},${g.y}`));
     for (let y = room.y; y < room.y + room.h; y++) {
       for (let x = room.x; x < room.x + room.w; x++) {
         if (x > x1 && x < x2 && y > y1 && y < y2) continue; // skip interior
         const tile = cluster.tiles[y]?.[x];
-        if (tile?.type === TileType.Wall) {
-          // Don't double-glitch
-          if (!hz.wallGlitches.some(g => g.x === x && g.y === y)) {
-            wallTiles.push({ x, y });
-          }
+        if (tile?.type === TileType.Wall && !glitchKeys.has(`${x},${y}`)) {
+          wallTiles.push({ x, y });
         }
       }
     }
