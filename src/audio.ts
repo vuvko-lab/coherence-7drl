@@ -39,7 +39,7 @@ const SOUND_REGISTRY: Record<string, { path: string; category: SoundCategory }> 
   seal:               { path: 'sounds/hazard/seal.wav', category: 'sfx' },
   // Hazard ambient loops
   ambient_firewall:       { path: 'sounds/hazard/firewall_loop.ogg', category: 'ambient' },
-  ambient_memory_leak:    { path: 'sounds/hazard/memory_leak_loop.ogg', category: 'ambient' },
+  // ambient_memory_leak omitted — no ambient for memory leak
   ambient_corrupted:      { path: 'sounds/hazard/corruption_loop.ogg', category: 'ambient' },
   ambient_gravity_well:   { path: 'sounds/hazard/gravity_well_loop.ogg', category: 'ambient' },
   ambient_echo_chamber:   { path: 'sounds/hazard/echo_chamber_loop.ogg', category: 'ambient' },
@@ -92,6 +92,7 @@ class SoundManager {
   private categoryGains: Record<SoundCategory, GainNode | null> = { sfx: null, ui: null, ambient: null };
   private buffers = new Map<string, AudioBuffer>();
   private activeAmbient: { key: string; source: AudioBufferSourceNode; gain: GainNode } | null = null;
+  private roomAmbientKey: string | null = null; // persists across narrative one-shots
   private activeSources: { source: AudioBufferSourceNode; gain: GainNode }[] = [];
   private footstepIdx = 0;
   private lastPlay = new Map<string, number>();
@@ -235,9 +236,16 @@ class SoundManager {
     const available = ids.filter(id => this.buffers.has(id));
     if (available.length === 0) return;
     // Keep current if it's already in this pool
-    if (this.activeAmbient && available.includes(this.activeAmbient.key)) return;
-    const chosen = available[Math.floor(Math.random() * available.length)];
-    this.startAmbient(chosen);
+    if (this.activeAmbient && available.includes(this.activeAmbient.key)) {
+      this.roomAmbientKey = this.activeAmbient.key;
+      return;
+    }
+    // If roomAmbientKey is in this pool, resume the same track rather than picking a new one
+    const resume = this.roomAmbientKey && available.includes(this.roomAmbientKey)
+      ? this.roomAmbientKey
+      : available[Math.floor(Math.random() * available.length)];
+    this.roomAmbientKey = resume;
+    this.startAmbient(resume);
   }
 
   /** Start a non-looping sound on the ambient channel (crossfades like ambient). */
@@ -273,6 +281,8 @@ class SoundManager {
     source.onended = () => {
       if (this.activeAmbient?.source === source) {
         this.activeAmbient = null;
+        // Resume the room ambient that was playing before this narrative sound
+        if (this.roomAmbientKey) this.startAmbient(this.roomAmbientKey);
       }
     };
   }
