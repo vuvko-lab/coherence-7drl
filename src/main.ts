@@ -2070,6 +2070,9 @@ function runLoadingScreen() {
 
   let animDone = false;
   let audioDone = false;
+  // Duration of the first scramble: (lines-1)*lineDelay + ticks*tickMs = 1*300 + 5*60 = 600ms
+  const firstScrambleDurationMs = (loadingLines.length - 1) * 300 + 5 * 60;
+  const scrambleStartTime = performance.now();
 
   const tryDismiss = () => {
     if (!animDone || !audioDone) return;
@@ -2081,6 +2084,9 @@ function runLoadingScreen() {
       el.appendChild(span);
       suffixes.push(span);
     });
+    // Duration of the [COMPLETE] scramble: (lines-1)*200 + 4*50 = 400ms
+    const completeDurationMs = (suffixes.length - 1) * 200 + 4 * 50;
+    soundManager.play('boot_complete', { debounceMs: 0, stopAfterMs: completeDurationMs, fadeOutMs: 200 });
     scrambleReveal(suffixes, () => {
       setTimeout(() => {
         loadingOverlay.classList.add('done');
@@ -2098,8 +2104,14 @@ function runLoadingScreen() {
   // Scramble-reveal the loading lines
   scrambleReveal(loadingLines, () => { animDone = true; tryDismiss(); }, 300, 5, 60);
 
-  // Start audio loading
-  soundManager.init().then(() => { audioDone = true; tryDismiss(); });
+  // Start audio loading; play boot_glitch when ready, synced to remaining scramble time
+  soundManager.init().then(() => {
+    const elapsed = performance.now() - scrambleStartTime;
+    const remaining = Math.max(50, firstScrambleDurationMs - elapsed);
+    soundManager.play('boot_glitch', { debounceMs: 0, stopAfterMs: remaining, fadeOutMs: 200 });
+    audioDone = true;
+    tryDismiss();
+  });
 }
 
 // Start loading on first user interaction (needed for AudioContext)

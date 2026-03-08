@@ -64,6 +64,9 @@ const SOUND_REGISTRY: Record<string, { path: string; category: SoundCategory }> 
   echo_appear:        { path: 'sounds/narrative/echo_appear.ogg', category: 'ambient' },
   terminal_open:      { path: 'sounds/narrative/terminal_open.ogg', category: 'ambient' },
   archive_open:       { path: 'sounds/narrative/archive_open.ogg', category: 'ambient' },
+  // Boot / loading screen
+  boot_glitch:        { path: 'sounds/ui/boot_glitch.ogg', category: 'ui' },
+  boot_complete:      { path: 'sounds/ui/boot_complete.ogg', category: 'ui' },
   // System
   module_toggle:      { path: 'sounds/system/module_toggle.wav', category: 'ui' },
 };
@@ -151,7 +154,7 @@ class SoundManager {
   isReady(): boolean { return this._ready; }
 
   /** Play a one-shot sound. */
-  play(id: string, opts?: { category?: SoundCategory; pitchVariation?: number; debounceMs?: number; volume?: number }): void {
+  play(id: string, opts?: { category?: SoundCategory; pitchVariation?: number; debounceMs?: number; volume?: number; stopAfterMs?: number; fadeOutMs?: number }): void {
     if (!this.ctx || !this.masterGain) return;
     const buf = this.buffers.get(id);
     if (!buf) return;
@@ -185,6 +188,17 @@ class SoundManager {
       const idx = this.activeSources.indexOf(entry);
       if (idx >= 0) this.activeSources.splice(idx, 1);
     };
+
+    // Schedule early fade-out if sound is longer than desired play window
+    if (opts?.stopAfterMs != null) {
+      const fadeMs = opts.fadeOutMs ?? 200;
+      const ctx = this.ctx!;
+      setTimeout(() => {
+        const t = ctx.currentTime;
+        envGain.gain.linearRampToValueAtTime(0, t + fadeMs / 1000);
+        setTimeout(() => { try { source.stop(); } catch { /* already ended */ } }, fadeMs + 20);
+      }, opts.stopAfterMs);
+    }
   }
 
   /** Play a randomized footstep sound. */
