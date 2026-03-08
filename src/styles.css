@@ -1452,7 +1452,7 @@ body {
   position: fixed;
   inset: 0;
   z-index: 999;
-  background: var(--theme-bg);
+  background: var(--theme-bg) url('coherence-back.png') center/cover no-repeat;
   display: flex;
   justify-content: center;
   align-items: center;
