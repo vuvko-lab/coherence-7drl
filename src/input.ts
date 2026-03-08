@@ -107,13 +107,6 @@ export class InputHandler {
       return;
     }
 
-    // Interact with adjacent terminal
-    if (e.key === 'e' || e.key === 'E') {
-      e.preventDefault();
-      this.onAction({ kind: 'interact' });
-      return;
-    }
-
     // Aim / shoot toggle
     if (e.key === 'f' || e.key === 'F') {
       e.preventDefault();

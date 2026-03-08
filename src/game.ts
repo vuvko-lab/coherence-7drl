@@ -803,22 +803,6 @@ export function processAction(state: GameState, action: PlayerAction): boolean {
     case 'shoot':
       acted = tryShoot(state, action.target);
       break;
-    case 'interact': {
-      // Check adjacent tiles for terminals
-      const cluster = getCurrentCluster(state);
-      const pp = state.player.position;
-      const dirs = [[-1,0],[1,0],[0,-1],[0,1]] as const;
-      for (const [dx, dy] of dirs) {
-        const t = cluster.tiles[pp.y + dy]?.[pp.x + dx];
-        if (t?.type === TileType.Terminal && t.terminalId) {
-          state.openTerminal = { terminalId: t.terminalId, clusterId: state.currentClusterId };
-          break;
-        }
-      }
-      // interact doesn't cost a turn (opening terminal is a menu action)
-      acted = false;
-      break;
-    }
   }
 
   if (acted) {

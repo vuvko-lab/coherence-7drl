@@ -1243,6 +1243,7 @@ function renderAll() {
     collapseGlitchTiles: state.collapseGlitchTiles,
     smokeEffects: state.smokeEffects,
     invisibleMode: state.invisibleMode,
+    alertThreats: state.alertThreats,
   });
   if (state.selfPanelRevealed) {
     panelEl.style.display = '';
