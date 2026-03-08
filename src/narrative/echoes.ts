@@ -152,7 +152,7 @@ export const NARRATIVE_ECHOES: Record<number, NarrativeEchoDef[]> = {
           id: 'root',
           lines: [
             'PERSONAL LOG \u2014 T. OSEI, DAY 1,250.',
-            "'The recycler broke again. Third time this month. Parts don't exist anymore.'",
+            "'The recycler broke again. Third time this month. Fabricator parts are running low.'",
           ],
           choices: [
             { label: 'LISTEN', nodeId: 'c2' },
