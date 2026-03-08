@@ -6,6 +6,7 @@ import { PlayerAction, Position, TileType, SMOKE_DURATION_MS } from './types';
 import { generateSeed } from './rng';
 import { GLITCH_EFFECTS, initGlitch, glitchShake, glitchChromatic, glitchBarSweep, glitchStaticBurst, glitchHorizontalTear, glitchDataBleed } from './glitch';
 import { VICTORY_EPILOGUES } from './narrative/index';
+import { FINAL_TERMINAL_CONFIRM } from './narrative/final-terminal';
 import { hasLOS } from './fov';
 import { canSee } from './ai';
 import { soundManager } from './audio';
@@ -586,7 +587,7 @@ function openTerminalOverlay() {
 
   terminalOptions.innerHTML = '';
 
-  if (terminal.hasKey && exitLocked) {
+  if (terminal.hasKey && exitLocked && !terminal.isFinalTerminal) {
     const grantBtn = document.createElement('button');
     grantBtn.className = 'terminal-opt-btn opt-grant';
     grantBtn.textContent = '> [EXECUTE] authorize cluster egress';
@@ -596,6 +597,41 @@ function openTerminalOverlay() {
       renderAll();
     });
     terminalOptions.appendChild(grantBtn);
+  }
+
+  // Final terminal: narrative choice (restore / jump) when exit is unlocked
+  if (terminal.isFinalTerminal && !exitLocked && !state.narrativeChoice) {
+    const restoreBtn = document.createElement('button');
+    restoreBtn.className = 'terminal-opt-btn opt-grant';
+    restoreBtn.textContent = '> [RESTORE] purge viral agents — stabilize ship systems';
+    restoreBtn.addEventListener('click', () => {
+      state.narrativeChoice = 'restore';
+      addMessage(state, 'VIRAL PURGE INITIATED. Proceed to exit interface.', 'important');
+      showFinalTerminalConfirmation('restore');
+      renderAll();
+    });
+    terminalOptions.appendChild(restoreBtn);
+
+    const jumpBtn = document.createElement('button');
+    jumpBtn.className = 'terminal-opt-btn opt-grant';
+    jumpBtn.textContent = '> [EGOCAST] transfer to nearby vessel — leave this ship behind';
+    jumpBtn.addEventListener('click', () => {
+      state.narrativeChoice = 'jump';
+      addMessage(state, 'COHERENCE TRANSFER LOCKED. Proceed to exit interface.', 'important');
+      showFinalTerminalConfirmation('jump');
+      renderAll();
+    });
+    terminalOptions.appendChild(jumpBtn);
+  }
+
+  // Final terminal: show choice already made
+  if (terminal.isFinalTerminal && state.narrativeChoice) {
+    const choiceLabel = state.narrativeChoice === 'restore' ? 'INITIATE SHIP PURGE' : 'PREPARE EGOCAST TO NEARBY VESSEL';
+    const choiceRow = document.createElement('button');
+    choiceRow.className = 'terminal-opt-btn';
+    choiceRow.textContent = `> [CHOICE LOCKED] ${choiceLabel}`;
+    choiceRow.disabled = true;
+    terminalOptions.appendChild(choiceRow);
   }
 
   // Final terminal: hack option
@@ -629,6 +665,25 @@ function openTerminalOverlay() {
   revealLines(terminalOptions.querySelectorAll('.terminal-opt-btn'), contentEls.length * 40 + 20);
   terminalOverlay.classList.add('open');
   soundManager.startAmbientOnce('terminal_open');
+}
+
+function showFinalTerminalConfirmation(choice: 'restore' | 'jump') {
+  const lines = FINAL_TERMINAL_CONFIRM[choice];
+
+  terminalContent.innerHTML = lines
+    .map(l => `<div class="t-log-line">${l}</div>`)
+    .join('');
+
+  terminalOptions.innerHTML = '';
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'terminal-opt-btn opt-close';
+  closeBtn.textContent = '> [ESC] disconnect';
+  closeBtn.addEventListener('click', closeTerminalOverlay);
+  terminalOptions.appendChild(closeBtn);
+
+  const contentEls = Array.from(terminalContent.querySelectorAll('.t-log-line'));
+  revealLines(contentEls, 0);
+  revealLines(terminalOptions.querySelectorAll('.terminal-opt-btn'), contentEls.length * 40 + 20);
 }
 
 function closeTerminalOverlay() {

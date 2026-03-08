@@ -961,15 +961,16 @@ export function hackFinalTerminal(state: GameState, terminalId: string, clusterI
     return;
   }
 
-  // Each successive hack costs more coherence and spawns more mites
+  // Each hack bypasses one missing privilege
   const hackNum = hacksDone + 1;
-  const cohCost = 5 * hackNum;
+  const cohCost = 5;
   if (state.player.coherence != null && !state.godMode) {
     state.player.coherence = Math.max(0, state.player.coherence - cohCost);
     addMessage(state, `Override ${hackNum}/${missing.length}: ${missing[hacksDone]} bypassed. Coherence drain: −${cohCost}.`, 'hazard');
   }
 
-  // Spawn hackNum mites near the terminal
+  // Spawn one mite per missing root privilege
+  const miteCount = missing.length;
   const { x, y } = terminal.position;
   let spawned = 0;
   const candidates: { x: number; y: number }[] = [];
@@ -983,7 +984,7 @@ export function hackFinalTerminal(state: GameState, terminalId: string, clusterI
       candidates.push({ x: nx, y: ny2 });
     }
   }
-  for (let i = 0; i < hackNum && i < candidates.length; i++) {
+  for (let i = 0; i < miteCount && i < candidates.length; i++) {
     const pos = candidates[i];
     const enemy = makeBitMite(pos, clusterId);
     enemy.id = Date.now() % 100000 + Math.floor(random() * 1000) + i;

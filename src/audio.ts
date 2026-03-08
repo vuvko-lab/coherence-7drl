@@ -42,7 +42,6 @@ const SOUND_REGISTRY: Record<string, { path: string; category: SoundCategory }> 
   ambient_memory_leak:    { path: '/sounds/hazard/memory_leak_loop.ogg', category: 'ambient' },
   ambient_corrupted:      { path: '/sounds/hazard/corruption_loop.ogg', category: 'ambient' },
   ambient_gravity_well:   { path: '/sounds/hazard/gravity_well_loop.ogg', category: 'ambient' },
-  ambient_quarantine:     { path: '/sounds/hazard/quarantine_loop.ogg', category: 'ambient' },
   ambient_echo_chamber:   { path: '/sounds/hazard/echo_chamber_loop.ogg', category: 'ambient' },
   ambient_cascade:        { path: '/sounds/hazard/cascade_loop.ogg', category: 'ambient' },
   ambient_unstable:       { path: '/sounds/hazard/unstable_loop.ogg', category: 'ambient' },
