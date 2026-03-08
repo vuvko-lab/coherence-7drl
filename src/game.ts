@@ -1209,15 +1209,13 @@ export function executeInteractableAction(
           }
         }
       }
-      // Reveal 2x2 center of the deactivated room
-      const cx = Math.floor(hazardRoom.x + hazardRoom.w / 2);
-      const cy = Math.floor(hazardRoom.y + hazardRoom.h / 2);
-      for (let dy = -1; dy <= 0; dy++) {
-        for (let dx = -1; dx <= 0; dx++) {
-          const t = cluster.tiles[cy + dy]?.[cx + dx];
-          if (t) t.seen = true;
-        }
-      }
+      // Reveal the entire deactivated room with animated effect
+      const roomCenter = {
+        x: Math.floor(hazardRoom.x + hazardRoom.w / 2),
+        y: Math.floor(hazardRoom.y + hazardRoom.h / 2),
+      };
+      const radius = Math.max(hazardRoom.w, hazardRoom.h);
+      applyReveal(state, cluster, floodFillReveal(cluster, roomCenter, radius), 15);
       addMessage(state, GAME_MESSAGES.hazardNeutralized, 'important');
       dlog(state, 'hazard', 'deactivate', `room=${hazardRoomId} type=${wasQuarantine ? 'quarantine' : 'other'} via=${item.id}`);
       return true; // close dialog

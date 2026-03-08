@@ -437,6 +437,7 @@ function updateFirewall(state: GameState, cluster: Cluster, room: Room) {
   let detected = false;
   if (!state.invisibleMode && posInRoom(state.player.position, room)) {
     if (beamSet.has(`${state.player.position.x},${state.player.position.y}`)) {
+      addMessage(state, '[FIREWALL SCAN]: Crew ego detected. Identity: [ERROR]', 'alert');
       if (state.alertLevel >= ALERT_SUSPICIOUS) detected = true;
     }
   }
