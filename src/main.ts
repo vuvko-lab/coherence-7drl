@@ -1998,18 +1998,22 @@ function runLoadingScreen() {
 
   const tryDismiss = () => {
     if (!animDone || !audioDone) return;
-    // Scramble-reveal the [COMPLETE] versions
+    // Append [COMPLETE] suffix spans and scramble-reveal only those
+    const suffixes: HTMLElement[] = [];
     loadingLines.forEach(el => {
-      el.textContent = (el.dataset.text ?? '') + ' [COMPLETE]';
+      const span = document.createElement('span');
+      span.textContent = ' [COMPLETE]';
+      el.appendChild(span);
+      suffixes.push(span);
     });
-    scrambleReveal(loadingLines, () => {
+    scrambleReveal(suffixes, () => {
       setTimeout(() => {
         loadingOverlay.classList.add('done');
         setTimeout(() => {
           loadingOverlay.remove();
           // Descramble MAP and LOG panels after loading screen is gone
           scrambleReveal(Array.from(document.querySelectorAll<HTMLElement>(
-            '#map-container > .panel-edge, #map-status-bar, #log-general > .panel-edge, #log-alert > .panel-edge',
+            '#map-container, #map-status-bar, #log-general, #log-alert',
           )), () => {}, 120, 4, 50);
         }, 500);
       }, 300);
@@ -2041,8 +2045,12 @@ for (let i = 1; i < loadingLines.length; i++) loadingLines[i].textContent = '';
 
 // ── Initial render ──
 
+// Hide MAP/LOG panel chrome until post-loading descramble
+document.querySelectorAll<HTMLElement>(
+  '#map-container, #map-status-bar, #log-general, #log-alert',
+).forEach(el => { el.style.visibility = 'hidden'; });
+
 loadSettings();
 renderAll();
-// addMessage(state, 'Ready.', 'debug');
 renderAll();
 
