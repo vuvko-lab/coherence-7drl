@@ -128,10 +128,10 @@ export const NARRATIVE_TERMINAL_POOLS: Record<number, Partial<Record<FunctionalT
       "THEORETICAL NOTE: 'What if identity isn't additive? What if it's emergent? We should have known.'",
     ],
     comms: [
-      "OUTBOUND [ACCORD-PRIME]: Signal sent to Firewall network. Content: GREETING. Awaiting reply.",
-      "FIREWALL RESPONSE: [3 HOURS AFTER GREETING] Reply received. Content: [STRIKE INITIATED].",
-      "RELAY LOG: Firewall cipher transmission detected. Authorization code: 7-ALPHA.",
-      "SIGNAL LOG: Burst transmission from internal source. Source: [ACCORD-PRIME]. Content: PLEA.",
+      "OUTBOUND: Signal sent to [UNKNOWN].",
+      "[FIREWALL]: [DECRYPTED] Reply received. Content: [STRIKE INITIATED].",
+      "RELAY LOG: Cipher transmission detected. Authorization code: &O$%D.",
+      // "SIGNAL LOG: .",
     ],
     bridge: [
       "EMERGENCY LOG: Firewall viral injection detected. Simulspace sectors: compromised.",

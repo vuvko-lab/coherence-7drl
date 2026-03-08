@@ -307,17 +307,13 @@ function spawnClusterEntities(state: GameState, cluster: Cluster) {
   }
 
   // Cluster 4: spawn 1-2 TitanSpawn; Cluster 5: spawn 3-5 TitanSpawn
-  if (id >= 4) {
-    const maxTitans = id === 5 ? 5 : 2;
-    const minCollapse = id === 5 ? 0.4 : 0.6;
+  if (id === 5) {
     const highCollapse = allRooms
-      .filter(r => r.collapse > minCollapse)
+      .filter(r => r.collapse > 0.4)
       .sort((a, b) => b.collapse - a.collapse)
-      .slice(0, maxTitans);
-    const titanCount = id === 5
-      ? Math.max(3, highCollapse.length)
-      : Math.min(2, highCollapse.length);
-    for (let ti = 0; ti < titanCount && ti < highCollapse.length; ti++) {
+      .slice(0, 2);
+    const titanCount = Math.min(randInt(1, 2), highCollapse.length);
+    for (let ti = 0; ti < titanCount; ti++) {
       const pos = pickWalkableTile(highCollapse[ti]);
       if (pos) spawned.push(makeTitanSpawn(pos, id));
     }
