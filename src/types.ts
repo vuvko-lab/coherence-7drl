@@ -60,7 +60,7 @@ export type RoomType =
   | 'echo_chamber'
   | 'gravity_well';
 
-export type CorruptionStage = 'degrading' | 'corrupted' | 'collapsed';
+export type CorruptionStage = 'degrading' | 'corrupted' | 'collapsed' | 'dissolved';
 
 export interface ScannerBeam {
   axis: 'horizontal' | 'vertical';

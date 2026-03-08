@@ -233,6 +233,7 @@ function spawnClusterEntities(state: GameState, cluster: Cluster) {
 
   for (const room of shuffled) {
     if (cooldown > 0) { cooldown--; continue; }
+    if (room.roomType === 'corrupted') continue; // corruption rooms are uninhabitable
 
     const spawnChance = Math.min(0.75, baseChance + room.collapse * 0.35);
     if (random() >= spawnChance) continue;

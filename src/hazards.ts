@@ -75,7 +75,7 @@ function tileIntegrity(cluster: Cluster, x: number, y: number): number {
 
 // ── Corruption ──
 
-const CORRUPTION_STAGES: CorruptionStage[] = ['degrading', 'corrupted', 'collapsed'];
+const CORRUPTION_STAGES: CorruptionStage[] = ['degrading', 'corrupted', 'collapsed', 'dissolved'];
 
 function nextCorruptionStage(stage: CorruptionStage): CorruptionStage | null {
   const idx = CORRUPTION_STAGES.indexOf(stage);
@@ -90,7 +90,7 @@ function updateCorruption(state: GameState, cluster: Cluster, room: Room) {
   const hz = room.hazardState!;
   if (!hz.corruptionTiles) return;
 
-  const spreadInterval = randInt(8, 12);
+  const spreadInterval = randInt(20, 30);
   if (state.tick - (hz.lastSpreadTick ?? 0) < spreadInterval) return;
   hz.lastSpreadTick = state.tick;
 
@@ -106,9 +106,7 @@ function updateCorruption(state: GameState, cluster: Cluster, room: Room) {
         type: 'corruption',
         stage: corruptionOverlayStage(next),
       };
-      if (next === 'collapsed') {
-        cluster.tiles[cy][cx].walkable = false;
-      }
+      // All corruption stages remain walkable — damage handled by applyTileHazardToPlayer
     }
 
     // Spread to adjacent tile (floor, wall, or door)
@@ -1169,9 +1167,10 @@ export function tileHazardDamage(overlay: { type: string; stage?: number } | und
   if (!overlay) return 0;
   switch (overlay.type) {
     case 'corruption':
-      if (overlay.stage === 0) return 1;
-      if (overlay.stage === 1) return 3;
-      return 0; // collapsed — impassable
+      if (overlay.stage === 0) return 3;   // degrading
+      if (overlay.stage === 1) return 7;   // corrupted
+      if (overlay.stage === 2) return 12;  // collapsed
+      return 15;                           // dissolved
     case 'flood':
       if (overlay.stage === 0) return 1;
       return 2;

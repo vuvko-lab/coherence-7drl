@@ -2371,9 +2371,9 @@ function placeScenarios(tiles: Tile[][], rooms: Room[], interactables: Interacta
   if (clusterId >= 2 && clusterId <= 4) {
     if (random() < 0.7) placeSpookyAstronauts(tiles, rooms);
   }
-  // Broken Sleever: clusters 2-4
-  if (clusterId >= 2 && clusterId <= 4) {
-    if (random() < 0.6) placeBrokenSleever(tiles, rooms);
+  // Broken Sleever: clusters 2-5
+  if (clusterId >= 2 && clusterId <= 5) {
+    if (random() < 0.9) placeBrokenSleever(tiles, rooms);
   }
   // Whispering Wall: clusters 1+
   if (clusterId >= 1) {

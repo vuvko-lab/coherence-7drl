@@ -91,6 +91,11 @@ function move(entity: Entity, cluster: Cluster, target: Position, state?: GameSt
     }
     return false;
   }
+  // Block movement onto interactable positions (terminals, echoes, archives are solid)
+  if (cluster.interactables.some(ia => ia.position.x === target.x && ia.position.y === target.y)) {
+    return false;
+  }
+
   // Check for entity at target position
   if (state) {
     const occupant = state.entities.find(

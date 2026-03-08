@@ -265,7 +265,8 @@ export class Renderer {
             case 'corruption':
               if (ho.stage === 0) { glyph = '░'; fg = '#cc2222'; }
               else if (ho.stage === 1) { glyph = '▒'; fg = '#ff4444'; }
-              else { glyph = '█'; fg = '#881111'; }
+              else if (ho.stage === 2) { glyph = '▓'; fg = '#cc1111'; }
+              else { glyph = '█'; fg = '#660808'; }
               break;
             case 'flood':
               if (ho.stage === 0) { glyph = '~'; fg = '#2266aa'; bg = '#0a1a3a'; }
