@@ -177,6 +177,12 @@ export class Renderer {
     this.display.draw(x, y, ch, fg, bg);
   }
 
+  /** Draw a glyph at a position with a custom background color. */
+  drawWithBg(x: number, y: number, ch: string, fg: string, bg: string) {
+    if (!this.display) return;
+    this.display.draw(x, y, ch, fg, bg);
+  }
+
   setPathHighlight(path: Position[]) {
     this.pathHighlight = path;
   }
@@ -635,7 +641,7 @@ export function renderSelfPanel(el: HTMLElement, player: Entity, debugMode = fal
   el.innerHTML = `\
 <div class="panel-edge"><span class="corner">┌</span><span class="label">[ SELF ]</span><span class="fill"></span><span class="corner">┐</span></div>
 <div class="panel-body">
-<div class="stat-row"><span class="stat-value">${player.name}</span><span class="stat-label">${hexId}</span></div>
+<div class="stat-row"><span class="stat-value">mesh-id</span><span class="stat-label">${hexId}</span></div>
 <div class="stat-row"><span class="stat-label">State:</span><span class="stat-value">running</span></div>
 <div class="stat-row"><span class="stat-label">Coherence:</span><span class="stat-value"${cohStyle}>${coherencePct}%</span></div>
 <div class="coherence-bar ${barClass}"><span class="bar-fill"${cohStyle}>${barFill}</span><span class="bar-empty">${barEmpty}</span></div>

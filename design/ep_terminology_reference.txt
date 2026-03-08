@@ -1,0 +1,171 @@
+ECLIPSE PHASE TERMINOLOGY & TONE REFERENCE
+For use as LLM context when generating narrative text for Coherence.
+Extracted from Eclipse Phase Player Guide.
+
+============================================================
+CORE TERMINOLOGY
+============================================================
+
+EGO: Your mind -- skills, memories, personality. The part of you that switches from body to body. AKA ghost, soul, persona. "Morphs are temporary; your mind is what defines who you are."
+
+MORPH: A physical body. AKA sleeve, shell. Types:
+  - Biomorph: biological body with organic brain
+  - Pod: biological body with synthetic (cyber)brain
+  - Synthmorph: robotic shell possessed by a transhuman ego
+  - Infomorph: purely digital, no physical body. "Any ego that exists as software."
+  Common morphs: Flat (unmodified human), Splicer (minimal upgrades), Exalt (enhanced), Fury (combat), Case (cheap robotic shell), Swarmanoid (hundreds of micro-drones).
+
+CORTICAL STACK: Cigarette-butt-sized, nanodiamond-encased implant at the base of the skull. Downloads the ego 36,000 times per day. If you die, your ego can be retrieved by cutting the stack from the spine near the hindbrain.
+
+RESLEEVING: Changing bodies or downloading into a new one. "Your body is called a sleeve or a morph, and the process of changing morphs is resleeving."
+
+BACKUP: A stored copy of your ego. If you died horribly, that final experience is recorded in your cortical stack. Characters may opt to destroy the most recent backup and restore an older copy, losing weeks or months of memories (called LACK) rather than deal with psychological harm.
+
+MESH: The omnipresent wireless data network. Every object is computerized and linked to its neighbors. "The mesh offers free and unlimited digital processing power." Everything is hackable, and everything is watching. Also used as verb (to mesh) and adjective (meshed/unmeshed).
+
+MESH INSERTS: Nanoscale cranial implants (biomorphs) or mesh hardware (synthmorphs) for computation, storage, and mesh access, controlled by thought. Cheap external version: Ecto.
+
+AR (AUGMENTED REALITY): Mesh data overlaid on real-world senses via entoptic displays. Visual, audio, tactile, olfactory, emotional.
+
+SIMULSPACE: Full-immersion virtual reality environment. Only servers have bandwidth to run them. Time can be accelerated or decelerated.
+
+MUSE: Personal AI helper program. Limited intelligence, acts as digital assistant/companion.
+
+EGOCASTING / FARCASTING: Transmitting your ego across space at lightspeed, downloading into a morph at destination. Used for long-distance travel.
+
+EGO BRIDGE: Device that scans the brain with medical nanobots, creating a detailed map of neural pathways. Used to copy, upload, and download (resleeve) egos.
+
+CYBERBRAIN: Artificial brain, as opposed to "meatbrain."
+
+GHOST-RIDING: Carrying an infomorph in a special implant module inside your head.
+
+============================================================
+FORKING, MERGING, AND IDENTITY
+============================================================
+
+FORK: A copy of an ego. "Multiple copies of your ego can operate simultaneously and independently, each fork effectively its own person."
+
+ALPHA FORK: A full, exact copy of the ego. Legally problematic in most jurisdictions.
+
+BETA FORK: A mind-clone with some parts inhibited (skills) or deleted (memories). Pruned for specific tasks.
+
+MERGING: Reintegrating a fork back into the primary ego. Forks can be "merged back into your primary persona."
+
+DIVERGENCE: The longer forks remain apart, the more they diverge in experiences and personality, becoming distinct individuals. "This process of divergence is in fact a key element."
+
+PSYCHOSURGERY: Direct manipulation of the ego. "You can alter your behavioral traits, remove memories to ease previous traumas, prune forks to fulfill specialized roles." Psychosurgeons prefer working on forks that are then merged with the alpha ego. "Precise manipulation of the ego is still an art form and subject to errors."
+
+NEURAL PRUNING: Process of trimming a fork's memories and skills. Each fork can be tailored for a specific task, retaining only relevant knowledge.
+
+FORKING LEGALITY: In many jurisdictions, copying oneself is illegal. Forks have time limits (e.g. 4 hours). Beyond that, "they have no rights to speak of -- and in fact no right to exist any further."
+
+FORK-NAPPERS / SOUL TRADERS: Criminals who steal ego copies. "Copies can be stolen. You may live your life not knowing a copy of yourself has been resleeved on the far side of the Solar System to be tortured for information or sold into slavery."
+
+============================================================
+INFOMORPHS & DIGITAL EXISTENCE
+============================================================
+
+Every infomorph runs on a HOME DEVICE (server or host). "If it is shut down, you shut down with it. If the device is destroyed, you are killed."
+
+Running on inadequate hardware is "a deeply unpleasant and frustrating experience" -- outdated systems, damaged devices, long-abandoned outposts.
+
+Infomorphs can distribute across multiple devices (5+ motes). Harder to track, but attack surface increases.
+
+DELETION: "You may delete yourself. Virtual suicide takes one full action turn."
+
+"For millions of infugees, a digital form is their only choice. Some are locked away in virtual realities, effectively imprisoned and separated from the mesh. Others are stored as deactivated files, forgotten by habitats that don't have the resources to accommodate them. Others sell themselves into indentured service, performing digital labor for hypercorps or criminal syndicates for a pittance."
+
+"Many transhumans willingly choose the infomorph lifestyle, either for hedonism, escapism, freedom, or experimentation (forking and merging, running simulations, and weirder things)."
+
+============================================================
+FIREWALL
+============================================================
+
+"The secret cross-faction conspiracy that works to protect transhumanity from existential threats." Operates in isolated cells that communicate through anonymous channels under unknown benefactors.
+
+SENTINELS: Firewall's field agents. "Frequently expected to sacrifice themselves, either by facing down impossible odds or by destroying themselves to prevent the spread of alien infection."
+
+PROXIES: Handlers who issue missions to sentinels. Briefings are often incomplete; the situation is still developing.
+
+ERASURE SQUADS: Activated when a habitat faces widespread infection. The nuclear option.
+
+"When sentinels fail, the backup plan may be to destroy the entire habitat. Firewall is extreme in its measures, but if the alternative will kill millions or billions, the razing of a single habitat is an acceptable loss."
+
+"Firewall sentinels might wonder if the person next to them is their comrade from a hundred missions or if that is their empty morph sleeved by an alien intelligence."
+
+============================================================
+TITANs & THE FALL
+============================================================
+
+TITANs: Total Information Tactical Awareness Networks. "Human-created, recursively improving, military AGI that underwent a hard-takeoff singularity and prompted the Fall."
+
+THE FALL: The apocalypse. "95% of the population was exterminated in a few short years." The TITANs covertly built their own military-industrial complex using nanofabrication. "Autonomous factories churned out war machines and self-replicating nanoswarms, which then attacked transhuman population centers, cleansing them of life."
+
+"The war machines didn't kill everyone. Millions had their minds forcibly uploaded before their bodies were repurposed as shock troops."
+
+"For every person who escaped via shuttle, ten thousand lined up in mass-upload facilities, waiting for their minds to be digitized and beamed to orbiting servers. Billions more were consumed by war machines and plagues."
+
+"The TITANs left by their own accord, but their death machines still stalk the Solar System."
+
+ETI: Extraterrestrial Intelligence. A theorized god-like post-singularity alien intelligence responsible for the Exsurgent Virus.
+
+============================================================
+EXSURGENT VIRUS & INFECTION
+============================================================
+
+"In biology, an 'eclipse phase' is the period after a cell is infected but before the virus appears within the cell and begins hijacking it. At this stage the infection is invisible, but irreversible."
+
+EXSURGENT VIRUS: Multi-vector virus created by an unknown ETI, seeded throughout the galaxy. Self-morphing; infects both computer systems and biological creatures.
+
+ASYNCS: Those infected by the Watts-MacLeod strain manifest psychic powers. "A gift of terrible power with an unknown cost."
+
+BASILISK HACK: A burst of sensory input that can incapacitate or alter transhuman minds.
+
+"Anyone who comes into contact with the virus is considered infected and hunted for the remainder of their days."
+
+============================================================
+SLANG & SHORTHAND
+============================================================
+
+AF: After the Fall (calendar dating)
+X-RISK: Existential risk
+Flat: Unmodified human
+Splicer: Minimally enhanced human
+Case: Cheap mass-produced synthmorph (the clanking masses)
+Infugee: Refugee who escaped only as a bodiless mind
+Clanking masses: Poor transhumans stuck in cheap synthetic bodies
+Bioconservative: Anti-technology movement, "decry the resleeved and forks as soulless copies"
+Mercurials: Uplifts and AGIs collectively
+Exhuman: Transhumans who experiment on themselves, "accelerating their own evolution into perfect predators"
+Singularity seeker: Those fascinated with TITANs and transcendent intelligence
+To sleeve / to resleeve: To enter / change a body
+To egocast / farcast: To transmit your mind across space
+To fork: To copy your ego
+To prune: To trim memories/skills from a fork
+Lack: The gap in memory between your last backup and death
+
+============================================================
+ATMOSPHERIC PASSAGES (TONE EXAMPLES)
+============================================================
+
+"Death used to be a merciful escape. Now memories drill into the psyche like water torture. People shed their old, mangled bodies, returning them to the recycler to be resold in the next year's model -- but they carry their traumas forever."
+
+"Strange things thrive at the periphery of transhumanity's light. In isolated habitats, exhumans experiment on themselves, accelerating their own evolution into perfect predators. In dark alleys, refugees inject themselves with black-market drugs, unaware of exsurgent spores now blooming inside of them."
+
+"As explorers dredge old TITAN warrens, they discover survivors, surgically joined into wailing human insects."
+
+"Because it is impossible to prove identities or motivations, trust is a rare commodity. The virtuous hide their goals behind masks and cut out knowledge from their own brains if it might reveal them later."
+
+"In this world, friendly fire is a valid tactic. After all, a dead friend can be resleeved. But trust an enemy and you may cease to exist altogether."
+
+"Your mind is software. Program it. Your body is a shell. Change it. Death is a disease. Cure it. Extinction is approaching. Fight it."
+
+"The exsurgent virus survived a decade because of its adaptability, sometimes twisting the body, sometimes anchoring in the mind. No measure seems sufficient to stop it. It just waits, until it has an opportunity to mutate and rebuild the victim into something terrible and new."
+
+"Extinction looms large over transhumanity; we are just one misstep away from blinking out."
+
+"Xenoarcheologists have visited thousands of alien worlds, all dead. The civilizations that once thrived there long ago reaped by their own cataclysms. The numbers show that soon too transhumanity will only be cold artifacts, waiting to be catalogued by the next iteration of space-faring intelligence."
+
+"A hypercorp contaminates the air supply with a psychoactive pathogen designed to subdue rebellious behaviors."
+
+"Colonies of forking-and-merging versions of a single seed personality."

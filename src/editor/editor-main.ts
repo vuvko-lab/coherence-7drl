@@ -432,6 +432,7 @@ function buildSimState(): GameState {
     pendingSounds: [],
     firedTriggerIds: new Set(),
     corruptShotsFired: 0,
+    cloakActivations: 0,
     terminalsRead: 0,
   };
 

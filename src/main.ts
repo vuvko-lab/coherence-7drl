@@ -255,6 +255,14 @@ function initAdminPanel() {
 <div class="admin-section collapsed" id="admin-sec-glitch">
 ${buttons}
 </div>
+<button class="admin-btn admin-show-echoes">&gt; show narrative echoes</button>
+<button class="admin-section-hdr" data-section="screens">[+] SCREENS</button>
+<div class="admin-section collapsed" id="admin-sec-screens">
+<button class="admin-btn admin-screen-btn" data-screen="restore">&gt; ending: restore</button>
+<button class="admin-btn admin-screen-btn" data-screen="jump">&gt; ending: jump</button>
+<button class="admin-btn admin-screen-btn" data-screen="death">&gt; ending: death</button>
+<button class="admin-btn admin-screen-btn" data-screen="none">&gt; ending: none</button>
+</div>
 <button class="admin-section-hdr" data-section="sounds">[+] SOUNDS</button>
 <div class="admin-section collapsed" id="admin-sec-sounds">
 ${soundManager.getAllSoundIds().map(id => `<button class="admin-btn admin-sound-btn" data-sound="${id}">&gt; ${id}</button>`).join('\n')}
@@ -448,6 +456,40 @@ ${soundManager.getAllSoundIds().map(id => `<button class="admin-btn admin-sound-
       soundManager.init();
       const id = (btn as HTMLElement).dataset.sound;
       if (id) soundManager.play(id, { debounceMs: 0 });
+    });
+  });
+
+  // Show narrative echoes in current cluster
+  adminEl.querySelector('.admin-show-echoes')?.addEventListener('click', () => {
+    const cluster = state.clusters.get(state.currentClusterId);
+    if (!cluster) return;
+    const echoes = cluster.interactables.filter(ia => ia.kind === 'archive_echo' && ia.dialog.length > 0 && !ia.isDataArchive);
+    if (echoes.length === 0) {
+      addMessage(state, '[DEBUG] No narrative echoes in this cluster.', 'debug');
+    } else {
+      addMessage(state, `[DEBUG] ${echoes.length} narrative echo(es) in cluster ${state.currentClusterId}:`, 'debug');
+      for (const e of echoes) {
+        const label = e.dialog[0]?.lines?.[0] ?? e.id;
+        addMessage(state, `  ${e.id} at (${e.position.x},${e.position.y}) — ${label}`, 'debug');
+      }
+    }
+    renderAll();
+    // Highlight narrative echo positions with magenta background
+    for (const e of echoes) {
+      renderer.drawWithBg(e.position.x, e.position.y, '≡', '#ff88ff', '#880088');
+    }
+  });
+
+  // Screen preview buttons
+  adminEl.querySelectorAll('.admin-screen-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const screen = (btn as HTMLElement).dataset.screen;
+      if (screen === 'death') {
+        showDeathOverlay();
+      } else {
+        state.narrativeChoice = screen === 'none' ? undefined : (screen as 'restore' | 'jump');
+        showVictoryOverlay();
+      }
     });
   });
 }
@@ -1051,32 +1093,32 @@ function showVictoryOverlay() {
     ? Object.entries(killCounts).map(([k, n]) => `<div>&gt; ${k}: ${n}</div>`).join('')
     : '<div>&gt; none destroyed</div>';
 
-  // Collect all unlocked achievements
-  const achievements: { name: string; desc: string }[] = [];
-  if (!state.selfPanelRevealed) {
-    achievements.push({ name: 'SILENT PROTOCOL', desc: 'Exited the system without loading an identity.' });
-  }
-  if (state.corruptShotsFired === 0) {
-    achievements.push({ name: 'CLEAN SIGNAL', desc: 'Escaped without firing corrupt.m once.' });
-  }
-  if (state.killedEntities.length === 0) {
-    achievements.push({ name: 'ZERO FOOTPRINT', desc: 'Escaped without destroying any entity.' });
-  }
-  if (state.terminalsRead === 0) {
-    achievements.push({ name: 'GHOST IN THE MESH', desc: 'Escaped without reading any terminal.' });
-  }
+  // Check all achievements
+  const allAchievements = [
+    { name: 'SILENT PROTOCOL', desc: 'Finish the game without loading an identity.', unlocked: !state.selfPanelRevealed },
+    { name: 'CLEAN SIGNAL', desc: 'Finish the game without firing corrupt.m once.', unlocked: state.corruptShotsFired === 0 },
+    { name: 'ZERO FOOTPRINT', desc: 'Finish the game without destroying any entity.', unlocked: state.killedEntities.length === 0 },
+    { name: 'PLAINTEXT', desc: 'Finish the game without activating cloak.m.', unlocked: state.cloakActivations === 0 },
+    { name: 'GHOST IN THE MESH', desc: 'Finish the game without reading any terminal.', unlocked: state.terminalsRead === 0 },
+  ];
 
   const achievementEl = document.getElementById('victory-achievement')!;
-  if (achievements.length > 0) {
-    achievementEl.innerHTML = achievements.map(a =>
-      `<div class="achievement-badge">◈ ACHIEVEMENT UNLOCKED ◈</div>` +
-      `<div class="achievement-name">${a.name}</div>` +
-      `<div class="achievement-desc">${a.desc}</div>`
-    ).join('');
-    achievementEl.style.display = '';
-  } else {
-    achievementEl.style.display = 'none';
-  }
+  achievementEl.innerHTML = allAchievements.map(a => {
+    if (a.unlocked) {
+      return `<div class="achievement-entry achievement-unlocked">` +
+        `<div class="achievement-badge">◈ ACHIEVEMENT UNLOCKED ◈</div>` +
+        `<div class="achievement-name">${a.name}</div>` +
+        `<div class="achievement-desc">${a.desc}</div>` +
+        `</div>`;
+    } else {
+      return `<div class="achievement-entry achievement-locked">` +
+        `<div class="achievement-badge">◇ LOCKED ◇</div>` +
+        `<div class="achievement-name">${a.name}</div>` +
+        `<div class="achievement-desc">${a.desc}</div>` +
+        `</div>`;
+    }
+  }).join('');
+  achievementEl.style.display = '';
 
   victoryOverlay.classList.add('open');
   soundManager.stopAmbient(500);
@@ -1084,9 +1126,12 @@ function showVictoryOverlay() {
   const victoryLines: Element[] = [document.getElementById('victory-header')!];
   victoryLines.push(...Array.from(victoryStats.children));
   victoryLines.push(...Array.from(victoryKills.children));
-  if (achievementEl.style.display !== 'none') victoryLines.push(...Array.from(achievementEl.children));
+  victoryLines.push(...Array.from(achievementEl.children));
   victoryLines.push(victoryRestartBtn);
+  const victoryPanel = document.getElementById('victory-panel')!;
+  victoryPanel.style.overflowY = 'hidden';
   revealLines(victoryLines);
+  setTimeout(() => { victoryPanel.style.overflowY = 'auto'; }, victoryLines.length * 40 + 60);
 }
 
 // ── Death overlay ──
@@ -1134,7 +1179,10 @@ function showDeathOverlay() {
   deathLines.push(...Array.from(deathStats.children));
   deathLines.push(...Array.from(deathKills.children));
   deathLines.push(deathRestartBtn);
+  const deathPanel = document.getElementById('death-panel')!;
+  deathPanel.style.overflowY = 'hidden';
   revealLines(deathLines);
+  setTimeout(() => { deathPanel.style.overflowY = 'auto'; }, deathLines.length * 40 + 60);
 }
 
 // ── Aim mode ──
@@ -1957,7 +2005,13 @@ function runLoadingScreen() {
     scrambleReveal(loadingLines, () => {
       setTimeout(() => {
         loadingOverlay.classList.add('done');
-        setTimeout(() => loadingOverlay.remove(), 500);
+        setTimeout(() => {
+          loadingOverlay.remove();
+          // Descramble MAP and LOG panels after loading screen is gone
+          scrambleReveal(Array.from(document.querySelectorAll<HTMLElement>(
+            '#map-container > .panel-edge, #map-status-bar, #log-general > .panel-edge, #log-alert > .panel-edge',
+          )), () => {}, 120, 4, 50);
+        }, 500);
       }, 300);
     }, 200, 4, 50);
   };
@@ -1992,6 +2046,3 @@ renderAll();
 // addMessage(state, 'Ready.', 'debug');
 renderAll();
 
-scrambleReveal(Array.from(document.querySelectorAll<HTMLElement>(
-  '#map-container > .panel-edge, #map-status-bar, #log-general > .panel-edge, #log-alert > .panel-edge',
-)), () => {}, 120, 4, 50);

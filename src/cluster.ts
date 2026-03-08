@@ -6,7 +6,7 @@ import {
   createRoomTags,
 } from './types';
 import { generate, CellType, RoomDef, Hall } from './gen-halls';
-import { random, randInt, pick } from './rng';
+import { random, randInt, pick, shuffle } from './rng';
 import { initNoise, collapseNoise } from './noise';
 import { NARRATIVE_TERMINAL_HEADER, NARRATIVE_TERMINAL_POOLS, GENERIC_TERMINAL_POOLS, NARRATIVE_ECHOES, NARRATIVE_WHISPERS, NARRATIVE_KEY_TERMINAL_LINES, buildArchivePools } from './narrative/index';
 
@@ -845,11 +845,12 @@ function placeTerminals(tiles: Tile[][], allRooms: Room[], clusterId: number, do
   if (terminals.length > 0) {
     const keyTerminal = state_findKeyTerminal(terminals, allRooms, doorAdjacency);
     keyTerminal.hasKey = true;
+    const header = NARRATIVE_TERMINAL_HEADER[clusterId] ?? NARRATIVE_TERMINAL_HEADER[-1];
     const keyPool = NARRATIVE_KEY_TERMINAL_LINES[clusterId] ?? KEY_CONTENT_LINES;
     const keyLines = [...keyPool].sort(() => random() - 0.5).slice(0, randInt(2, 3));
     const keyRoom = allRooms.find(r => r.id === keyTerminal.roomId);
-    const tagLines = generateTerminalContent(keyRoom?.tags.functional ?? null, clusterId).slice(0, randInt(1, 3));
-    keyTerminal.content = [...keyLines, ...tagLines];
+    const tagLines = generateTerminalContent(keyRoom?.tags.functional ?? null, clusterId).slice(header.length, header.length + randInt(1, 3));
+    keyTerminal.content = [...header, '──────────────────────────────────', ...keyLines, ...tagLines];
     // Mark as final terminal in the final cluster
     if (clusterId === FINAL_CLUSTER_ID) {
       keyTerminal.isFinalTerminal = true;
@@ -1162,14 +1163,24 @@ function placeNarrativeEchoes(
   };
 
   for (const def of defs) {
-    // Find a non-hall room matching the functional tag; prefer low-collapse rooms
-    const candidates = allRooms
-      .filter(r => !r.tags.geometric.has('hall') && r.tags.functional === def.functionalTag)
+    // Find non-hall rooms matching the functional tag; prefer low-collapse rooms
+    let candidates = allRooms
+      .filter(r => !r.tags.geometric.has('hall') && r.tags.functional !== null && def.functionalTags.includes(r.tags.functional))
       .sort((a, b) => a.collapse - b.collapse);
-    const room = candidates[0];
-    if (!room) continue;
-    const pos = tryPlace(findPlacementInRoom(tiles, room));
-    if (!pos) continue;
+    // Fallback: any non-hall room with a functional tag
+    if (candidates.length === 0) {
+      candidates = allRooms
+        .filter(r => !r.tags.geometric.has('hall') && r.tags.functional !== null)
+        .sort((a, b) => a.collapse - b.collapse);
+    }
+
+    let pos: Position | null = null;
+    let room: Room | undefined;
+    for (const c of candidates) {
+      pos = tryPlace(findPlacementInRoom(tiles, c));
+      if (pos) { room = c; break; }
+    }
+    if (!pos || !room) continue;
 
     const id = makeId('narr');
     const isTutorial = def.isTutorialEcho ?? false;
@@ -1196,7 +1207,7 @@ function placeNarrativeEchoes(
 function buildLostEchoDialogWithWhispers(clusterId: number, hasExitCode: boolean): DialogNode[] {
   const whispers = NARRATIVE_WHISPERS[clusterId];
   if (!whispers || whispers.length < 4) return buildLostEchoDialog(hasExitCode);
-  const shuffled = [...whispers].sort(() => random() - 0.5);
+  const shuffled = shuffle([...whispers]);
   const nodes: DialogNode[] = [
     {
       id: 'root',
@@ -1291,7 +1302,7 @@ function placeInteractables(
   const echoRooms = allRooms.filter(r => r.collapse > echoThreshold)
     .sort((a, b) => b.collapse - a.collapse);
   let echoCount = 0;
-  const echoMax = clusterId >= 4 ? 20 : clusterId >= 2 ? 12 : 8;
+  const echoMax = clusterId >= 4 ? 10 : clusterId >= 2 ? 7 : 4;
   // Allow one echo per cluster to hold an exit code (only if cluster has one)
   let exitCodeAssigned = false;
 
@@ -1326,9 +1337,10 @@ function placeInteractables(
 
   // ── Archive echos (low-collapse functional rooms) ─────────────────────────
   const archiveEligible = allRooms.filter(r =>
-    !r.tags.geometric.has('hall') && r.collapse < 0.5 && r.tags.functional !== null,
-  ).sort(() => random() - 0.5);
-  const archiveCap = clusterId >= 4 ? 5 : clusterId >= 2 ? 4 : 2;
+    !r.tags.geometric.has('hall') && r.collapse < 0.7 && r.tags.functional !== null,
+  );
+  shuffle(archiveEligible);
+  const archiveCap = clusterId >= 4 ? 8 : clusterId >= 2 ? 6 : 4;
   const archiveTarget = Math.min(archiveCap, Math.max(0, Math.floor(archiveEligible.length / 2)));
 
   for (let i = 0; i < archiveTarget; i++) {

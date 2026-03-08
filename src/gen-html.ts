@@ -156,8 +156,10 @@ function createStateForCluster(seed: number, clusterId: number): GameState {
     collapseGlitchTiles: new Map(),
     selfPanelRevealed: true,
     smokeEffects: [],
+    pendingSounds: [],
     firedTriggerIds: new Set(),
     corruptShotsFired: 0,
+    cloakActivations: 0,
     terminalsRead: 0,
   };
 

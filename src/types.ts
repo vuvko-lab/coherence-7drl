@@ -490,6 +490,7 @@ export interface GameState {
   firedTriggerIds: Set<string>;       // ids of once-only narrative triggers that have already fired
   // Achievement tracking
   corruptShotsFired: number;          // total corrupt.m shots fired across all clusters
+  cloakActivations: number;           // total cloak.m activations across all clusters
   terminalsRead: number;              // total terminals interacted with
 }
 

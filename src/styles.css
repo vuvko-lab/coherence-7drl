@@ -718,7 +718,8 @@ body {
   z-index: 100;
   background: rgba(0, 0, 0, 0.7);
   justify-content: center;
-  align-items: center;
+  align-items: flex-start;
+  padding: 5vh 0;
 }
 
 #about-overlay.open {
@@ -1283,7 +1284,8 @@ body {
   z-index: 200;
   background: rgba(0, 0, 0, 0.92);
   justify-content: center;
-  align-items: center;
+  align-items: flex-start;
+  padding: 5vh 0;
 }
 
 #victory-overlay.open {
@@ -1295,6 +1297,8 @@ body {
   border: 1px solid var(--theme-accent);
   padding: 2rem 3rem;
   min-width: 360px;
+  max-height: 80vh;
+  overflow-y: auto;
   text-align: center;
   font-family: inherit;
 }
@@ -1327,6 +1331,10 @@ body {
   text-align: center;
 }
 
+.achievement-entry {
+  margin-bottom: 0.6rem;
+}
+
 .achievement-badge {
   color: #ddcc44;
   letter-spacing: 0.12em;
@@ -1344,6 +1352,18 @@ body {
 .achievement-desc {
   color: #aa9944;
   font-size: 0.88em;
+}
+
+.achievement-locked .achievement-badge {
+  color: #555;
+}
+
+.achievement-locked .achievement-name {
+  color: #666;
+}
+
+.achievement-locked .achievement-desc {
+  color: #444;
 }
 
 #victory-restart {
@@ -1371,7 +1391,8 @@ body {
   z-index: 200;
   background: rgba(0, 0, 0, 0.92);
   justify-content: center;
-  align-items: center;
+  align-items: flex-start;
+  padding: 5vh 0;
 }
 
 #death-overlay.open {
@@ -1383,6 +1404,8 @@ body {
   border: 1px solid #ff4444;
   padding: 2rem 3rem;
   min-width: 360px;
+  max-height: 80vh;
+  overflow-y: auto;
   text-align: center;
   font-family: inherit;
 }
@@ -1453,4 +1476,37 @@ body {
   line-height: 2;
   letter-spacing: 0.08em;
   white-space: pre;
+}
+
+/* --- Custom scrollbar --- */
+#victory-panel,
+#death-panel,
+#about-panel .about-body {
+  scrollbar-width: thin;
+  scrollbar-color: var(--theme-dim) transparent;
+}
+
+#victory-panel::-webkit-scrollbar,
+#death-panel::-webkit-scrollbar,
+#about-panel .about-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+#victory-panel::-webkit-scrollbar-track,
+#death-panel::-webkit-scrollbar-track,
+#about-panel .about-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#victory-panel::-webkit-scrollbar-thumb,
+#death-panel::-webkit-scrollbar-thumb,
+#about-panel .about-body::-webkit-scrollbar-thumb {
+  background: var(--theme-dim);
+  border-radius: 3px;
+}
+
+#victory-panel::-webkit-scrollbar-thumb:hover,
+#death-panel::-webkit-scrollbar-thumb:hover,
+#about-panel .about-body::-webkit-scrollbar-thumb:hover {
+  background: var(--theme-fg);
 }

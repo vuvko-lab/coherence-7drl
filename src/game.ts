@@ -132,6 +132,7 @@ export function createGame(initialSeed?: number): GameState {
     pendingSounds: [],
     firedTriggerIds: new Set(),
     corruptShotsFired: 0,
+    cloakActivations: 0,
     terminalsRead: 0,
   };
 
@@ -507,6 +508,7 @@ export function activateCloak(state: GameState, cloak: PlayerModule): boolean {
   }
 
   cloak.clusterUseCount = useCount + 1;
+  state.cloakActivations++;
   cloak.active = true;
   cloak.cloakExpiresAtTick = state.tick + CLOAK_DURATION;
   cloak.cooldownUntilTick = state.tick + CLOAK_COOLDOWN;
