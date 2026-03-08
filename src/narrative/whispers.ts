@@ -8,7 +8,7 @@ export const NARRATIVE_WHISPERS: Record<number, string[]> = {
     '[ECHO \u2592\u2588\u2591\u2588\u2588]: ...still cataloging... room integrity... 12%... still cataloging... [LOOP]',
     '...I remember being afraid of the dark... now I am the dark... [FRAGMENT]',
     '...is anyone still receiving... respond on any channel... [REPEATING]',
-    '...the substrate is warm... this is home now... [END OF RECORDING]',
+    '...the simulspace is warm... this is home now... [END OF RECORDING]',
     '...is there a name for what we are becoming... [FRAGMENT ENDS]',
   ],
   1: [

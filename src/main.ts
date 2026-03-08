@@ -688,7 +688,7 @@ function renderDataArchive(item: import('./types').Interactable) {
     const integrityPct = Math.round((1 - decay) * 100);
     const remaining = max - accum;
     iaContent.innerHTML = [
-      `<div class="ia-line">${glitchText('[DATA ARCHIVE — SUBSTRATE FRAGMENT]', decay * 0.3)}</div>`,
+      `<div class="ia-line">${glitchText('[DATA ARCHIVE — SIMULSPACE FRAGMENT]', decay * 0.3)}</div>`,
       `<div class="ia-line ia-archive-meta">INTEGRITY: ${integrityPct}%  ·  QUERIES REMAINING: ${remaining}</div>`,
     ].join('');
 

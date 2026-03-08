@@ -257,7 +257,7 @@ export const NARRATIVE_ECHOES: Record<number, NarrativeEchoDef[]> = {
         {
           id: 'then',
           lines: [
-            "'[ECHO-FOSS]: ...they decided we were a risk... thirty-seven people... one mind... [LOOP]'",
+            "'[ECHO-FOSS]: ...they decided we were a risk... [CORR]even people... one mind... [LOOP]'",
             "'[ECHO-FOSS]: ...they called it contained... we called it ourselves... [FADING]'",
           ],
           choices: [

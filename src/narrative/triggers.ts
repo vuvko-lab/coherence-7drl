@@ -11,7 +11,7 @@ export const NARRATIVE_TRIGGERS: NarrativeTrigger[] = [
   //   condition: { event: 'cluster_enter', clusterId: 0, once: true },
   //   effects: [
   //     { kind: 'message', text: 'BOOT SEQUENCE COMPLETE. EGO-INSTANCE: COVAD. BACKUP AGE: 21 DAYS.', style: 'system' },
-  //     { kind: 'message', text: 'Substrate integrity critical. The ship is quiet. Something happened here.', style: 'normal' },
+  //     { kind: 'message', text: 'Simulspace integrity critical. The ship is quiet. Something happened here.', style: 'normal' },
   //   ],
   // },
   {
@@ -124,7 +124,7 @@ export const NARRATIVE_TRIGGERS: NarrativeTrigger[] = [
     id: 'high_collapse_room',
     condition: { event: 'room_enter', collapseMin: 0.7, once: false },
     effects: [
-      { kind: 'message', text: 'Infrastructure collapse severe. The substrate is barely holding shape here.', style: 'hazard' },
+      { kind: 'message', text: 'Infrastructure collapse severe. The simulspace is barely holding shape here.', style: 'hazard' },
     ],
   },
 ];

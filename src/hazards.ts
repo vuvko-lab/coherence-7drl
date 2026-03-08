@@ -1071,7 +1071,7 @@ function tryFireMicroEvent(state: GameState, cluster: Cluster, room: Room) {
       break;
     case 'distant_scream': {
       const screams = [
-        '...a distorted cry echoes through the substrate.',
+        '...a distorted cry echoes through the simulspace.',
         'Something screams in a register you cannot parse.',
         'A sound like tearing data echoes from deeper in the ship.',
         '...a voice, already fading: "—not like this—"',

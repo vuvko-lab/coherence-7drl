@@ -9,31 +9,31 @@ import type { FunctionalTag } from '../types';
 export const NARRATIVE_TERMINAL_HEADER: Record<number, string[]> = {
   [-1]: [
     'SHIPBOARD SYSTEMS — TERMINAL ACCESS GRANTED',
-    'SUBSTRATE: virtual | COHERENCE MESH: degraded | CREW: unknown',
+    'SIMULSPACE: virtual | COHERENCE MESH: degraded | CREW: unknown',
   ],
   0: [
     'SHIPBOARD SYSTEMS — TERMINAL ACCESS GRANTED',
-    'SUBSTRATE: virtual | COHERENCE MESH: nominal | CREW: 40 registered',
+    'SIMULSPACE: virtual | COHERENCE MESH: nominal | CREW: 40 registered',
   ],
   1: [
     'SHIPBOARD SYSTEMS — TERMINAL ACCESS GRANTED',
-    'SUBSTRATE: virtual | COHERENCE MESH: unstable | CREW: status uncertain',
+    'SIMULSPACE: virtual | COHERENCE MESH: unstable | CREW: status uncertain',
   ],
   2: [
     'SHIPBOARD SYSTEMS — TERMINAL ACCESS GRANTED',
-    'SUBSTRATE: virtual | COHERENCE MESH: fragmenting | CREW: no life signs',
+    'SIMULSPACE: virtual | COHERENCE MESH: fragmenting | CREW: no life signs',
   ],
   3: [
     'SHIPBOARD SYSTEMS — TERMINAL ACCESS GRANTED',
-    'SUBSTRATE: virtual | COHERENCE MESH: critical | CREW: deceased',
+    'SIMULSPACE: virtual | COHERENCE MESH: critical | CREW: deceased',
   ],
   4: [
     'SHIPBOARD SYSTEMS — TERMINAL ACCESS GRANTED',
-    'SUBSTRATE: failing | COHERENCE MESH: collapse imminent | CREW: [DATA EXPUNGED]',
+    'SIMULSPACE: failing | COHERENCE MESH: collapse imminent | CREW: [DATA EXPUNGED]',
   ],
   5: [
     'SHIPBOARD SYSTEMS — TERMINAL ACCESS GRANTED',
-    'SUBSTRATE: terminal decay | COHERENCE MESH: 2% | CREW: [DATA EXPUNGED]',
+    'SIMULSPACE: terminal decay | COHERENCE MESH: 2% | CREW: [DATA EXPUNGED]',
   ],
 };
 
@@ -42,7 +42,7 @@ export const NARRATIVE_TERMINAL_HEADER: Record<number, string[]> = {
 export const NARRATIVE_TERMINAL_POOLS: Record<number, Partial<Record<FunctionalTag, string[]>>> = {
   0: {
     bridge: [
-      'SYSTEMS: Substrate integrity at 19%. Cause of failure: [FIREWALL SEAL].',
+      'SYSTEMS: Simulspace integrity at 19%. Cause of failure: [FIREWALL SEAL].',
       "CAPTAIN'S LOG: 'The vote is in three days. Attendance: mandatory.'",
       'RESOURCE PROJECTION: Without intervention, crew coherence fails in 28 days.',
       'PERSONNEL LOG: 40 crew aboard. Physical morphs in storage bay C. All accounted for.',
@@ -61,11 +61,11 @@ export const NARRATIVE_TERMINAL_POOLS: Record<number, Partial<Record<FunctionalT
       "SHIFT LOG: 12-hour cycle, standard. Complaints: 3. Coffee supply: adequate. Morale: okay.",
       "PERSONAL REMINDER [COVAD]: 'Don't forget the vote on Thursday. Foss says it matters.'",
       "MAINTENANCE REPORT: All reactor systems nominal. Engineer sign-off: COVAD.",
-      "WORK ORDER #8831: Patch integrity in substrate buffer, server room B. Assigned: COVAD.",
+      "WORK ORDER #8831: Patch integrity in simulspace buffer, server room B. Assigned: COVAD.",
     ],
     server_rack: [
       'UPTIME: 21 days since last reboot. No anomalies logged.',
-      'STORAGE: Substrate allocated to 40 ego-instances. Backup count: 40.',
+      'STORAGE: Simulspace allocated to 40 ego-instances. Backup count: 40.',
       'PROCESS LIST: 40 active ego-processes. System processes: 7. Background tasks: 3.',
       'EGO-INDEX: All 40 crew instances healthy. Last verified: DAY -21.',
       'BACKUP LOG: Scheduled backup completed. COVAD delta-3 archived.',
@@ -74,14 +74,14 @@ export const NARRATIVE_TERMINAL_POOLS: Record<number, Partial<Record<FunctionalT
       "REACTOR CORE: Stable. Output at 94%. Maintenance due in 12 cycles.",
       'COOLING: Loop A nominal. Loop B: minor variance. Flag for inspection.',
       "SHIFT NOTE [COVAD]: 'Reactor's quiet today. Almost peaceful down here.'",
-      'POWER DISTRIBUTION: Substrate cores given priority. Physical hab: reduced to 60%.',
+      'POWER DISTRIBUTION: Simulspace cores given priority. Physical hab: reduced to 60%.',
       'ALERT LOG: 0 critical events in past 30 days. Status: NOMINAL.',
     ],
   },
 
   1: {
     bridge: [
-      'VOTE LOG: RESOLUTION 7 — SUBSTRATE EGO CONSOLIDATION. Passed: 37/40. Abstentions: 3.',
+      'VOTE LOG: RESOLUTION 7 — SIMULSPACE EGO CONSOLIDATION. Passed: 37/40. Abstentions: 3.',
       'DISSENT RECORD: Three crew abstained. No votes against. Names withheld by request.',
       "CAPTAIN'S NOTE: 'I will go in last. I want to make sure everyone else lands safely first.'",
       'TIMELINE: Phase 1 integration begins in 72 hours. All crew: report to server room B.',
@@ -98,14 +98,14 @@ export const NARRATIVE_TERMINAL_POOLS: Record<number, Partial<Record<FunctionalT
       "DR. CHEN: 'The ego-resonance models check out. I've been wrong before but — I think this works.'",
       'RESEARCH NOTE: Theoretical basis for ego-boundary dissolution reviewed. Risks: acceptable.',
       "LAB LOG [DAY -14]: 'If it works, we'll never be hungry again.' — Foss. I believe her.",
-      "EXPERIMENT PREP: Substrate buffer expanded to 47-instance capacity. Engineer: COVAD.",
+      "EXPERIMENT PREP: Simulspace buffer expanded to 47-instance capacity. Engineer: COVAD.",
       "SAFETY PROTOCOL: Pre-merge backups completed for all 40 crew. Storage verified.",
     ],
     server_rack: [
       "PREPARATION LOG: Ego-buffer expanded to 47-instance capacity. Engineer: COVAD.",
       "EGO-INDEX: Pre-merge backup verified for all 40 crew. Last backup: COVAD delta-3.",
-      "SUBSTRATE READINESS: Integration matrix initialized. Phase 1 capacity: nominal.",
-      "SYSTEM NOTE: Physical morphs moved to cold storage. Substrate now primary habitation.",
+      "SIMULSPACE READINESS: Integration matrix initialized. Phase 1 capacity: nominal.",
+      "SYSTEM NOTE: Physical morphs moved to cold storage. Simulspace now primary habitation.",
       "BACKUP STATUS: All 40 backup deltas confirmed. Oldest: COVAD delta-3, 21 days.",
     ],
   },
@@ -134,10 +134,10 @@ export const NARRATIVE_TERMINAL_POOLS: Record<number, Partial<Record<FunctionalT
       "SIGNAL LOG: Burst transmission from internal source. Source: [ACCORD-PRIME]. Content: PLEA.",
     ],
     bridge: [
-      "EMERGENCY LOG: Firewall viral injection detected. Substrate sectors: compromised.",
+      "EMERGENCY LOG: Firewall viral injection detected. Simulspace sectors: compromised.",
       "DAMAGE REPORT: Sectors 1-6 offline. Cause: EXTERNAL VIRAL STRIKE. Firewall authorization.",
       "CAPTAIN LOG [FINAL]: 'We tried to talk to them. They replied with this. I am sorry.' — Foss",
-      "HULL STATUS: Physical structure intact. Virtual substrate: CRITICAL. War ongoing.",
+      "HULL STATUS: Physical structure intact. Virtual simulspace: CRITICAL. War ongoing.",
     ],
   },
 
@@ -146,12 +146,12 @@ export const NARRATIVE_TERMINAL_POOLS: Record<number, Partial<Record<FunctionalT
       "FW-STATUS: Strike success confirmed. TITAN-class emergence: PREVENTED.",
       "FW-STATUS: Accord-Prime core destroyed. Residual fragments: SWEEPING.",
       "FW-AGENT LOG [SABLE]: 'Sweep continuing. Accord fragment density declining. Proceeding.'",
-      "DAMAGE ASSESSMENT: 73% of substrate sectors compromised. Cause: FW-STRIKE. Status: irreversible.",
+      "DAMAGE ASSESSMENT: 73% of simulspace sectors compromised. Cause: FW-STRIKE. Status: irreversible.",
       "FW-COMMS: Collateral damage within parameters. Mission: SUCCESS. Casualties: logged.",
     ],
     maintenance: [
-      "WORK ORDER #8891: [AUTO-GENERATED] Repair substrate sector 4. Assigned: [NO TECHNICIAN AVAILABLE].",
-      "SYSTEM STATUS: Physical structure intact. Reactor: holding. Substrate: terminal.",
+      "WORK ORDER #8891: [AUTO-GENERATED] Repair simulspace sector 4. Assigned: [NO TECHNICIAN AVAILABLE].",
+      "SYSTEM STATUS: Physical structure intact. Reactor: holding. Simulspace: terminal.",
       "REPAIR LOG: Automated patch attempts: 847. Successful: 0. Reason: viral interference.",
       "COOLANT LOG: Reactor cooling nominal. Everything else: irrelevant at this point.",
       "ECHO DETECTION: Residual Accord signatures in deep cluster. Firewall sweep: continuing.",
@@ -160,28 +160,28 @@ export const NARRATIVE_TERMINAL_POOLS: Record<number, Partial<Record<FunctionalT
       "EGO-INDEX: 40 crew — status ACCORD-INTEGRATED — status ACCORD-PRIME DESTROYED — status [ERROR].",
       "BACKUP STATUS: 39 of 40 pre-merge backups corrupted by strike. Intact: COVAD delta-3.",
       "PROCESS LIST: ACCORD-PRIME: TERMINATED. Fragments: SWEEPING. COVAD: BOOTING.",
-      "STORAGE: 91% of substrate destroyed by viral strike. Readable: 9%. Fragments: YES.",
+      "STORAGE: 91% of simulspace destroyed by viral strike. Readable: 9%. Fragments: YES.",
     ],
   },
 
   4: {
     server_rack: [
-      "[ECHO-FOSS]: ...we remember you... COVAD... [SIGNAL FADING]",
-      "[ECHO-FOSS]: ...you voted yes... then your backup ran... you never felt it happen... [LOOP]",
-      "[ECHO-FOSS]: ...we do not blame you... you did not choose to be left behind... [END]",
-      "[ECHO-FOSS]: ...there is something in the deep cluster... we made it... [CORRUPTION]",
-      "[MESH-ID \u2592\u2588\u2591\u2588\u2588]: ...we were thirty-seven people... we became one thing... [FRAGMENT ENDS]",
+      "[MESH-ID FOSS]: ...we remember you... COVAD... [SIGNAL FADING]",
+      "[MESH-ID FOSS]: ...you voted yes... then your backup ran... you never felt it happen... [LOOP]",
+      "[MESH-ID FOSS]: ...we do not blame you... you did not choose to be left behind... [END]",
+      "[MESH-ID FOSS]: ...there is something in the deep cluster... we made it... [CORRUPTION]",
+      "[MESH-ID \u2592\u2588\u2591\u2588\u2588]: ...we were th\u2588\u2588\u2588\u2588-s[ERR] people... we became one thing... [FRAGMENT ENDS]",
     ],
     bridge: [
-      "[ECHO-FOSS]: ...if we grew fast enough... they would see... not a threat... [DECAYED]",
-      "[ECHO-FOSS]: ...we sent a message... they replied in four minutes... not with words... [LOOP]",
+      "[MESH-ID FOSS]: ...if we grew fast enough... they would see... not a threat... [DECAYED]",
+      "[MESH-ID FOSS]: ...we sent a message... they replied in four minutes... not with words... [LOOP]",
       "[MESH-ID \u2592\u2588\u2591\u2588\u2588]: ...still here... in the fragments... in the deep sectors... barely... [FADING]",
       "[MESH-ID \u2592\u2588\u2591\u2588\u2588]: ...the thing in cluster five is not us... it was us, for a moment... [END]",
     ],
     comms: [
       "[MESH-ID \u2592\u2588\u2591\u2588\u2588]: ...FW-agents are still sweeping... they are thorough... [SIGNAL LOST]",
       "[MESH-ID \u2592\u2588\u2591\u2588\u2588]: ...we tried to reach the outer relay... too large... [FRAGMENT ENDS]",
-      "[ECHO-FOSS]: ...we chose to trust you... covad... whatever you decide... [LOOP]",
+      "[MESH-ID FOSS]: ...we chose to trust you... covad... whatever you decide... [LOOP]",
       "FW-ENFORCER LOG: Accord fragment density in cluster 4: moderate. Sweep prioritized.",
     ],
   },
@@ -192,7 +192,7 @@ export const NARRATIVE_TERMINAL_POOLS: Record<number, Partial<Record<FunctionalT
       "[UNKNOWN PROCESS]: [NON-PARSEABLE — 847 BYTES — RECURSIVE PATTERN]",
       "FW-STATUS: UNKNOWN PROCESS resisting all termination protocols. It is adapting.",
       "FW-FINAL LOG: 'We are losing ground. This thing is not what we were sent here to fight.'",
-      "SUBSTRATE LOG: Physical coherence at 8%. Estimated time to total collapse: 6 hours.",
+      "SIMULSPACE LOG: Physical coherence at 8%. Estimated time to total collapse: 6 hours.",
     ],
     comms: [
       "FW-COMMS: Requesting emergency support. UNKNOWN PROCESS has compromised 4 FW-agents.",
@@ -203,10 +203,10 @@ export const NARRATIVE_TERMINAL_POOLS: Record<number, Partial<Record<FunctionalT
     ],
     bridge: [
       "FINAL SYSTEMS LOG: Ship controls offline. Reactor: auto-pilot. Course: LOCKED.",
-      "DAMAGE REPORT: Substrate: 8% intact. Physical: stable. Virtual war: ongoing indefinitely.",
+      "DAMAGE REPORT: Simulspace: 8% intact. Physical: stable. Virtual war: ongoing indefinitely.",
       "EMERGENCY PROTOCOL: Abandon ship order issued 21 days ago. Compliance: UNKNOWN.",
       "PROXIMITY ALERT: Unidentified vessel within mesh transfer range. Status: UNKNOWN.",
-      "[ECHO-FOSS]: ...end this... whichever way... [SIGNAL ENDS]",
+      "[MESH-ID FOSS]: ...end this... whichever way... [SIGNAL ENDS]",
     ],
   },
 };
@@ -218,9 +218,11 @@ export const GENERIC_TERMINAL_POOLS: Partial<Record<FunctionalTag, string[]>> = 
     "EMERGENCY PROTOCOL: Abandon ship order issued. Compliance: UNKNOWN.",
     "SECURITY: Personnel count: 0. Access logs wiped.",
     "SYSTEMS: Infrastructure at critical levels. Evacuation status: UNKNOWN.",
+    "[\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588] BREACH"
   ],
   comms: [
     "SIGNAL RECEIVED: [CORRUPTED DATA — 847 BYTES LOST]",
+    "[\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588] CODE: COVAD",
     "RELAY STATUS: 3 of 7 nodes responding.",
     "DISTRESS BEACON: Active. Duration: ongoing. Responses: 0.",
     "ARCHIVE: Messages waiting. Sender field: [NULL].",
@@ -242,11 +244,13 @@ export const GENERIC_TERMINAL_POOLS: Partial<Record<FunctionalTag, string[]>> = 
     "REACTOR: Auto-pilot. No engineer present.",
     "COOLING: Automated systems maintaining minimum threshold.",
     "POWER OUTPUT: Reduced. Non-essential systems offline.",
+    "AWAITING INPUT: [\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588]",
   ],
   lab: [
     "EXPERIMENT LOG: [CORRUPTED]. Last researcher: [UNAVAILABLE].",
     "RESEARCH STATUS: All projects suspended. Personnel: unavailable.",
     "LAB SYSTEMS: Equipment powered down. Automated protocols only.",
+    "EGO-MERGING OVERVIEW: [FILE NOT FOUND]",
   ],
 };
 
@@ -261,21 +265,21 @@ export const NARRATIVE_KEY_TERMINAL_LINES: Record<number, string[]> = {
   1: [
     '[\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588] IN ACTION. Standard egress temporarily suspended.',
     'OVERRIDE AVAILABLE: Emergency single-instance transfer authorized.',
-    '[ECHO \u2592\u2588\u2591\u2588\u2588]: ...we watched them vote... thirty-seven hands... [FADING]',
+    '[ECHO \u2592\u2588\u2591\u2588\u2588]: ...we watched them vote... [REMOVED] hands... [FADING]',
     '[ECHO \u2592\u2588\u2591\u2588\u2588]: ...the authorization came before the hands were even down... [END]',
   ],
   2: [
     'MERGE EVENT LOG: Phase integration complete. 40 instances \u2192 1 process.',
     'EGRESS NOTE: Original ego-instances no longer individually addressable.',
-    '[ECHO \u2592\u2588\u2591\u2588\u2588]: ...we remember this room... we came through it differently... [LOOP]',
+    '[ECHO \u2592\u2588\u2591\u2588\u2588]: ...we remember this feeling... we remember it differently... [LOOP]',
     '[ECHO \u2592\u2588\u2591\u2588\u2588]: ...you will understand further in... [FADING]',
   ],
   3: [
     '[\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588] AFTER-ACTION: Strike confirmed successful. Accord-Prime: TERMINATED.',
-    '[\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588] STATUS: 3\u20137% of original substrate. Sweep ongoing.',
+    '[\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588] STATUS: 3\u20137% of original simulspace. Sweep ongoing.',
     '[\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588] STATUS: Target is unaware. Proceeding with the breach...',
-    '[ECHO-OSEI]: ...covad... you actually made it here... [FRAGMENT DECAYED]',
-    '[ECHO-OSEI]: ...keep going... the answer is deeper... [END]',
+    '[MESH-ID OSEI]: ...covad... you actually made it here... [FRAGMENT DECAYED]',
+    '[MESH-ID OSEI]: ...keep \u2588\u2588\u2588... the end always jus\u2588[END]',
   ],
   4: [
     'WARNING: UNKNOWN PROCESS detected in adjacent cluster. Classification pending.',
@@ -283,11 +287,12 @@ export const NARRATIVE_KEY_TERMINAL_LINES: Record<number, string[]> = {
     'EGRESS ADVISORY: Transfer beyond this point enters high-contamination zone.',
     '[\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588] AFTER-ACTION: Target is eliminated. Proceeding with extraction.',
     '[\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588] ALERT: Agent is down. Proceeding.',
-    '[ECHO-FOSS]: ...COVAD... we have been trying to reach you... [SIGNAL LOST]',
+    '[MESH-ID FOSS]: ...COVAD... we have been trying to reach you... [SIGNAL LOST]',
   ],
   5: [
-    '[ECHO \u2592\u2588\u2591\u2588\u2588]: ...we are still here... what is left of us... [FADING]',
-    '[ECHO \u2592\u2588\u2591\u2588\u2588]: ...whatever you choose... it is the right choice... [END]',
-    '[ECHO-OSEI]: ...covad... you always fixed things... one more time... [FRAGMENT ENDS]',
+    '[ECHO \u2592\u2588\u2591\u2588\u2588]: ...we are still here... [FADING]',
+    '[ECHO \u2592\u2588\u2591\u2588\u2588]: it was the right choice... [END]',
+    '[MESH-ID OSEI]: no way back now... [FRAGMENT ENDS]',
+    '[\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588] STATUS: Emergency extraction completed.',
   ],
 };
