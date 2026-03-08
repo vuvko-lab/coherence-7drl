@@ -11,6 +11,12 @@
   <link rel="stylesheet" href="/src/styles.css" />
 </head>
 <body>
+  <div id="loading-overlay">
+    <div id="loading-panel">
+      <div class="loading-line" data-text="EGO BOOTING..."></div>
+      <div class="loading-line" data-text="MORPH LOADING..."></div>
+    </div>
+  </div>
   <div id="settings-overlay">
     <div id="settings-panel">
       <div class="panel-edge"><span class="corner">┌</span><span class="label">[ CONFIG ]</span><span class="fill"></span><button class="overlay-close" data-close="settings-overlay">[X]</button><span class="corner">┐</span></div>
@@ -28,6 +34,39 @@
           <div class="ascii-slider" id="cfg-font-size-slider">
             <button class="slider-btn" data-dir="-1">-</button>
             <span class="slider-track" data-min="10" data-max="24" data-value="16"></span>
+            <button class="slider-btn" data-dir="1">+</button>
+          </div>
+        </div>
+        <div class="panel-sep"><span class="fill"></span><span class="label">audio</span><span class="fill"></span></div>
+        <div class="settings-row">
+          <label>Master</label>
+          <div class="ascii-slider" id="cfg-vol-master">
+            <button class="slider-btn" data-dir="-1">-</button>
+            <span class="slider-track" data-min="0" data-max="100" data-value="80"></span>
+            <button class="slider-btn" data-dir="1">+</button>
+          </div>
+        </div>
+        <div class="settings-row">
+          <label>SFX</label>
+          <div class="ascii-slider" id="cfg-vol-sfx">
+            <button class="slider-btn" data-dir="-1">-</button>
+            <span class="slider-track" data-min="0" data-max="100" data-value="80"></span>
+            <button class="slider-btn" data-dir="1">+</button>
+          </div>
+        </div>
+        <div class="settings-row">
+          <label>UI</label>
+          <div class="ascii-slider" id="cfg-vol-ui">
+            <button class="slider-btn" data-dir="-1">-</button>
+            <span class="slider-track" data-min="0" data-max="100" data-value="80"></span>
+            <button class="slider-btn" data-dir="1">+</button>
+          </div>
+        </div>
+        <div class="settings-row">
+          <label>Ambient</label>
+          <div class="ascii-slider" id="cfg-vol-ambient">
+            <button class="slider-btn" data-dir="-1">-</button>
+            <span class="slider-track" data-min="0" data-max="100" data-value="60"></span>
             <button class="slider-btn" data-dir="1">+</button>
           </div>
         </div>

@@ -429,6 +429,7 @@ function buildSimState(): GameState {
     collapseGlitchTiles: new Map(),
     selfPanelRevealed: true,
     smokeEffects: [],
+    pendingSounds: [],
     firedTriggerIds: new Set(),
     corruptShotsFired: 0,
     terminalsRead: 0,

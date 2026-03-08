@@ -483,6 +483,7 @@ export interface GameState {
   selfPanelRevealed: boolean;         // false until player interacts with tutorial echo (or skips cluster 0)
   smokeEffects: SmokeEffect[];        // transient death/dissolution smoke particles
   pendingGlitch?: string;             // set by game logic; consumed by main.ts to fire glitch effects
+  pendingSounds: string[];            // sound IDs queued by game logic; consumed by main.ts
   narrativeChoice?: 'restore' | 'jump'; // final-room choice; shapes victory epilogue
   firedTriggerIds: Set<string>;       // ids of once-only narrative triggers that have already fired
   // Achievement tracking

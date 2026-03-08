@@ -5,9 +5,10 @@ import { InputHandler } from './input';
 import { PlayerAction, Position, TileType, SMOKE_DURATION_MS } from './types';
 import { generateSeed } from './rng';
 import { GLITCH_EFFECTS, initGlitch, glitchShake, glitchChromatic, glitchBarSweep, glitchStaticBurst, glitchHorizontalTear, glitchDataBleed } from './glitch';
-import { VICTORY_EPILOGUES } from './narrative';
+import { VICTORY_EPILOGUES } from './narrative/index';
 import { hasLOS } from './fov';
 import { canSee } from './ai';
+import { soundManager } from './audio';
 
 // ── Bootstrap ──
 
@@ -29,6 +30,7 @@ function initRenderer() {
 
 function restartGame(newSeed: number) {
   stopAutoWalk();
+  soundManager.stopAmbient(500);
   adminInitialized = false;
   rootPrivsAnimating = false;
   lastKnownPrivilegeSet = new Set();
@@ -71,6 +73,10 @@ function startAutoWalk() {
       return;
     }
     if (stepAutoPath(state)) {
+      soundManager.playFootstep();
+      // Consume any sounds from auto-walk step (door opens, hazard damage, etc.)
+      for (const sid of state.pendingSounds) soundManager.play(sid);
+      state.pendingSounds = [];
       startSmokeLoop();
       renderer.setPathHighlight(state.autoPath);
       renderAll();
@@ -247,6 +253,10 @@ function initAdminPanel() {
 <button class="admin-section-hdr" data-section="glitch">[+] GLITCH</button>
 <div class="admin-section collapsed" id="admin-sec-glitch">
 ${buttons}
+</div>
+<button class="admin-section-hdr" data-section="sounds">[+] SOUNDS</button>
+<div class="admin-section collapsed" id="admin-sec-sounds">
+${soundManager.getAllSoundIds().map(id => `<button class="admin-btn admin-sound-btn" data-sound="${id}">&gt; ${id}</button>`).join('\n')}
 </div>
 </div>
 <div class="panel-edge"><span class="corner">└</span><span class="fill"></span><span class="corner">┘</span></div>`;
@@ -430,6 +440,15 @@ ${buttons}
       }
     });
   });
+
+  // Sound board buttons
+  adminEl.querySelectorAll('.admin-sound-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      soundManager.init();
+      const id = (btn as HTMLElement).dataset.sound;
+      if (id) soundManager.play(id, { debounceMs: 0 });
+    });
+  });
 }
 
 function updateAdminPanel() {
@@ -459,6 +478,13 @@ const terminalOverlay = document.getElementById('terminal-overlay')!;
 const terminalTitle = document.getElementById('terminal-title')!;
 const terminalContent = document.getElementById('terminal-content')!;
 const terminalOptions = document.getElementById('terminal-options')!;
+
+// Click sound for terminal buttons (event delegation)
+terminalOptions.addEventListener('click', (e) => {
+  if ((e.target as HTMLElement).classList.contains('terminal-opt-btn')) {
+    soundManager.play('ui_click');
+  }
+});
 
 function revealLines(elements: NodeListOf<Element> | Element[], startDelay = 0, perLineDelay = 40): void {
   const arr = Array.from(elements);
@@ -559,10 +585,13 @@ function openTerminalOverlay() {
 
   revealLines(terminalOptions.querySelectorAll('.terminal-opt-btn'), contentEls.length * 40 + 20);
   terminalOverlay.classList.add('open');
+  soundManager.startAmbientOnce('terminal_open');
 }
 
 function closeTerminalOverlay() {
   terminalOverlay.classList.remove('open');
+  soundManager.play('ui_close');
+  soundManager.stopAmbient(500);
   state.openTerminal = undefined;
 }
 
@@ -572,6 +601,13 @@ const interactableOverlay = document.getElementById('interactable-overlay')!;
 const iaKindBadge        = document.getElementById('ia-kind-badge')!;
 const iaContent          = document.getElementById('ia-content')!;
 const iaChoices          = document.getElementById('ia-choices')!;
+
+// Click sound for interactable choice buttons (event delegation)
+iaChoices.addEventListener('click', (e) => {
+  if ((e.target as HTMLElement).classList.contains('ia-choice-btn')) {
+    soundManager.play('ui_click');
+  }
+});
 
 const IA_KIND_LABELS: Record<string, string> = {
   info_terminal: '[ INFO TERMINAL ]',
@@ -722,6 +758,7 @@ function openInteractableOverlay() {
 
   if (item.isDataArchive) {
     if (item.corrupted) glitchHorizontalTear().then(() => glitchBarSweep());
+    soundManager.startAmbientOnce('archive_open');
     renderDataArchive(item);
     return;
   }
@@ -732,6 +769,11 @@ function openInteractableOverlay() {
   // Glitch on Lost Echo or corrupted terminal open
   if (item.kind === 'lost_echo' || item.corrupted) {
     glitchHorizontalTear().then(() => glitchBarSweep());
+  }
+  if (item.kind === 'lost_echo') {
+    soundManager.startAmbientOnce('echo_appear');
+  } else {
+    soundManager.play('ui_open', { category: 'ui' });
   }
 
   iaKindBadge.textContent = IA_KIND_LABELS[item.kind] ?? '[ UNKNOWN ]';
@@ -784,6 +826,8 @@ function openInteractableOverlay() {
 function closeInteractableOverlay() {
   const closedRef = state.openInteractable;
   interactableOverlay.classList.remove('open');
+  soundManager.play('ui_close');
+  soundManager.stopAmbient(500);
   state.openInteractable = undefined;
 
   // Tutorial echo close → trigger SELF panel reveal
@@ -1007,6 +1051,7 @@ function showVictoryOverlay() {
   }
 
   victoryOverlay.classList.add('open');
+  soundManager.stopAmbient(500);
 
   const victoryLines: Element[] = [document.getElementById('victory-header')!];
   victoryLines.push(...Array.from(victoryStats.children));
@@ -1055,6 +1100,7 @@ function showDeathOverlay() {
     : '<div>&gt; none destroyed</div>';
 
   deathOverlay.classList.add('open');
+  soundManager.stopAmbient(1000);
 
   const deathLines: Element[] = [document.getElementById('death-header')!];
   deathLines.push(...Array.from(deathStats.children));
@@ -1238,6 +1284,9 @@ function onAction(action: PlayerAction) {
   // Block all input when game is over
   if (state.gameOver) return;
 
+  // Lazy-init audio on first user gesture
+  soundManager.init();
+
   // Block input during animation
   if (state.animation?.isAnimating) {
     return;
@@ -1284,6 +1333,29 @@ function onAction(action: PlayerAction) {
     else if (g === 'bar_sweep') glitchBarSweep();
     else if (g === 'static_burst') glitchStaticBurst();
     else if (g === 'horizontal_tear') glitchHorizontalTear();
+  }
+
+  // Consume pending sounds from game logic
+  for (const sid of state.pendingSounds) {
+    if (sid === 'step') soundManager.playFootstep();
+    else soundManager.play(sid);
+  }
+  state.pendingSounds = [];
+
+  // Ambient loop management — track player room hazard type
+  {
+    const cluster = state.clusters.get(state.currentClusterId)!;
+    const px = state.player.position.x;
+    const py = state.player.position.y;
+    const playerRoom = cluster.rooms.find(r =>
+      px >= r.x && px < r.x + r.w && py >= r.y && py < r.y + r.h);
+    const hazardType = playerRoom?.roomType;
+    const ambientKey = hazardType ? `ambient_${hazardType}` : null;
+    if (ambientKey && soundManager.hasSound(ambientKey)) {
+      soundManager.startAmbient(ambientKey);
+    } else {
+      soundManager.stopAmbient(500);
+    }
   }
 
   // Hazard tile entry glitch
@@ -1402,6 +1474,7 @@ function onModuleNav(dir: import('./input').ModuleNavDir) {
       toggleAim();
     } else if (mod.id === 'overclock.m' || mod.id === 'cloak.m') {
       mod.active = !mod.active;
+      soundManager.play('module_toggle', { category: 'ui' });
       moduleMenuOpen = false;
       input.moduleMenuOpen = false;
       renderAll();
@@ -1668,6 +1741,25 @@ function loadSettings() {
 
 initSlider(fontSizeSlider, applySettings);
 
+// Volume sliders
+for (const { id, cat } of [
+  { id: 'cfg-vol-master', cat: 'master' as const },
+  { id: 'cfg-vol-sfx', cat: 'sfx' as const },
+  { id: 'cfg-vol-ui', cat: 'ui' as const },
+  { id: 'cfg-vol-ambient', cat: 'ambient' as const },
+]) {
+  const el = document.getElementById(id);
+  if (el) {
+    // Restore saved volume
+    const saved = soundManager.getVolume(cat);
+    setSliderValue(el, Math.round(saved * 100));
+    initSlider(el, () => {
+      soundManager.init();
+      soundManager.setVolume(cat, getSliderValue(el) / 100);
+    });
+  }
+}
+
 const aboutBtn = document.getElementById('about-btn')!;
 const aboutOverlay = document.getElementById('about-overlay')!;
 
@@ -1713,6 +1805,14 @@ document.querySelectorAll('.overlay-close').forEach(btn => {
       document.getElementById(targetId)?.classList.remove('open');
     }
   });
+});
+
+// Global click sound for all UI buttons
+document.addEventListener('click', (e) => {
+  const target = e.target as HTMLElement;
+  if (target.tagName === 'BUTTON' && !target.classList.contains('admin-sound-btn') && !target.classList.contains('slider-btn')) {
+    soundManager.play('ui_click');
+  }
 });
 
 // CFG reboot button
@@ -1798,6 +1898,58 @@ logAreaEl.querySelectorAll('.log-expand-btn').forEach(btn => {
     }
   });
 });
+
+// ── Loading screen ──
+
+const loadingOverlay = document.getElementById('loading-overlay')!;
+const loadingLines = Array.from(loadingOverlay.querySelectorAll<HTMLElement>('.loading-line'));
+
+function runLoadingScreen() {
+  // Populate loading lines with their data-text, initially hidden for scramble
+  loadingLines.forEach(el => {
+    el.textContent = el.dataset.text ?? '';
+    el.style.visibility = 'hidden';
+  });
+
+  let animDone = false;
+  let audioDone = false;
+
+  const tryDismiss = () => {
+    if (!animDone || !audioDone) return;
+    // Scramble-reveal the [COMPLETE] versions
+    loadingLines.forEach(el => {
+      el.textContent = (el.dataset.text ?? '') + ' [COMPLETE]';
+    });
+    scrambleReveal(loadingLines, () => {
+      setTimeout(() => {
+        loadingOverlay.classList.add('done');
+        setTimeout(() => loadingOverlay.remove(), 500);
+      }, 300);
+    }, 200, 4, 50);
+  };
+
+  // Scramble-reveal the loading lines
+  scrambleReveal(loadingLines, () => { animDone = true; tryDismiss(); }, 300, 5, 60);
+
+  // Start audio loading
+  soundManager.init().then(() => { audioDone = true; tryDismiss(); });
+}
+
+// Start loading on first user interaction (needed for AudioContext)
+let loadingStarted = false;
+function startLoadOnGesture() {
+  if (loadingStarted) return;
+  loadingStarted = true;
+  document.removeEventListener('click', startLoadOnGesture);
+  document.removeEventListener('keydown', startLoadOnGesture);
+  runLoadingScreen();
+}
+document.addEventListener('click', startLoadOnGesture);
+document.addEventListener('keydown', startLoadOnGesture);
+
+// Show initial state — prompt user to interact
+loadingLines[0].textContent = '[ CLICK OR PRESS ANY KEY ]';
+for (let i = 1; i < loadingLines.length; i++) loadingLines[i].textContent = '';
 
 // ── Initial render ──
 

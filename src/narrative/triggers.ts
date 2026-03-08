@@ -6,18 +6,19 @@ import type { NarrativeTrigger } from '../types';
 
 export const NARRATIVE_TRIGGERS: NarrativeTrigger[] = [
   // ── Cluster entry messages ──
-  {
-    id: 'boot_message',
-    condition: { event: 'cluster_enter', clusterId: 0, once: true },
-    effects: [
-      { kind: 'message', text: 'BOOT SEQUENCE COMPLETE. EGO-INSTANCE: COVAD. BACKUP AGE: 21 DAYS.', style: 'system' },
-      { kind: 'message', text: 'Substrate integrity critical. The ship is quiet. Something happened here.', style: 'normal' },
-    ],
-  },
+  // {
+  //   id: 'boot_message',
+  //   condition: { event: 'cluster_enter', clusterId: 0, once: true },
+  //   effects: [
+  //     { kind: 'message', text: 'BOOT SEQUENCE COMPLETE. EGO-INSTANCE: COVAD. BACKUP AGE: 21 DAYS.', style: 'system' },
+  //     { kind: 'message', text: 'Substrate integrity critical. The ship is quiet. Something happened here.', style: 'normal' },
+  //   ],
+  // },
   {
     id: 'c1_enter',
     condition: { event: 'cluster_enter', clusterId: 1, once: true },
     effects: [
+      { kind: 'message', text: '[SYSTEM STATUS]: WARNING! SYSTEM UNDER STRESS!', style: 'system' },
       { kind: 'message', text: '[ECHO \u2592\u2588\u2591\u2588\u2588]: ...you came further than we expected... [FADING]', style: 'system' },
     ],
   },
@@ -25,29 +26,30 @@ export const NARRATIVE_TRIGGERS: NarrativeTrigger[] = [
     id: 'c2_enter',
     condition: { event: 'cluster_enter', clusterId: 2, once: true },
     effects: [
-      { kind: 'message', text: 'The substrate resonance changes here. Something was born in this cluster.', style: 'system' },
+      { kind: 'message', text: '[SYSTEM ERROR]: ERRNO 28: ENOSPC', style: 'system' },
     ],
   },
   {
     id: 'c3_enter',
     condition: { event: 'cluster_enter', clusterId: 3, once: true },
     effects: [
-      { kind: 'message', text: '[ECHO-OSEI]: ...covad... you made it this far... [FRAGMENT DECAYED]', style: 'system' },
+      { kind: 'message', text: '[SYSTEM STATUS]: CPU CORE STUCK. REROUTING RESOURCES.', style: 'system' },
+      { kind: 'message', text: '... you made it this far... [FRAGMENT DECAYED]', style: 'system' },
     ],
   },
   {
     id: 'c4_enter',
     condition: { event: 'cluster_enter', clusterId: 4, once: true },
     effects: [
-      { kind: 'message', text: '[ECHO-FOSS]: ...we have been watching your path through our systems... [LOOP]', style: 'system' },
-      { kind: 'message', text: 'The Firewall sweep is thinning. Something else is moving in the deep cluster.', style: 'normal' },
+      { kind: 'message', text: '[SYSTEM STATUS]: LESS THAN 10% POWER REMAINING. LOOSING POWER.', style: 'system' },
     ],
   },
   {
     id: 'c5_enter',
     condition: { event: 'cluster_enter', clusterId: 5, once: true },
     effects: [
-      { kind: 'message', text: 'The substrate tears open. An [UNKNOWN PROCESS] moves through the ruins.', style: 'important' },
+      { kind: 'message', text: '[SYSTEM ERROR]: ERRNO 0x79: EREMOTEIO', style: 'system' },
+      { kind: 'message', text: '[SYSTEM ERROR]: ERRNO 0x6c: ESHUTDOWN', style: 'system' },
       { kind: 'message', text: '[ECHO \u2592\u2588\u2591\u2588\u2588]: ...stay away from it... please... [SIGNAL LOST]', style: 'system' },
     ],
   },
@@ -89,22 +91,23 @@ export const NARRATIVE_TRIGGERS: NarrativeTrigger[] = [
     id: 'first_fw_kill',
     condition: { event: 'entity_killed', killedFaction: 'aggressive', once: true },
     effects: [
-      { kind: 'message', text: 'FW-HUNTER destroyed. Firewall will notice the gap in sweep coverage.', style: 'normal' },
-      { kind: 'alert_delta', amount: 15 },
+      // { kind: 'message', text: 'FW-HUNTER destroyed. Firewall will notice the gap in sweep coverage.', style: 'normal' },
+      // { kind: 'alert_delta', amount: 15 },
     ],
   },
   {
     id: 'first_accord_fragment_kill',
     condition: { event: 'entity_killed', killedFaction: 'neutral', once: true },
     effects: [
-      { kind: 'message', text: '[ECHO \u2592\u2588\u2591\u2588\u2588]: ...oh... [SIGNAL TERMINATED]', style: 'system' },
+      // { kind: 'message', text: '[ECHO \u2592\u2588\u2591\u2588\u2588]: ...oh... [SIGNAL TERMINATED]', style: 'system' },
+      { kind: 'alert_delta', amount: 15 },
     ],
   },
   {
     id: 'first_titan_encounter',
     condition: { event: 'entity_killed', killedFaction: 'titan', once: true },
     effects: [
-      { kind: 'message', text: 'UNKNOWN PROCESS fragment dissolved. The substrate steadies \u2014 briefly.', style: 'important' },
+      { kind: 'message', text: 'UNKNOWN PROCESS fragment dissolved.', style: 'important' },
       { kind: 'message', text: '[ECHO \u2592\u2588\u2591\u2588\u2588]: ...that should not have been possible... be careful... [FADING]', style: 'system' },
     ],
   },
@@ -119,7 +122,7 @@ export const NARRATIVE_TRIGGERS: NarrativeTrigger[] = [
   },
   {
     id: 'high_collapse_room',
-    condition: { event: 'room_enter', collapseMin: 0.8, once: false },
+    condition: { event: 'room_enter', collapseMin: 0.7, once: false },
     effects: [
       { kind: 'message', text: 'Infrastructure collapse severe. The substrate is barely holding shape here.', style: 'hazard' },
     ],

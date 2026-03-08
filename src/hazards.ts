@@ -50,6 +50,7 @@ function damageCoherence(state: GameState, amount: number) {
   if (state.godMode) return;
   if (state.player.coherence == null) return;
   state.player.coherence = Math.max(0, state.player.coherence - amount);
+  state.pendingSounds.push('hit');
 }
 
 /** Convert a wall or door tile to floor (breach) */
@@ -229,6 +230,7 @@ function updateTriggerTrap(state: GameState, cluster: Cluster, room: Room) {
       const dist = roomDistance(cluster.doorAdjacency, pRoom.id, room.id);
       if (dist === 0) {
         addMessage(state, 'DETONATION! The data-bomb tears through the room!', 'hazard');
+        state.pendingSounds.push('explosion');
         damageCoherence(state, randInt(40, 60));
       } else if (dist === 1) {
         addMessage(state, 'An explosion shakes the walls!', 'hazard');

@@ -1406,3 +1406,34 @@ body {
   background: #ff4444;
   color: var(--theme-bg);
 }
+
+/* --- Loading overlay --- */
+#loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  background: var(--theme-bg);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  transition: opacity 0.4s ease;
+}
+
+#loading-overlay.done {
+  opacity: 0;
+  pointer-events: none;
+}
+
+#loading-panel {
+  border: 1px solid var(--theme-dim);
+  padding: 1.5rem 3rem;
+  min-width: 320px;
+  font-family: inherit;
+}
+
+.loading-line {
+  color: var(--theme-fg);
+  line-height: 2;
+  letter-spacing: 0.08em;
+  white-space: pre;
+}

@@ -43,6 +43,9 @@ Simulation tests (no browser needed):
 - **rng.ts** — Global seeded PRNG (mulberry32). Call `seed()` before generation; use `random()`, `randInt()`, `pick()`, `shuffle()` instead of `Math.random()` everywhere for reproducible maps.
 - **noise.ts** — Seeded 2D Perlin noise (`initNoise()` + `collapseNoise()`). Used by `cluster.ts` to generate the infrastructure collapse heatmap that weights hazard room assignment.
 - **glitch.ts** — Screen glitch effects: CSS effects (shake, chromatic, bars, flicker, hue) animate `#game`; canvas effects (static burst, horizontal tear, data bleed) use `GlitchRenderer.drawOver()`. Canvas effects are temporary — `renderAll()` in `main.ts` restores. `GLITCH_EFFECTS` registry used by admin panel.
+- **audio.ts** — Web Audio API singleton `soundManager`. Categories: `sfx`, `ui`, `ambient` with independent gain controls. `play()` for one-shots, `startAmbient()` for looping hazard sounds, `startAmbientOnce()` for non-looping ambient (overlay sounds). Only one ambient source at a time; crossfades on switch.
+- **narrative/** — Content modules: `terminals.ts` (terminal dialog trees per cluster), `echoes.ts` (lost echo encounters), `archives.ts` (data archive fragments), `whispers.ts` (ambient messages), `triggers.ts` (event-driven narrative beats), `epilogues.ts` (victory/death endings), `messages.ts` (system messages), `dialog.ts` (dialog node types), `index.ts` (re-exports)
+- **editor/** — Map editor (`editor-main.ts`) with simulation playback; `serialize.ts` for map import/export
 - **sim-test.ts** — Headless balancing test suite. Run with `npx tsx src/sim-test.ts`. Simulates clusters using real game logic, snapshots metrics every 10 ticks, reports connectivity/path damage/entity/determinism checks across N seeds.
 - **types.ts** — All type definitions, enums, constants, color palette
 

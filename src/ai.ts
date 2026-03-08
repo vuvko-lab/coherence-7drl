@@ -196,6 +196,7 @@ function bitMiteAttack(state: GameState, entity: Entity, target: Entity) {
   if (target.coherence !== undefined) {
     const pi = target.id === state.player.id;
     target.coherence = Math.max(0, target.coherence - entity.attackValue);
+    if (pi) state.pendingSounds.push('hit');
     addAiMessage(state, `Bit-Mite Swarm attacks ${target.name}! −${entity.attackValue} coherence. (${target.coherence}/${target.maxCoherence})`, 'combat', pi);
     if (target.coherence <= 0) {
       addAiMessage(state, `Bit-Mite Swarm destroys ${target.name}!`, 'combat', pi);
@@ -309,6 +310,7 @@ function leechMeleeAttack(state: GameState, entity: Entity, target: Entity): boo
   if (target.coherence === undefined) return false;
   const pi = target.id === state.player.id;
   target.coherence = Math.max(0, target.coherence - entity.attackValue);
+  if (pi) state.pendingSounds.push('hit');
   addAiMessage(state, `Logic Leech strikes ${target.name}! −${entity.attackValue} coherence. (${target.coherence}/${target.maxCoherence})`, 'combat', pi);
   if (target.coherence <= 0) {
     addAiMessage(state, `Logic Leech destroys ${target.name}!`, 'combat', pi);
@@ -448,6 +450,7 @@ function sentryAttack(state: GameState, entity: Entity, target: Entity) {
   if (target.coherence !== undefined) {
     const pi = target.id === state.player.id;
     target.coherence = Math.max(0, target.coherence - entity.attackValue);
+    if (pi) state.pendingSounds.push('hit');
     addAiMessage(state, `Sentry strikes ${target.name}! −${entity.attackValue}. (${target.coherence} left)`, 'combat', pi);
     shootingAnimation(state, entity.position, target.position, 'single');
     if (target.coherence <= 0) {
@@ -842,6 +845,7 @@ function updateGateKeeper(state: GameState, entity: Entity, cluster: Cluster) {
 
     const pi = target.id === state.player.id;
     target.coherence = Math.max(0, target.coherence - entity.attackValue);
+    if (pi) state.pendingSounds.push('hit');
     addAiMessage(state, `Gate-Keeper fires containment beam at ${target.name}! −${entity.attackValue}. (${target.coherence} left)`, 'combat', pi);
     shootingAnimation(state, entity.position, target.position, 'beam');
     if (target.coherence <= 0) {

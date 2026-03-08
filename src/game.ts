@@ -13,7 +13,7 @@ import { seed as seedRng, generateSeed, randInt, pick } from './rng';
 import {
   updateEntityAI, makeChronicler, makeBitMite, makeLogicLeech, makeSentry, makePropEntity, makeGateKeeper, makeRepairScrapper, makeTitanSpawn,
 } from './ai';
-import { NARRATIVE_TRIGGERS, GAME_MESSAGES } from './narrative';
+import { NARRATIVE_TRIGGERS, GAME_MESSAGES } from './narrative/index';
 export { makeDamagedBitMite } from './ai';
 import { shootingAnimation } from './combat_animations';
 
@@ -129,6 +129,7 @@ export function createGame(initialSeed?: number): GameState {
     collapseGlitchTiles: new Map(),
     selfPanelRevealed: false,
     smokeEffects: [],
+    pendingSounds: [],
     firedTriggerIds: new Set(),
     corruptShotsFired: 0,
     terminalsRead: 0,
@@ -451,6 +452,7 @@ function tryShoot(state: GameState, target: Position): boolean {
   state.corruptShotsFired++;
   dlog(state, 'player', 'shoot', `target=(${target.x},${target.y}) shot#=${corrupt.clusterShotCount}`);
 
+  state.pendingSounds.push('shoot');
   shootingAnimation(state, from, target, 'beam');
 
   // Damage entity at target if present
@@ -486,6 +488,7 @@ function tryMove(state: GameState, dx: number, dy: number): boolean {
   if (state.godMode) {
     state.player.position.x = nx;
     state.player.position.y = ny;
+    state.pendingSounds.push('step');
     if (targetTile.type === TileType.InterfaceExit) {
       addMessage(state, GAME_MESSAGES.interfaceExitDetected, 'important');
     }
@@ -495,6 +498,7 @@ function tryMove(state: GameState, dx: number, dy: number): boolean {
   // Bump-to-open: closed door → open it, costs a turn, don't move
   if (targetTile.type === TileType.Door && !targetTile.doorOpen && targetTile.glyph === '+') {
     openDoor(targetTile);
+    state.pendingSounds.push('door_open');
     return true;
   }
 
@@ -522,10 +526,12 @@ function tryMove(state: GameState, dx: number, dy: number): boolean {
     if (canAttack) {
       if (bumpedEntity.coherence !== undefined) {
         bumpedEntity.coherence = Math.max(0, bumpedEntity.coherence - MELEE_DAMAGE);
+        state.pendingSounds.push('melee');
         addMessage(state,
           `You strike ${bumpedEntity.name} for ${MELEE_DAMAGE}. (${bumpedEntity.coherence}/${bumpedEntity.maxCoherence})`,
           'important');
         if (bumpedEntity.coherence <= 0) {
+          state.pendingSounds.push('entity_destroy');
           const _sf = bumpedEntity.ai?.faction;
           state.smokeEffects.push({
             x: bumpedEntity.position.x, y: bumpedEntity.position.y,
@@ -660,6 +666,7 @@ function tryTransfer(state: GameState): boolean {
   const corruptM = state.player.modules?.find(m => m.id === 'corrupt.m');
   if (corruptM) corruptM.clusterShotCount = 0;
 
+  state.pendingSounds.push('transfer');
   if (cluster.id === 0) {
     addMessage(state, GAME_MESSAGES.sleevingFacility, 'important');
   } else {
@@ -812,6 +819,7 @@ export function processAction(state: GameState, action: PlayerAction): boolean {
     // Remove dead entities (coherence <= 0) — spawn smoke for any not yet handled
     for (const e of state.entities) {
       if ((e.coherence ?? 1) <= 0 && e.id !== state.player.id) {
+        state.pendingSounds.push('entity_destroy');
         if (!state.smokeEffects.some(s => s.x === e.position.x && s.y === e.position.y)) {
           const _sf = e.ai?.faction;
           state.smokeEffects.push({
@@ -870,6 +878,7 @@ export function grantExitAccess(state: GameState, terminalId: string, clusterId:
     return;
   }
   cluster.exitLocked = false;
+  state.pendingSounds.push('ui_select');
   addMessage(state, GAME_MESSAGES.exitUnlocked, 'important');
   state.openTerminal = undefined;
 }
