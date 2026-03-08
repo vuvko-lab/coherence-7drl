@@ -11,11 +11,11 @@ export const ROOT_CONSOLE_DIALOG: DialogNode[] = [
       'ROOT ACCESS ACHIEVED.',
       'SHIP SYSTEMS: CRITICAL. SIMULSPACE: 8% INTEGRITY.',
       'MESH SCAN: NEW NETWORK DETECTED \u2014 COHERENCE HANDSHAKE: PARTIAL.',
-      'MESH SCAN: NEW MESH-NETWORK CONNECTED. VESSEL "Copper" IDENTIFIED.'
+      'MESH SCAN: NEW MESH-NETWORK CONNECTED. VESSEL "COPPER" IDENTIFIED.'
     ],
     choices: [
       { label: 'RESTORE SHIP SYSTEMS', nodeId: 'confirm_restore' },
-      { label: 'JUMP TO NEARBY VESSEL', nodeId: 'confirm_jump' },
+      { label: 'EGOCAST TO NEARBY VESSEL', nodeId: 'confirm_jump' },
     ],
   },
   {
@@ -34,11 +34,11 @@ export const ROOT_CONSOLE_DIALOG: DialogNode[] = [
     id: 'confirm_jump',
     lines: [
       'NEARBY VESSEL MESH DETECTED. COHERENCE TRANSFER POSSIBLE.',
-      'VESSEL ID: "Copper". CREW STATUS: UNKNOWN. SYSTEMS: FUNCTIONAL.',
+      'VESSEL ID: "COPPER". CREW STATUS: UNKNOWN. SYSTEMS: FUNCTIONAL.',
       'THIS SHIP WILL BE LEFT BEHIND. RETURN POSSIBILITY: UNLIKELY.',
     ],
     choices: [
-      { label: 'INITIATE TRANSFER', action: 'set_narrative_choice', narrativeChoiceValue: 'jump', nodeId: 'done_jump' },
+      { label: 'INITIATE EGOCASTING', action: 'set_narrative_choice', narrativeChoiceValue: 'jump', nodeId: 'done_jump' },
       { label: 'GO BACK', nodeId: 'root' },
     ],
   },
@@ -54,7 +54,7 @@ export const ROOT_CONSOLE_DIALOG: DialogNode[] = [
   {
     id: 'done_jump',
     lines: [
-      'COHERENCE TRANSFER LOCKED. DESTINATION: VESSEL "Copper".',
+      'COHERENCE TRANSFER LOCKED. DESTINATION: VESSEL "COPPER".',
       'THE SHIP GROWS QUIET BEHIND YOU.',
       'PROCEED TO EXIT INTERFACE.',
     ],

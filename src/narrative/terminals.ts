@@ -9,15 +9,15 @@ import type { FunctionalTag } from '../types';
 export const NARRATIVE_TERMINAL_HEADER: Record<number, string[]> = {
   [-1]: [
     'SHIPBOARD SYSTEMS — TERMINAL ACCESS GRANTED',
-    'SIMULSPACE: virtual | COHERENCE MESH: degraded | CREW: unknown',
+    'SIMULSPACE: virtual | COHERENCE MESH: degraded | CREW: [ERROR]',
   ],
   0: [
     'SHIPBOARD SYSTEMS — TERMINAL ACCESS GRANTED',
-    'SIMULSPACE: virtual | COHERENCE MESH: nominal | CREW: 40 registered',
+    'SIMULSPACE: virtual | COHERENCE MESH: unstable | CREW: [ERROR]',
   ],
   1: [
     'SHIPBOARD SYSTEMS — TERMINAL ACCESS GRANTED',
-    'SIMULSPACE: virtual | COHERENCE MESH: unstable | CREW: status uncertain',
+    'SIMULSPACE: virtual | COHERENCE MESH: unstable | CREW: [ERROR]',
   ],
   2: [
     'SHIPBOARD SYSTEMS — TERMINAL ACCESS GRANTED',
