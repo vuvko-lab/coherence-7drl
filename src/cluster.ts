@@ -418,7 +418,7 @@ function hazardTierForCollapse(c: number, clusterId = 0): HazardTier {
   return TIER_EXTREME;
 }
 
-function assignHazardsByCollapse(allRooms: Room[], clusterId = 0) {
+function assignHazardsByCollapse(allRooms: Room[], clusterId = 0, doorAdjacency?: Map<number, number[]>) {
   // Find entry/exit by geometric tag — never assign hazards
   const entryIds = new Set(
     allRooms.filter(r => r.tags.geometric.has('entry') || r.tags.geometric.has('exit')).map(r => r.id)
@@ -451,7 +451,20 @@ function assignHazardsByCollapse(allRooms: Room[], clusterId = 0) {
     const tier = hazardTierForCollapse(room.collapse, clusterId);
     if (tier.length === 0) continue;
 
-    const type = weightedPick(tier);
+    let type = weightedPick(tier);
+
+    // Quarantine seals all doors — only allow on dead-end rooms (degree ≤ 1)
+    // to prevent disconnecting the map
+    if (type === 'quarantine' && doorAdjacency) {
+      const degree = doorAdjacency.get(room.id)?.length ?? 0;
+      if (degree > 1) {
+        // Re-roll without quarantine; if only quarantine was in the tier, skip
+        const filtered = tier.filter(e => e.type !== 'quarantine');
+        if (filtered.length === 0) continue;
+        type = weightedPick(filtered);
+      }
+    }
+
     room.roomType = type;
     hazardCount++;
   }
@@ -1517,6 +1530,7 @@ function initRoomHazards(tiles: Tile[][], rooms: Room[]) {
               tiles[y][x].fg = '#ff2222';
               tiles[y][x].walkable = false;
               tiles[y][x].doorOpen = false;
+              tiles[y][x].sealed = true;
             }
           }
         }
@@ -1599,47 +1613,84 @@ const HAZARD_DISPLAY_NAMES: Partial<Record<RoomType, string>> = {
   gravity_well: 'GRAVITY WELL',
 };
 
-/** For each hazard room, assign 1-3 non-room interactables that can deactivate it.
- *  Each interactable can hold multiple hazard overrides (one per hazard room). */
-function assignHazardDeactivation(interactables: Interactable[], allRooms: Room[]) {
-  const hazardRooms = allRooms.filter(r => r.roomType !== 'normal');
-  for (const hazardRoom of hazardRooms) {
-    const candidates = [...interactables].filter(i => i.roomId !== hazardRoom.id)
-      .sort(() => random() - 0.5);
-    if (candidates.length === 0) continue;
+/** Candidate slot for hazard deactivation assignment — wraps either an interactable or a terminal. */
+type DeactivationTarget =
+  | { type: 'interactable'; ia: Interactable }
+  | { type: 'terminal'; terminal: TerminalDef };
 
-    const selected: Interactable[] = [candidates[0]];
-    if (candidates.length > 1 && random() < 0.75) selected.push(candidates[1]);
-    if (candidates.length > 2 && random() < 0.15) selected.push(candidates[2]);
+/** For each hazard room, assign 1-3 non-room entities (interactables + terminals) that can deactivate it. */
+function assignHazardDeactivation(interactables: Interactable[], terminals: TerminalDef[], allRooms: Room[]) {
+  const quarantineRoomIds = new Set(allRooms.filter(r => r.roomType === 'quarantine').map(r => r.id));
+  const hazardRooms = allRooms.filter(r => r.roomType !== 'normal');
+
+  for (const hazardRoom of hazardRooms) {
+    // Build candidate pool: interactables + terminals outside this hazard room
+    // For quarantine deactivation, also exclude candidates inside OTHER quarantine rooms
+    const isQuarantine = hazardRoom.roomType === 'quarantine';
+    const iaCandidates: DeactivationTarget[] = interactables
+      .filter(i => {
+        if (i.roomId === hazardRoom.id) return false;
+        if (isQuarantine && quarantineRoomIds.has(i.roomId)) return false;
+        return true;
+      })
+      .map(ia => ({ type: 'interactable' as const, ia }));
+
+    const termCandidates: DeactivationTarget[] = terminals
+      .filter(t => {
+        if (t.roomId === hazardRoom.id) return false;
+        if (isQuarantine && quarantineRoomIds.has(t.roomId)) return false;
+        return true;
+      })
+      .map(terminal => ({ type: 'terminal' as const, terminal }));
+
+    const allCandidates = [...iaCandidates, ...termCandidates].sort(() => random() - 0.5);
+    if (allCandidates.length === 0) continue;
+
+    const selected: DeactivationTarget[] = [allCandidates[0]];
+    if (allCandidates.length > 1 && random() < 0.75) selected.push(allCandidates[1]);
+    if (allCandidates.length > 2 && random() < 0.15) selected.push(allCandidates[2]);
 
     const hazardName = HAZARD_DISPLAY_NAMES[hazardRoom.roomType] ?? hazardRoom.roomType.toUpperCase().replace(/_/g, ' ');
     const hazardHex = '0x' + randInt(0x1000, 0xFFFF).toString(16).toUpperCase();
     const hazardLabel = `${hazardName} ${hazardHex}`;
 
-    for (const ia of selected) {
-      // Check if this interactable already has a deactivation for THIS specific hazard room
-      if (ia.dialog.some(n => n.id === `deactivate_${hazardRoom.id}`)) continue;
+    for (const target of selected) {
+      if (target.type === 'terminal') {
+        // Terminals use hazardOverrides array rendered in the terminal overlay
+        const term = target.terminal;
+        if (!term.hazardOverrides) term.hazardOverrides = [];
+        if (term.hazardOverrides.some(o => o.hazardRoomId === hazardRoom.id)) continue;
+        term.hazardOverrides.push({ label: hazardLabel, hazardRoomId: hazardRoom.id });
+      } else {
+        const ia = target.ia;
+        if (ia.dialog.some(n => n.id === `deactivate_${hazardRoom.id}`)) continue;
 
-      const nodeId = `deactivate_${hazardRoom.id}`;
-      ia.dialog.push({
-        id: nodeId,
-        lines: [
-          'UNAUTHORIZED SUBSYSTEM ACCESS DETECTED.',
-          `OVERRIDE CODE LOCATED: ${hazardLabel} NEUTRALIZATION AVAILABLE.`,
-          'WARNING: DEACTIVATION IS PERMANENT.',
-        ],
-        choices: [
-          { label: `OVERRIDE ${hazardLabel}`, action: 'deactivate_hazard', deactivatesHazardRoomId: hazardRoom.id },
-          { label: '[BACK] RETURN', nodeId: 'root' },
-        ],
-      });
+        const nodeId = `deactivate_${hazardRoom.id}`;
+        // For data archives: push the deactivation node into dialog array;
+        // the archive menu renderer reads it directly (no root node needed)
+        ia.dialog.push({
+          id: nodeId,
+          lines: [
+            'UNAUTHORIZED SUBSYSTEM ACCESS DETECTED.',
+            `OVERRIDE CODE LOCATED: ${hazardLabel} NEUTRALIZATION AVAILABLE.`,
+            'WARNING: DEACTIVATION IS PERMANENT.',
+          ],
+          choices: [
+            { label: `OVERRIDE ${hazardLabel}`, action: 'deactivate_hazard', deactivatesHazardRoomId: hazardRoom.id },
+            { label: '[BACK] RETURN', nodeId: 'root' },
+          ],
+        });
 
-      const rootNode = ia.dialog.find(n => n.id === 'root');
-      if (rootNode) {
-        const closeIdx = rootNode.choices.findIndex(c => c.action === 'close');
-        const choice: DialogChoice = { label: `[OVERRIDE] ${hazardLabel}`, nodeId };
-        if (closeIdx >= 0) rootNode.choices.splice(closeIdx, 0, choice);
-        else rootNode.choices.push(choice);
+        // Wire into root menu for standard dialog interactables
+        const rootNode = ia.dialog.find(n => n.id === 'root');
+        if (rootNode) {
+          const closeIdx = rootNode.choices.findIndex(c => c.action === 'close');
+          const choice: DialogChoice = { label: `[OVERRIDE] ${hazardLabel}`, nodeId };
+          if (closeIdx >= 0) rootNode.choices.splice(closeIdx, 0, choice);
+          else rootNode.choices.push(choice);
+        }
+        // Note: data archives (isDataArchive=true) have no 'root' node — that's fine,
+        // renderDataArchive() reads deactivation nodes from ia.dialog directly
       }
     }
   }
@@ -2000,7 +2051,7 @@ function placeStuckEcho(tiles: Tile[][], rooms: Room[], interactables: Interacta
     const [dx, dy] = floorNeighbours[i];
     const bx = echoPos.x + dx, by = echoPos.y + dy;
     const t = tiles[by]?.[bx];
-    if (t && t.walkable) {
+    if (t && t.walkable && !isAdjacentToDoor(tiles, bx, by)) {
       t.type = TileType.Wall;
       t.walkable = false;
       t.transparent = false;
@@ -2075,14 +2126,14 @@ function placeSpookyAstronauts(tiles: Tile[][], rooms: Room[]) {
   if (horizontal) {
     // Along top and bottom interior rows
     for (let x = x1; x <= x2; x += 2) {
-      if (tiles[y1]?.[x]?.walkable) props.push({ position: { x, y: y1 }, glyph: '♙', fg: '#8899aa', name: 'Spacesuit', propTag: 'spacesuit' });
-      if (tiles[y2]?.[x]?.walkable) props.push({ position: { x, y: y2 }, glyph: '♙', fg: '#8899aa', name: 'Spacesuit', propTag: 'spacesuit' });
+      if (tiles[y1]?.[x]?.walkable && !isAdjacentToDoor(tiles, x, y1)) props.push({ position: { x, y: y1 }, glyph: '♙', fg: '#8899aa', name: 'Spacesuit', propTag: 'spacesuit' });
+      if (tiles[y2]?.[x]?.walkable && !isAdjacentToDoor(tiles, x, y2)) props.push({ position: { x, y: y2 }, glyph: '♙', fg: '#8899aa', name: 'Spacesuit', propTag: 'spacesuit' });
     }
   } else {
     // Along left and right interior columns
     for (let y = y1; y <= y2; y += 2) {
-      if (tiles[y]?.[x1]?.walkable) props.push({ position: { x: x1, y }, glyph: '♙', fg: '#8899aa', name: 'Spacesuit', propTag: 'spacesuit' });
-      if (tiles[y]?.[x2]?.walkable) props.push({ position: { x: x2, y }, glyph: '♙', fg: '#8899aa', name: 'Spacesuit', propTag: 'spacesuit' });
+      if (tiles[y]?.[x1]?.walkable && !isAdjacentToDoor(tiles, x1, y)) props.push({ position: { x: x1, y }, glyph: '♙', fg: '#8899aa', name: 'Spacesuit', propTag: 'spacesuit' });
+      if (tiles[y]?.[x2]?.walkable && !isAdjacentToDoor(tiles, x2, y)) props.push({ position: { x: x2, y }, glyph: '♙', fg: '#8899aa', name: 'Spacesuit', propTag: 'spacesuit' });
     }
   }
 
@@ -2219,6 +2270,7 @@ function placeLostExpedition(tiles: Tile[][], rooms: Room[], interactables: Inte
     const x = x1 + Math.floor(random() * (x2 - x1 + 1));
     const y = y1 + Math.floor(random() * (y2 - y1 + 1));
     if (!tiles[y]?.[x]?.walkable) continue;
+    if (isAdjacentToDoor(tiles, x, y)) continue;
     if (props.some(p => p.position.x === x && p.position.y === y)) continue;
     props.push({ position: { x, y }, glyph: '♙', fg: '#6677aa', name: 'Crew Remains', propTag: 'crew_remains' });
   }
@@ -2230,6 +2282,7 @@ function placeLostExpedition(tiles: Tile[][], rooms: Room[], interactables: Inte
       const x = x1 + Math.floor(random() * (x2 - x1 + 1));
       const y = y1 + Math.floor(random() * (y2 - y1 + 1));
       if (!tiles[y]?.[x]?.walkable) continue;
+      if (isAdjacentToDoor(tiles, x, y)) continue;
       if (props.some(p => p.position.x === x && p.position.y === y)) continue;
       return { x, y };
     }
@@ -2290,8 +2343,15 @@ function placeCorruptionRitual(tiles: Tile[][], rooms: Room[], interactables: In
   if (eligible.length === 0) return;
 
   const room = eligible[Math.floor(random() * eligible.length)];
-  const cx = Math.floor(room.x + room.w / 2);
-  const cy = Math.floor(room.y + room.h / 2);
+  let cx = Math.floor(room.x + room.w / 2);
+  let cy = Math.floor(room.y + room.h / 2);
+
+  // Nudge center if it's adjacent to a door
+  if (isAdjacentToDoor(tiles, cx, cy)) {
+    const alt = findPlacementInRoom(tiles, room);
+    if (!alt) return;
+    cx = alt.x; cy = alt.y;
+  }
 
   // GateKeeper at center (spawned via ritual_gatekeeper propTag)
   const gkProp: ScenarioPropDef = {
@@ -2306,7 +2366,7 @@ function placeCorruptionRitual(tiles: Tile[][], rooms: Room[], interactables: In
   const echoPositions: Position[] = [
     { x: Math.max(room.x + 1, cx - 2), y: cy },
     { x: Math.min(room.x + room.w - 2, cx + 2), y: cy },
-  ];
+  ].filter(p => !isAdjacentToDoor(tiles, p.x, p.y));
 
   const glitchedBroadcasts = [
     '█▓░ JOINING INITIATED ░▓█',
@@ -2446,7 +2506,7 @@ export function generateCluster(id: number): Cluster {
   for (const r of allRooms) r.collapse = sampleRoomCollapse(r, collapseMap);
 
   // Assign hazards based on collapse intensity
-  assignHazardsByCollapse(allRooms, id);
+  assignHazardsByCollapse(allRooms, id, doorAdjacency);
 
   // Convert grid cells to tiles
   const tiles = gridToTiles(grid.cells, roomIdAt);
@@ -2485,7 +2545,7 @@ export function generateCluster(id: number): Cluster {
   const interactables = placeInteractables(tiles, allRooms, id, terminals);
 
   // Post-process interactables: hazard deactivation options & root parts
-  assignHazardDeactivation(interactables, allRooms);
+  assignHazardDeactivation(interactables, terminals, allRooms);
   assignRootParts(interactables, id);
 
   // Tutorial zone: cluster 0 gets a fixed narrative terminal and lost echo near entry

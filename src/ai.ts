@@ -622,7 +622,8 @@ function factionSmokeColor(faction?: string): string {
   return '#aaaa66';
 }
 
-/** Remove an entity from the game state, spawning a death-smoke effect. */
+/** Remove an entity from the game state, spawning a death-smoke effect.
+ *  Marks for deferred removal — actual filtering happens after the entity loop. */
 function removeEntity(state: GameState, target: Entity) {
   if (target.id === state.player.id) return; // never remove player
   state.smokeEffects.push({
@@ -630,7 +631,7 @@ function removeEntity(state: GameState, target: Entity) {
     fg: factionSmokeColor(target.ai?.faction),
     spawnTime: performance.now(),
   });
-  state.entities = state.entities.filter(e => e.id !== target.id);
+  target._pendingRemoval = true;
   state.markedEntities.delete(target.id);
 }
 

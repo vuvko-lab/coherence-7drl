@@ -81,6 +81,8 @@ interface SeedResult {
   genTimeMs: number;
   deterministic: boolean;
   quarantineWithoutSwitch: number;  // quarantine rooms with no deactivation interactable
+  quarantineUnreachableSwitch: number; // quarantine rooms where switch exists but is unreachable
+  quarantineDiagnostics: string[];  // detailed diagnostics for quarantine issues
   totalQuarantine: number;          // total quarantine rooms
 }
 
@@ -419,7 +421,7 @@ function snapshotCluster(
 
 // ── Simulation ──
 
-function simulateCluster(seed: number, ticks: number, clusterId: number): { snapshots: SimSnapshot[]; genTimeMs: number; quarantineWithoutSwitch: number; totalQuarantine: number } {
+function simulateCluster(seed: number, ticks: number, clusterId: number): { snapshots: SimSnapshot[]; genTimeMs: number; quarantineWithoutSwitch: number; quarantineUnreachableSwitch: number; quarantineDiagnostics: string[]; totalQuarantine: number } {
   const t0 = performance.now();
   const state = createGame(seed);
 
@@ -437,7 +439,7 @@ function simulateCluster(seed: number, ticks: number, clusterId: number): { snap
   const genTimeMs = performance.now() - t0;
 
   if (!state.clusters.has(clusterId)) {
-    return { snapshots: [], genTimeMs, quarantineWithoutSwitch: 0, totalQuarantine: 0 };
+    return { snapshots: [], genTimeMs, quarantineWithoutSwitch: 0, quarantineUnreachableSwitch: 0, quarantineDiagnostics: [], totalQuarantine: 0 };
   }
 
   const cluster = state.clusters.get(clusterId)!;
@@ -469,18 +471,120 @@ function simulateCluster(seed: number, ticks: number, clusterId: number): { snap
     }
   }
 
-  // Check quarantine rooms have deactivation switches
+  // Check quarantine rooms have reachable deactivation switches
   const quarantineRooms = cluster.rooms.filter(r => r.roomType === 'quarantine');
   const totalQuarantine = quarantineRooms.length;
   let quarantineWithoutSwitch = 0;
+  let quarantineUnreachableSwitch = 0;
+  const quarantineDiagnostics: string[] = [];
+
+  // BFS from entry, respecting sealed doors (quarantine doors are not walkable)
+  const reachable = bfsReach(cluster, entryPos);
+  const quarantineRoomIds = new Set(quarantineRooms.map(r => r.id));
+
   for (const qRoom of quarantineRooms) {
-    const hasSwitch = cluster.interactables.some(ia =>
+    // Find all interactables that can deactivate this quarantine room
+    const switches = cluster.interactables.filter(ia =>
       ia.dialog.some(n => n.choices.some(c => c.deactivatesHazardRoomId === qRoom.id))
     );
-    if (!hasSwitch) quarantineWithoutSwitch++;
+    // Also check terminals with hazardOverrides
+    const termSwitches = cluster.terminals.filter(t =>
+      t.hazardOverrides?.some(o => o.hazardRoomId === qRoom.id)
+    );
+    const totalSwitches = switches.length + termSwitches.length;
+
+    if (totalSwitches === 0) {
+      quarantineWithoutSwitch++;
+      const hasKey = cluster.terminals.some(t => t.hasKey && t.roomId === qRoom.id);
+      quarantineDiagnostics.push(
+        `  [NO SWITCH] seed=${seed} cluster=${clusterId} quarantine room ${qRoom.id} (${qRoom.w}x${qRoom.h})` +
+        `${hasKey ? ' [HAS KEY TERMINAL]' : ''} — no deactivation assigned`
+      );
+      continue;
+    }
+
+    // Check if any switch (interactable or terminal) is reachable from entry
+    let anyReachable = false;
+    let anyUsableSwitch = false;
+    const switchDetails: string[] = [];
+
+    for (const sw of switches) {
+      const posKey = `${sw.position.x},${sw.position.y}`;
+      const isReachableTile = reachable.has(posKey);
+      const swRoom = cluster.rooms.find(r => r.id === sw.roomId);
+      const inQuarantine = swRoom ? quarantineRoomIds.has(swRoom.id) : false;
+      const reachableStatus = isReachableTile ? 'REACHABLE' : 'UNREACHABLE';
+      switchDetails.push(
+        `    ia-switch ${sw.id} (${sw.kind}) in room ${sw.roomId} ` +
+        `[${swRoom?.roomType ?? '?'}] @ (${sw.position.x},${sw.position.y}) → ${reachableStatus}` +
+        `${inQuarantine ? ' [INSIDE QUARANTINE]' : ''}` +
+        `${sw.isDataArchive ? ' [DATA ARCHIVE]' : ''}`
+      );
+      if (isReachableTile) anyReachable = true;
+
+      // Check usability: data archives render deactivation from ia.dialog directly;
+      // standard interactables need a root menu link
+      if (isReachableTile) {
+        if (sw.isDataArchive) {
+          anyUsableSwitch = true;
+        } else {
+          const rootNode = sw.dialog.find(n => n.id === 'root');
+          if (rootNode?.choices.some(c => c.nodeId === `deactivate_${qRoom.id}`)) {
+            anyUsableSwitch = true;
+          } else {
+            switchDetails.push(`    ⚠ ia-switch ${sw.id} — deactivate node exists but NOT linked from root menu`);
+          }
+        }
+      }
+    }
+
+    for (const ts of termSwitches) {
+      const posKey = `${ts.position.x},${ts.position.y}`;
+      // Terminal tile is not walkable, check adjacent tiles for reachability
+      const adjReachable = [[0,-1],[0,1],[-1,0],[1,0]].some(([dx,dy]) =>
+        reachable.has(`${ts.position.x+dx},${ts.position.y+dy}`)
+      );
+      const tsRoom = cluster.rooms.find(r => r.id === ts.roomId);
+      const inQuarantine = tsRoom ? quarantineRoomIds.has(tsRoom.id) : false;
+      switchDetails.push(
+        `    term-switch ${ts.id} in room ${ts.roomId} ` +
+        `[${tsRoom?.roomType ?? '?'}] @ (${ts.position.x},${ts.position.y}) → ${adjReachable ? 'REACHABLE' : 'UNREACHABLE'}` +
+        `${inQuarantine ? ' [INSIDE QUARANTINE]' : ''}`
+      );
+      if (adjReachable) { anyReachable = true; anyUsableSwitch = true; }
+    }
+
+    if (!anyReachable) {
+      quarantineUnreachableSwitch++;
+      const hasKey = cluster.terminals.some(t => t.hasKey && t.roomId === qRoom.id);
+      quarantineDiagnostics.push(
+        `  [UNREACHABLE] seed=${seed} cluster=${clusterId} quarantine room ${qRoom.id}` +
+        `${hasKey ? ' [HAS KEY TERMINAL]' : ''} — ${totalSwitches} switch(es) exist but none reachable:`,
+        ...switchDetails
+      );
+    } else if (!anyUsableSwitch) {
+      quarantineUnreachableSwitch++;  // effectively unreachable — no usable dialog path
+      const hasKey = cluster.terminals.some(t => t.hasKey && t.roomId === qRoom.id);
+      quarantineDiagnostics.push(
+        `  [NO USABLE SWITCH] seed=${seed} cluster=${clusterId} quarantine room ${qRoom.id}` +
+        `${hasKey ? ' [HAS KEY TERMINAL]' : ''} — ${totalSwitches} switch(es) assigned but ALL lack root menu link (e.g. archive echoes):`,
+        ...switchDetails.filter(l => l.includes('⚠'))
+      );
+    } else {
+      // Still report if there are usability warnings
+      const warnings = switchDetails.filter(l => l.includes('⚠'));
+      if (warnings.length > 0) {
+        const hasKey = cluster.terminals.some(t => t.hasKey && t.roomId === qRoom.id);
+        quarantineDiagnostics.push(
+          `  [WARNING] seed=${seed} cluster=${clusterId} quarantine room ${qRoom.id}` +
+          `${hasKey ? ' [HAS KEY TERMINAL]' : ''} — some switches have issues (but at least one is usable):`,
+          ...warnings
+        );
+      }
+    }
   }
 
-  return { snapshots, genTimeMs, quarantineWithoutSwitch, totalQuarantine };
+  return { snapshots, genTimeMs, quarantineWithoutSwitch, quarantineUnreachableSwitch, quarantineDiagnostics, totalQuarantine };
 }
 
 // ── Determinism check ──
@@ -773,9 +877,9 @@ async function main() {
     const origLog2 = console.log;
     console.log = () => {};  // suppress cluster-gen logs during simulation runs
     for (const seed of seeds) {
-      const { snapshots, genTimeMs, quarantineWithoutSwitch, totalQuarantine } = simulateCluster(seed, TOTAL_TICKS, cid);
+      const { snapshots, genTimeMs, quarantineWithoutSwitch, quarantineUnreachableSwitch, quarantineDiagnostics, totalQuarantine } = simulateCluster(seed, TOTAL_TICKS, cid);
       const deterministic = checkDeterminism(seed);
-      cidResults.push({ seed, snapshots, genTimeMs, deterministic, quarantineWithoutSwitch, totalQuarantine });
+      cidResults.push({ seed, snapshots, genTimeMs, deterministic, quarantineWithoutSwitch, quarantineUnreachableSwitch, quarantineDiagnostics, totalQuarantine });
     }
     console.log = origLog2;
     allClusterResults.set(cid, cidResults);
@@ -983,8 +1087,15 @@ async function main() {
   // Quarantine deactivation check
   const totalQRooms = validResults.reduce((s, r) => s + r.totalQuarantine, 0);
   const missingQSwitches = validResults.reduce((s, r) => s + r.quarantineWithoutSwitch, 0);
+  const unreachableQSwitches = validResults.reduce((s, r) => s + r.quarantineUnreachableSwitch, 0);
+  const allQDiagnostics = validResults.flatMap(r => r.quarantineDiagnostics);
   console.log('\nHazard integrity:');
   printMetric('Quarantine rooms without deactivation switch', `${missingQSwitches}/${totalQRooms}`, missingQSwitches === 0, 'high');
+  printMetric('Quarantine rooms with unreachable switch', `${unreachableQSwitches}/${totalQRooms}`, unreachableQSwitches === 0, 'high');
+  if (allQDiagnostics.length > 0) {
+    console.log('\n  Quarantine diagnostics:');
+    for (const line of allQDiagnostics) console.log(line);
+  }
 
   console.log('\nSeed variance:');
   printMetric('CV path damage @50', cvDamage.toFixed(3), cvDamage <= 0.4, 'medium');

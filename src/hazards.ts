@@ -1015,7 +1015,7 @@ function tryFireMicroEvent(state: GameState, cluster: Cluster, room: Room) {
             tile.doorOpen = false;
             tile.walkable = false;
             tile.transparent = false;
-            tile.glyph = '+';
+            tile.glyph = tile.sealed ? '▪' : '+';
             addMessage(state, 'A door slams shut nearby.', 'system');
             return;
           }

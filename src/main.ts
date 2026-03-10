@@ -1,4 +1,4 @@
-import { createGame, processAction, handleMapClick, stepAutoPath, addMessage, exportSave, exportDebugLog, loadSave, adminRegenCluster, adminTeleportToCluster, grantExitAccess, activateTerminal, executeInteractableAction, getEntityAt, CORRUPT_M_RANGE, hackFinalTerminal, makeDamagedBitMite, activateCloak } from './game';
+import { createGame, processAction, handleMapClick, stepAutoPath, addMessage, exportSave, exportDebugLog, loadSave, adminRegenCluster, adminTeleportToCluster, grantExitAccess, activateTerminal, executeInteractableAction, deactivateHazardRoom, getEntityAt, CORRUPT_M_RANGE, hackFinalTerminal, makeDamagedBitMite, activateCloak } from './game';
 import { setDamageParams, getDamageParams, setGenSizeOverride, clearGenSizeOverride, getGenSizeOverride, clusterScaleForId } from './cluster';
 import { Renderer, renderSelfPanel, renderLogs, renderOverviewPanel, renderMapStatusBar } from './renderer';
 import { InputHandler } from './input';
@@ -657,6 +657,28 @@ function openTerminalOverlay() {
     terminalOptions.appendChild(hackBtn);
   }
 
+  // Hazard override buttons (assigned by assignHazardDeactivation)
+  if (terminal.hazardOverrides) {
+    for (const override of terminal.hazardOverrides) {
+      const hazardRoom = cluster.rooms.find(r => r.id === override.hazardRoomId);
+      const alreadyDone = hazardRoom?.roomType === 'normal';
+      const btn = document.createElement('button');
+      btn.className = 'terminal-opt-btn opt-warn';
+      if (alreadyDone) {
+        btn.textContent = `> [OVERRIDE] ${override.label} [OVERRIDDEN]`;
+        btn.disabled = true;
+      } else {
+        btn.textContent = `> [OVERRIDE] ${override.label}`;
+        btn.addEventListener('click', () => {
+          deactivateHazardRoom(state, cluster, override.hazardRoomId);
+          closeTerminalOverlay();
+          glitchBarSweep().then(() => renderAll());
+        });
+      }
+      terminalOptions.appendChild(btn);
+    }
+  }
+
   const closeBtn = document.createElement('button');
   closeBtn.className = 'terminal-opt-btn opt-close';
   closeBtn.textContent = '> [ESC] disconnect';
@@ -815,6 +837,32 @@ function renderDataArchive(item: import('./types').Interactable) {
       });
       iaChoices.appendChild(btn);
     }
+    // Inject hazard override buttons from dialog nodes (assigned by assignHazardDeactivation)
+    const cluster = state.clusters.get(state.openInteractable!.clusterId);
+    if (cluster) {
+      for (const node of item.dialog) {
+        if (!node.id.startsWith('deactivate_')) continue;
+        const deactChoice = node.choices.find(c => c.action === 'deactivate_hazard');
+        if (!deactChoice?.deactivatesHazardRoomId) continue;
+        const hazardRoom = cluster.rooms.find(r => r.id === deactChoice.deactivatesHazardRoomId);
+        const alreadyDone = hazardRoom?.roomType === 'normal';
+        const btn = document.createElement('button');
+        btn.className = 'ia-choice-btn';
+        if (alreadyDone) {
+          btn.textContent = `> ${deactChoice.label} [OVERRIDDEN]`;
+          btn.disabled = true;
+        } else {
+          btn.textContent = `> ${glitchText(deactChoice.label, decay * 0.3)}`;
+          btn.addEventListener('click', () => {
+            executeInteractableAction(state, item.id, state.openInteractable!.clusterId, 'deactivate_hazard', deactChoice);
+            closeInteractableOverlay();
+            glitchBarSweep().then(() => renderAll());
+          });
+        }
+        iaChoices.appendChild(btn);
+      }
+    }
+
     const exitBtn = document.createElement('button');
     exitBtn.className = 'ia-choice-btn';
     exitBtn.textContent = '> [ESC] DISCONNECT';

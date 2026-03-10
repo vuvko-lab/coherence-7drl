@@ -30,6 +30,7 @@ export interface Tile {
   integrity?: number; // wall=3, door=2; corruption degrades to 0 → floor
   doorOpen?: boolean; // true = open, undefined/false = closed
   doorCloseTick?: number; // tick when door was last vacated (for auto-close)
+  sealed?: boolean; // quarantine-sealed door — closeDoor() preserves glyph/state
   terminalId?: string; // set when TileType.Terminal
 }
 
@@ -201,6 +202,7 @@ export interface TerminalDef {
   isFinalTerminal?: boolean;    // cluster-N narrative terminal requiring root parts
   lockModeUntilTick?: number;   // if > tick, terminal is temporarily locked after hack
   hackCount?: number;           // number of successful hacks (final terminal escalation)
+  hazardOverrides?: { label: string; hazardRoomId: number }[];  // deactivation buttons shown in terminal overlay
 }
 
 // ── Interactables ──
@@ -439,6 +441,7 @@ export interface Entity {
   modules?: PlayerModule[];
   ai?: EntityAI;
   propTag?: string; // identifies static prop entities (e.g. 'spacesuit', 'sleever_device')
+  _pendingRemoval?: boolean; // marked for deferred removal after entity loop
 }
 
 // ── Game State ──

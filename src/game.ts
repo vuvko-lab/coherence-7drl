@@ -57,8 +57,37 @@ function closeDoor(tile: Tile) {
   tile.doorOpen = false;
   tile.walkable = false;
   tile.transparent = false;
-  tile.glyph = '+';
+  tile.glyph = tile.sealed ? '▪' : '+';
+  tile.fg = tile.sealed ? '#ff2222' : tile.fg;
   tile.doorCloseTick = undefined;
+}
+
+export function deactivateHazardRoom(state: GameState, cluster: Cluster, hazardRoomId: number): boolean {
+  const hazardRoom = cluster.rooms.find(r => r.id === hazardRoomId);
+  if (!hazardRoom) return false;
+  const wasQuarantine = hazardRoom.roomType === 'quarantine';
+  hazardRoom.roomType = 'normal';
+  hazardRoom.hazardState = undefined;
+  for (let ry = hazardRoom.y; ry < hazardRoom.y + hazardRoom.h; ry++) {
+    for (let rx = hazardRoom.x; rx < hazardRoom.x + hazardRoom.w; rx++) {
+      const tile = cluster.tiles[ry]?.[rx];
+      if (!tile) continue;
+      tile.hazardOverlay = undefined;
+      if (wasQuarantine && tile.type === TileType.Door && !tile.walkable) {
+        tile.sealed = false;
+        closeDoor(tile);
+        tile.fg = COLORS.door;
+      }
+    }
+  }
+  const roomCenter = {
+    x: Math.floor(hazardRoom.x + hazardRoom.w / 2),
+    y: Math.floor(hazardRoom.y + hazardRoom.h / 2),
+  };
+  const radius = Math.max(hazardRoom.w, hazardRoom.h);
+  applyReveal(state, cluster, floodFillReveal(cluster, roomCenter, radius), 15);
+  addMessage(state, GAME_MESSAGES.hazardNeutralized, 'important');
+  return true;
 }
 
 function deltaToDir(dx: number, dy: number): Direction {
@@ -747,6 +776,17 @@ function tryTransfer(state: GameState): boolean {
   dlog(state, 'system', 'cluster_transfer', `from=${state.currentClusterId} to=${iface.targetClusterId}`);
   checkNarrativeTriggers(state, 'cluster_enter', { clusterId: iface.targetClusterId });
 
+  // Clean up entities from previous clusters to prevent unbounded growth
+  state.entities = state.entities.filter(e => e.clusterId === iface.targetClusterId || e.id === state.player.id);
+
+  // Cap log arrays to prevent memory bloat over long sessions
+  const MAX_MESSAGES = 500;
+  const MAX_DEBUG_LOG = 500;
+  const MAX_ACTION_LOG = 500;
+  if (state.messages.length > MAX_MESSAGES) state.messages = state.messages.slice(-MAX_MESSAGES);
+  if (state.debugLog.length > MAX_DEBUG_LOG) state.debugLog = state.debugLog.slice(-MAX_DEBUG_LOG);
+  if (state.actionLog.length > MAX_ACTION_LOG) state.actionLog = state.actionLog.slice(-MAX_ACTION_LOG);
+
   computeFOV(targetCluster, state.player.position);
   return true;
 }
@@ -864,7 +904,11 @@ export function processAction(state: GameState, action: PlayerAction): boolean {
     }
 
     // Process other entities (speed-based turns)
-    for (const entity of state.entities) {
+    // Use index-based loop: removeEntity() marks entities with _pendingRemoval
+    // instead of filtering mid-loop, so the array reference stays stable.
+    for (let i = 0; i < state.entities.length; i++) {
+      const entity = state.entities[i];
+      if (entity._pendingRemoval) continue;
       if (entity.clusterId !== state.currentClusterId) continue;
       entity.energy += 10;
       if (entity.energy >= entity.speed) {
@@ -884,9 +928,11 @@ export function processAction(state: GameState, action: PlayerAction): boolean {
             spawnTime: performance.now(),
           });
         }
+        e._pendingRemoval = true;
       }
     }
-    state.entities = state.entities.filter(e => (e.coherence ?? 1) > 0);
+    // Flush all pending removals in one pass
+    state.entities = state.entities.filter(e => !e._pendingRemoval);
 
     // Check player death
     if ((state.player.coherence ?? 100) <= 0 && !state.godMode) {
@@ -1192,32 +1238,8 @@ export function executeInteractableAction(
     case 'deactivate_hazard': {
       const hazardRoomId = choice?.deactivatesHazardRoomId ?? item.deactivatesHazardRoomId;
       if (hazardRoomId == null) break;
-      const hazardRoom = cluster.rooms.find(r => r.id === hazardRoomId);
-      if (!hazardRoom) break;
-      const wasQuarantine = hazardRoom.roomType === 'quarantine';
-      hazardRoom.roomType = 'normal';
-      hazardRoom.hazardState = undefined;
-      for (let ry = hazardRoom.y; ry < hazardRoom.y + hazardRoom.h; ry++) {
-        for (let rx = hazardRoom.x; rx < hazardRoom.x + hazardRoom.w; rx++) {
-          const tile = cluster.tiles[ry]?.[rx];
-          if (!tile) continue;
-          tile.hazardOverlay = undefined;
-          if (wasQuarantine && tile.type === TileType.Door && !tile.walkable) {
-            // Restore sealed door to normal closed door state
-            closeDoor(tile);
-            tile.fg = COLORS.door;
-          }
-        }
-      }
-      // Reveal the entire deactivated room with animated effect
-      const roomCenter = {
-        x: Math.floor(hazardRoom.x + hazardRoom.w / 2),
-        y: Math.floor(hazardRoom.y + hazardRoom.h / 2),
-      };
-      const radius = Math.max(hazardRoom.w, hazardRoom.h);
-      applyReveal(state, cluster, floodFillReveal(cluster, roomCenter, radius), 15);
-      addMessage(state, GAME_MESSAGES.hazardNeutralized, 'important');
-      dlog(state, 'hazard', 'deactivate', `room=${hazardRoomId} type=${wasQuarantine ? 'quarantine' : 'other'} via=${item.id}`);
+      if (!deactivateHazardRoom(state, cluster, hazardRoomId)) break;
+      dlog(state, 'hazard', 'deactivate', `room=${hazardRoomId} via=${item.id}`);
       return true; // close dialog
     }
     case 'hack_terminal': {
