@@ -201,6 +201,22 @@ export interface MarkEntityIntent {
   entityId: number;
 }
 
+// ── AI internal state (generic field setter for bookkeeping counters) ──
+
+export interface SetAIFieldIntent {
+  kind: 'set_ai_field';
+  entityId: number;
+  field: string;
+  value: any;
+}
+
+// ── Interactable repair ──
+
+export interface RepairInteractableIntent {
+  kind: 'repair_interactable';
+  position: Position;
+}
+
 // ── No-op (signals a valid action happened but nothing to resolve) ──
 
 export interface WaitIntent {
@@ -231,6 +247,9 @@ export type Intent =
   | SetTargetIntent
   | SetCooldownIntent
   | CatalogIntent
+  | SetAIFieldIntent
+  // Interactable
+  | RepairInteractableIntent
   // Presentation
   | MessageIntent
   | SoundIntent

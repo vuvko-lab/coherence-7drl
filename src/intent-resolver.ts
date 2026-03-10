@@ -261,6 +261,22 @@ function resolveAlertDelta(state: GameState, intent: AlertDeltaIntent): void {
   state.alertLevel = Math.max(0, state.alertLevel + intent.amount);
 }
 
+function resolveSetAIField(state: GameState, intent: { kind: 'set_ai_field'; entityId: number; field: string; value: any }): void {
+  const entity = findEntity(state, intent.entityId);
+  if (!entity?.ai) return;
+  (entity.ai as any)[intent.field] = intent.value;
+}
+
+function resolveRepairInteractable(state: GameState, intent: { kind: 'repair_interactable'; position: Position }): void {
+  const cluster = getCluster(state);
+  const ia = cluster.interactables.find(
+    i => i.position.x === intent.position.x && i.position.y === intent.position.y,
+  );
+  if (ia) {
+    ia.corrupted = false;
+  }
+}
+
 // ── Main entry point ──
 
 /**
@@ -292,6 +308,9 @@ export function resolveIntents(state: GameState, intents: Intent[]): void {
       case 'set_cooldown':     resolveSetCooldown(state, intent); break;
       case 'catalog':          resolveCatalog(state, intent); break;
       case 'mark_entity':      resolveMarkEntity(state, intent); break;
+      case 'set_ai_field':     resolveSetAIField(state, intent); break;
+      // Interactable
+      case 'repair_interactable': resolveRepairInteractable(state, intent); break;
       // Presentation
       case 'message':          resolveMessage(state, intent); break;
       case 'sound':            resolveSound(state, intent); break;
