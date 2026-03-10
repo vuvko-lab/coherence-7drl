@@ -97,14 +97,56 @@
 
 ---
 
+## Phase 3: Intent Pipeline ✓
+
+### Completed: Player Actions Return Intents
+
+**`collectMoveIntents()`** — Player movement returns `{ acted, intents: Intent[] }`:
+- God mode noclip: `move` + `sound` + interface exit `message` intents
+- Door bump: `open_door` + `sound` intents
+- Melee attack (hostile bump): `melee_attack` + `sound` + `message` intents
+- Friendly push + swap: `push_entity` + `move` intents (resolved sequentially)
+- Normal movement: `move` intent + interface exit messages
+- Terminal/interactable bumps: UI-only state, no intents (return `acted: false`)
+
+**`collectShootIntents()`** — corrupt.m ranged attack returns `{ acted, intents: Intent[] }`:
+- Module bookkeeping (cooldowns, shot counts, coherence drain) applied directly
+- Combat: `ranged_attack` + `shoot_animation` + `sound` + `message` intents
+- Free-shot warning via `message` intent
+
+### Completed: Pipeline-Structured processAction
+
+**`processAction()`** restructured into 5 phases:
+1. **Player intent** — collect + resolve player intents via `resolveIntents()`
+2. **Environment** — FOV, room entry, door auto-close
+3. **Hazards & room effects** — hazard ticks, tile damage, narrative triggers, modules
+4. **Entity AI** — speed-based energy accumulation, `updateEntityAI()` dispatch
+5. **Cleanup** — dead entity detection (coherence ≤ 0), smoke/sound/killedEntities tracking, `_pendingRemoval` flush, player death check
+
+### Completed: Uniform Death Tracking
+
+Dead entity cleanup enhanced to handle all death sources uniformly:
+- Entities killed by AI: handled by `remove_entity` intents in Phase 4
+- Entities killed by player (melee/ranged): `melee_attack`/`ranged_attack` intents reduce coherence, Phase 5 cleanup detects coherence ≤ 0 and adds smoke, sound, killedEntities, narrative triggers
+- `checkNarrativeTriggers('entity_killed')` now fires for all kill sources, not just player melee
+
+### Removed Code
+
+- `openDoor()` helper (replaced by `open_door` intent)
+- `tryMove()` function (replaced by `collectMoveIntents()`)
+- `tryShoot()` function (replaced by `collectShootIntents()`)
+- Inline entity death handling from player melee (moved to uniform cleanup)
+
+---
+
 ## Overall Progress
 
 | Phase | Status | Description |
 | --- | --- | --- |
 | 1. Foundation | **Complete** | Determinism fixes, intent types, intent resolver |
 | 2. Data Layer | **Complete** | balance.ts, hazard-defs.ts, scenario-defs.ts, events.ts |
-| 3. Intent Pipeline | Not started | Convert processAction to 6-phase pipeline |
-| 4. Entity AI | **Definitions done** | behaviors.ts, entity-defs.ts done; AI conversion pending |
+| 3. Intent Pipeline | **Complete** | processAction pipeline, player actions return Intent[] |
+| 4. Entity AI | **Complete** | behaviors.ts, entity-defs.ts, all 7 AI types converted |
 | 5. Room Events | Not started | Migrate narrative/hazard/scenario/micro to unified system |
 | 6. Integration Tests | Not started | Room/key/reach/entity/event tests |
 | 7. AI Player | Not started | Deterministic full-game bot |
@@ -127,7 +169,7 @@
 
 | File | Changes |
 | --- | --- |
-| `src/game.ts` | Determinism fixes; replaced local constants with balance.ts imports |
+| `src/game.ts` | Determinism fixes; balance.ts imports; intent pipeline (collectMoveIntents, collectShootIntents, 5-phase processAction, uniform death cleanup) |
 | `src/ai.ts` | Replaced 1 `performance.now()` with `0` |
 | `src/hazards.ts` | Replaced 4 `performance.now()` calls with `0` or negative delays |
 | `src/main.ts` | Added smoke/echo timestamp stamping in `runSmokeLoop()` |

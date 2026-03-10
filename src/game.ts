@@ -23,6 +23,8 @@ import {
   CLOAK_DURATION, CLOAK_COOLDOWN, CLOAK_FREE_USES, CLOAK_DRAIN_PER_EXTRA,
   MAX_MESSAGES, MAX_DEBUG_LOG, MAX_ACTION_LOG,
 } from './balance';
+import type { Intent } from './intents';
+import { resolveIntents } from './intent-resolver';
 
 export const CORRUPT_M_RANGE = _CORRUPT_M_RANGE;
 const MELEE_DAMAGE = PLAYER_MELEE_DAMAGE;
@@ -49,14 +51,6 @@ export function tryPushEntity(
     return true;
   }
   return false;
-}
-
-function openDoor(tile: Tile) {
-  tile.doorOpen = true;
-  tile.walkable = true;
-  tile.transparent = true;
-  tile.glyph = '▯';
-  tile.doorCloseTick = undefined;
 }
 
 function closeDoor(tile: Tile) {
@@ -432,19 +426,24 @@ export function getEntityAt(state: GameState, cluster: Cluster, x: number, y: nu
 
 // Module constants imported from balance.ts
 
-function tryShoot(state: GameState, target: Position): boolean {
+/**
+ * Collect intents for a corrupt.m ranged shot. Returns { acted, intents }.
+ * Module bookkeeping (cooldowns, shot counts, drain) is applied directly
+ * since it's player-specific state. Combat damage is expressed as intents.
+ */
+function collectShootIntents(state: GameState, target: Position): { acted: boolean; intents: Intent[] } {
   const cluster = getCurrentCluster(state);
   const corrupt = state.player.modules?.find(m => m.id === 'corrupt.m' && m.status === 'loaded');
   if (!corrupt) {
     addMessage(state, GAME_MESSAGES.noAttackModule, 'alert');
-    return false;
+    return { acted: false, intents: [] };
   }
 
   // Cooldown check
   if (corrupt.cooldownUntilTick != null && corrupt.cooldownUntilTick > state.tick) {
     const remaining = corrupt.cooldownUntilTick - state.tick;
     addMessage(state, `corrupt.m reloading — ${remaining} tick${remaining !== 1 ? 's' : ''} remaining.`, 'alert');
-    return false;
+    return { acted: false, intents: [] };
   }
 
   const from = state.player.position;
@@ -454,21 +453,21 @@ function tryShoot(state: GameState, target: Position): boolean {
 
   if (dist > CORRUPT_M_RANGE) {
     addMessage(state, GAME_MESSAGES.targetOutOfRange, 'alert');
-    return false;
+    return { acted: false, intents: [] };
   }
 
   const targetTile = cluster.tiles[target.y]?.[target.x];
   if (!targetTile?.visible) {
     addMessage(state, GAME_MESSAGES.noVisibleTarget, 'alert');
-    return false;
+    return { acted: false, intents: [] };
   }
 
   if (!hasLOS(cluster, from, target)) {
     addMessage(state, GAME_MESSAGES.noLineOfSight, 'alert');
-    return false;
+    return { acted: false, intents: [] };
   }
 
-  // Track shots and apply coherence drain for shots beyond the free quota
+  // Module bookkeeping: track shots and apply coherence drain beyond free quota
   const shotCount = corrupt.clusterShotCount ?? 0;
   const overQuota = shotCount - CORRUPT_M_FREE_SHOTS + 1; // >0 means this shot drains
   if (overQuota > 0 && state.player.coherence != null && !state.godMode) {
@@ -483,28 +482,32 @@ function tryShoot(state: GameState, target: Position): boolean {
   state.corruptShotsFired++;
   dlog(state, 'player', 'shoot', `target=(${target.x},${target.y}) shot#=${corrupt.clusterShotCount}`);
 
-  state.pendingSounds.push('shoot');
+  // Beam animation (presentation-layer, uses performance.now())
   shootingAnimation(state, from, target, 'beam');
+
+  // Build intents for combat effects
+  const intents: Intent[] = [
+    { kind: 'sound', id: 'shoot' },
+    { kind: 'shoot_animation', from: { ...from }, to: { ...target }, style: 'beam' as const },
+  ];
 
   // Damage entity at target if present
   const targetEntity = getEntityAt(state, cluster, target.x, target.y);
   if (targetEntity && targetEntity.id !== state.player.id && targetEntity.coherence !== undefined) {
-    targetEntity.coherence = Math.max(0, targetEntity.coherence - CORRUPT_M_DAMAGE);
-    addMessage(state,
-      `Corrupt shot hits ${targetEntity.name} for ${CORRUPT_M_DAMAGE}. (${targetEntity.coherence}/${targetEntity.maxCoherence})`,
-      'combat');
-    if (targetEntity.coherence <= 0 && targetEntity.ai) {
-      state.killedEntities.push({ name: targetEntity.name, kind: targetEntity.ai.kind });
-    }
+    const postHp = Math.max(0, targetEntity.coherence - CORRUPT_M_DAMAGE);
+    intents.push(
+      { kind: 'ranged_attack', attackerId: state.player.id, targetId: targetEntity.id, damage: CORRUPT_M_DAMAGE, style: 'beam' },
+      { kind: 'message', text: `Corrupt shot hits ${targetEntity.name} for ${CORRUPT_M_DAMAGE}. (${postHp}/${targetEntity.maxCoherence})`, style: 'combat' },
+    );
   }
 
   // Warn when the NEXT shot will start draining coherence
   const newCount = corrupt.clusterShotCount;
   if (newCount === CORRUPT_M_FREE_SHOTS) {
-    addMessage(state, GAME_MESSAGES.corruptModuleWarn, 'alert');
+    intents.push({ kind: 'message', text: GAME_MESSAGES.corruptModuleWarn, style: 'alert' });
   }
 
-  return true;
+  return { acted: true, intents };
 }
 
 // ── Cloak module ──
@@ -564,114 +567,112 @@ function updateCloak(state: GameState): void {
 
 // ── Player actions ──
 
-function tryMove(state: GameState, dx: number, dy: number): boolean {
+/**
+ * Collect intents for a player move. Returns { acted, intents }.
+ * UI-only side effects (terminal/interactable opening) are applied directly.
+ * All game-state mutations are expressed as intents.
+ */
+function collectMoveIntents(state: GameState, dx: number, dy: number): { acted: boolean; intents: Intent[] } {
   const cluster = getCurrentCluster(state);
   const nx = state.player.position.x + dx;
   const ny = state.player.position.y + dy;
 
-  if (nx < 0 || nx >= cluster.width || ny < 0 || ny >= cluster.height) return false;
+  if (nx < 0 || nx >= cluster.width || ny < 0 || ny >= cluster.height) return { acted: false, intents: [] };
 
   const targetTile = cluster.tiles[ny][nx];
 
   // God mode: walk through anything (noclip)
   if (state.godMode) {
-    state.player.position.x = nx;
-    state.player.position.y = ny;
-    state.pendingSounds.push('step');
+    const intents: Intent[] = [
+      { kind: 'move', entityId: state.player.id, to: { x: nx, y: ny } },
+      { kind: 'sound', id: 'step' },
+    ];
     if (targetTile.type === TileType.InterfaceExit) {
-      addMessage(state, GAME_MESSAGES.interfaceExitDetected, 'important');
+      intents.push({ kind: 'message', text: GAME_MESSAGES.interfaceExitDetected, style: 'important' });
     }
-    return true;
+    return { acted: true, intents };
   }
 
   // Bump-to-open: closed door → open it, costs a turn, don't move
   if (targetTile.type === TileType.Door && !targetTile.doorOpen && targetTile.glyph === '+') {
-    openDoor(targetTile);
-    state.pendingSounds.push('door_open');
-    return true;
+    return {
+      acted: true,
+      intents: [
+        { kind: 'open_door', entityId: state.player.id, at: { x: nx, y: ny } },
+        { kind: 'sound', id: 'door_open' },
+      ],
+    };
   }
 
-  // Bump-into-terminal → open it, no turn cost
+  // Bump-into-terminal → open it, no turn cost (UI-only)
   if (targetTile.type === TileType.Terminal && targetTile.terminalId) {
     state.openTerminal = { terminalId: targetTile.terminalId, clusterId: state.currentClusterId };
-    return false;
+    return { acted: false, intents: [] };
   }
 
-  // Bump-into-interactable → open dialog, no turn cost
+  // Bump-into-interactable → open dialog, no turn cost (UI-only)
   const bumped = cluster.interactables.find(
     i => i.position.x === nx && i.position.y === ny && !i.hidden,
   );
   if (bumped) {
     bumped.currentNodeId = 'root';
     state.openInteractable = { id: bumped.id, clusterId: state.currentClusterId };
-    return false;
+    return { acted: false, intents: [] };
   }
 
-  // Bump-into-entity → melee (hostile), push (friendly/neutral titan), or examine
+  // Bump-into-entity → melee (hostile), push (friendly), or examine (neutral)
   const bumpedEntity = getEntityAt(state, cluster, nx, ny);
   if (bumpedEntity && bumpedEntity.id !== state.player.id) {
     const targetFaction: Faction = bumpedEntity.ai?.faction ?? 'neutral';
     const canAttack = FACTION_RELATIONS['player']?.[targetFaction] === 'attack';
     if (canAttack) {
       if (bumpedEntity.coherence !== undefined) {
-        bumpedEntity.coherence = Math.max(0, bumpedEntity.coherence - MELEE_DAMAGE);
-        state.pendingSounds.push('melee');
-        addMessage(state,
-          `You strike ${bumpedEntity.name} for ${MELEE_DAMAGE}. (${bumpedEntity.coherence}/${bumpedEntity.maxCoherence})`,
-          'important');
-        if (bumpedEntity.coherence <= 0) {
-          state.pendingSounds.push('entity_destroy');
-          const _sf = bumpedEntity.ai?.faction;
-          state.smokeEffects.push({
-            x: bumpedEntity.position.x, y: bumpedEntity.position.y,
-            fg: _sf === 'aggressive' ? '#cc4444' : _sf === 'friendly' ? '#23d2a6' : _sf === 'titan' ? '#ff44ff' : '#aaaa66',
-            spawnTime: 0, // stamped by presentation layer
-          });
-          if (bumpedEntity.ai) {
-            state.killedEntities.push({ name: bumpedEntity.name, kind: bumpedEntity.ai.kind });
-            dlog(state, 'entity', 'killed_by_player', `name=${bumpedEntity.name} kind=${bumpedEntity.ai.kind} pos=(${bumpedEntity.position.x},${bumpedEntity.position.y})`);
-            checkNarrativeTriggers(state, 'entity_killed', { killedFaction: bumpedEntity.ai.faction });
-          }
-          state.entities = state.entities.filter(e => e.id !== bumpedEntity.id);
-          state.markedEntities.delete(bumpedEntity.id);
-        }
+        const postHp = Math.max(0, bumpedEntity.coherence - MELEE_DAMAGE);
+        const intents: Intent[] = [
+          { kind: 'melee_attack', attackerId: state.player.id, targetId: bumpedEntity.id, damage: MELEE_DAMAGE },
+          { kind: 'sound', id: 'melee' },
+          { kind: 'message', text: `You strike ${bumpedEntity.name} for ${MELEE_DAMAGE}. (${postHp}/${bumpedEntity.maxCoherence})`, style: 'important' },
+        ];
+        dlog(state, 'entity', 'player_melee', `target=${bumpedEntity.name} dmg=${MELEE_DAMAGE} postHp=${postHp}`);
+        return { acted: true, intents };
       }
-      return true; // costs a turn
+      return { acted: true, intents: [] };
     } else if (targetFaction === 'friendly') {
-      // Try to push the friendly entity aside
-      const pushed = tryPushEntity(state, cluster, bumpedEntity, state.player.position);
-      if (pushed) {
-        state.player.position = { x: nx, y: ny };
-        return true;
-      }
-      addMessage(state, `${bumpedEntity.name} blocks the way.`, 'normal');
-      return false;
+      // Push + move through intents (resolveIntents processes sequentially)
+      return {
+        acted: true,
+        intents: [
+          { kind: 'push_entity', pusherId: state.player.id, targetId: bumpedEntity.id, awayFrom: state.player.position },
+          { kind: 'move', entityId: state.player.id, to: { x: nx, y: ny } },
+        ],
+      };
     } else {
       addMessage(state, `You observe ${bumpedEntity.name}. It does not react.`, 'normal');
-      return false;
+      return { acted: false, intents: [] };
     }
   }
 
   if (!isWalkable(cluster, nx, ny)) {
-    return false;
+    return { acted: false, intents: [] };
   }
 
-  state.player.position.x = nx;
-  state.player.position.y = ny;
+  // Normal move
+  const intents: Intent[] = [
+    { kind: 'move', entityId: state.player.id, to: { x: nx, y: ny } },
+  ];
 
   // Check for interface exit
-  const tile = cluster.tiles[ny][nx];
-  if (tile.type === TileType.InterfaceExit) {
+  if (targetTile.type === TileType.InterfaceExit) {
     if (cluster.id === 0 && nx < 1) {
-      addMessage(state, GAME_MESSAGES.sleevingFacility, 'important');
+      intents.push({ kind: 'message', text: GAME_MESSAGES.sleevingFacility, style: 'important' });
     } else if (nx < 1) {
-      addMessage(state, GAME_MESSAGES.interfaceClosed, 'important');
+      intents.push({ kind: 'message', text: GAME_MESSAGES.interfaceClosed, style: 'important' });
     } else {
-      addMessage(state, GAME_MESSAGES.interfaceLocated, 'important');
+      intents.push({ kind: 'message', text: GAME_MESSAGES.interfaceLocated, style: 'important' });
     }
   }
 
-  return true;
+  return { acted: true, intents };
 }
 
 function tryTransfer(state: GameState): boolean {
@@ -822,12 +823,16 @@ function updateDoors(state: GameState): boolean {
 // ── Turn processing ──
 
 export function processAction(state: GameState, action: PlayerAction): boolean {
+  // ── Phase 1: Collect player intents ──
   let acted = false;
+  let playerIntents: Intent[] = [];
 
   switch (action.kind) {
     case 'move': {
       const delta = DIR_DELTA[action.dir];
-      acted = tryMove(state, delta.x, delta.y);
+      const result = collectMoveIntents(state, delta.x, delta.y);
+      acted = result.acted;
+      playerIntents = result.intents;
       break;
     }
     case 'transfer':
@@ -836,9 +841,17 @@ export function processAction(state: GameState, action: PlayerAction): boolean {
     case 'wait':
       acted = true;
       break;
-    case 'shoot':
-      acted = tryShoot(state, action.target);
+    case 'shoot': {
+      const result = collectShootIntents(state, action.target);
+      acted = result.acted;
+      playerIntents = result.intents;
       break;
+    }
+  }
+
+  // Resolve player intents through the single mutation point
+  if (playerIntents.length > 0) {
+    resolveIntents(state, playerIntents);
   }
 
   if (acted) {
@@ -849,7 +862,7 @@ export function processAction(state: GameState, action: PlayerAction): boolean {
 
     state.tick++;
 
-    // Update FOV
+    // ── Phase 2: Environment reacts ──
     const cluster = getCurrentCluster(state);
     computeFOV(cluster, state.player.position);
 
@@ -866,7 +879,7 @@ export function processAction(state: GameState, action: PlayerAction): boolean {
       computeFOV(cluster, state.player.position);
     }
 
-    // Update hazards
+    // ── Phase 3: Hazards & room effects ──
     updateHazards(state);
     applyTileHazardToPlayer(state);
 
@@ -900,9 +913,7 @@ export function processAction(state: GameState, action: PlayerAction): boolean {
       }
     }
 
-    // Process other entities (speed-based turns)
-    // Use index-based loop: removeEntity() marks entities with _pendingRemoval
-    // instead of filtering mid-loop, so the array reference stays stable.
+    // ── Phase 4: Entity AI ──
     for (let i = 0; i < state.entities.length; i++) {
       const entity = state.entities[i];
       if (entity._pendingRemoval) continue;
@@ -913,17 +924,27 @@ export function processAction(state: GameState, action: PlayerAction): boolean {
         updateEntityAI(state, entity);
       }
     }
-    // Remove dead entities (coherence <= 0) — spawn smoke for any not yet handled
+
+    // ── Phase 5: Cleanup ──
+    // Catch any entities that reached coherence 0 (from player combat, hazards, etc.)
+    // but weren't explicitly removed via remove_entity intents.
     for (const e of state.entities) {
+      if (e._pendingRemoval) continue; // already handled by intent resolver
       if ((e.coherence ?? 1) <= 0 && e.id !== state.player.id) {
         state.pendingSounds.push('entity_destroy');
         if (!state.smokeEffects.some(s => s.x === e.position.x && s.y === e.position.y)) {
           const _sf = e.ai?.faction;
           state.smokeEffects.push({
             x: e.position.x, y: e.position.y,
-            fg: _sf === 'aggressive' ? '#cc4444' : _sf === 'friendly' ? '#23d2a6' : '#aaaa66',
+            fg: _sf === 'aggressive' ? '#cc4444' : _sf === 'friendly' ? '#23d2a6' : _sf === 'titan' ? '#ff44ff' : '#aaaa66',
             spawnTime: 0, // stamped by presentation layer
           });
+        }
+        if (e.ai) {
+          state.killedEntities.push({ name: e.name, kind: e.ai.kind });
+          state.markedEntities.delete(e.id);
+          dlog(state, 'entity', 'killed', `name=${e.name} kind=${e.ai.kind} pos=(${e.position.x},${e.position.y})`);
+          checkNarrativeTriggers(state, 'entity_killed', { killedFaction: e.ai.faction });
         }
         e._pendingRemoval = true;
       }
@@ -1337,13 +1358,16 @@ export function stepAutoPath(state: GameState): boolean {
   const next = state.autoPath[0];
   const cluster = getCurrentCluster(state);
 
-  // Check if next step is a closed door — bump to open it
+  // Check if next step is a closed door — bump to open it via intents
   const nextTile = cluster.tiles[next.y]?.[next.x];
   if (nextTile?.type === TileType.Door && !nextTile.doorOpen && nextTile.glyph === '+') {
     const bumpDx = next.x - state.player.position.x;
     const bumpDy = next.y - state.player.position.y;
     state.actionLog.push({ kind: 'move', dir: deltaToDir(bumpDx, bumpDy) });
-    openDoor(nextTile);
+    resolveIntents(state, [
+      { kind: 'open_door', entityId: state.player.id, at: { x: next.x, y: next.y } },
+      { kind: 'sound', id: 'door_open' },
+    ]);
     // Don't shift path — we'll walk through on the next step
     state.tick++;
     computeFOV(cluster, state.player.position);
@@ -1398,7 +1422,9 @@ export function stepAutoPath(state: GameState): boolean {
 
   const prevRoom = getPlayerRoom(state);
 
-  if (tryMove(state, dx, dy)) {
+  const moveResult = collectMoveIntents(state, dx, dy);
+  if (moveResult.acted && moveResult.intents.length > 0) {
+    resolveIntents(state, moveResult.intents);
     state.actionLog.push({ kind: 'move', dir: deltaToDir(dx, dy) });
     state.autoPath.shift();
     state.tick++;
