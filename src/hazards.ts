@@ -900,7 +900,7 @@ function updateRoomScenarios(state: GameState, cluster: Cluster) {
           // Echoes dissolve into corrupted mite fragments
           for (const ia of cluster.interactables) {
             if (ia.roomId === room.id && ia.kind === 'lost_echo') {
-              ia.echoFadeAtTime = performance.now() + 300;
+              ia.echoFadeAtTime = -300; // negative = unstamped delay
             }
           }
           addMessage(state, 'The ritual echoes destabilize — fragments erupt!', 'hazard');
@@ -921,7 +921,7 @@ function updateRoomScenarios(state: GameState, cluster: Cluster) {
           // Destroy echoes
           for (const ia of cluster.interactables) {
             if (ia.roomId === room.id && ia.kind === 'lost_echo') {
-              ia.echoFadeAtTime = performance.now();
+              ia.echoFadeAtTime = -1; // negative = unstamped, immediate fade
             }
           }
           // Remove GateKeeper
@@ -929,7 +929,7 @@ function updateRoomScenarios(state: GameState, cluster: Cluster) {
             e => e.clusterId === cluster.id && e.ai?.kind === 'gate_keeper' && posInRoom(e.position, room),
           );
           if (gk) {
-            state.smokeEffects.push({ x: gk.position.x, y: gk.position.y, fg: '#23d2a6', spawnTime: performance.now() });
+            state.smokeEffects.push({ x: gk.position.x, y: gk.position.y, fg: '#23d2a6', spawnTime: 0 });
             state.entities = state.entities.filter(e => e.id !== gk.id);
             addMessage(state, 'The Gate-Keeper collapses. The ritual consumes itself.', 'hazard');
             state.pendingGlitch = 'tear';
@@ -1052,7 +1052,7 @@ function tryFireMicroEvent(state: GameState, cluster: Cluster, room: Room) {
         addMessage(state, `${target.name} destabilises and vanishes.`, 'system');
         state.smokeEffects.push({
           x: target.position.x, y: target.position.y,
-          fg: '#aaaa66', spawnTime: performance.now(),
+          fg: '#aaaa66', spawnTime: 0, // stamped by presentation layer
         });
       }
       break;

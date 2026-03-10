@@ -16,10 +16,16 @@ import {
 import { NARRATIVE_TRIGGERS, GAME_MESSAGES } from './narrative/index';
 export { makeDamagedBitMite } from './ai';
 import { shootingAnimation } from './combat_animations';
+import {
+  DOOR_CLOSE_DELAY, CORRUPT_M_RANGE as _CORRUPT_M_RANGE,
+  PLAYER_MELEE_DAMAGE,
+  CORRUPT_M_DAMAGE, CORRUPT_M_COOLDOWN, CORRUPT_M_FREE_SHOTS, CORRUPT_M_DRAIN_PER_EXTRA,
+  CLOAK_DURATION, CLOAK_COOLDOWN, CLOAK_FREE_USES, CLOAK_DRAIN_PER_EXTRA,
+  MAX_MESSAGES, MAX_DEBUG_LOG, MAX_ACTION_LOG,
+} from './balance';
 
-const DOOR_CLOSE_DELAY = 5; // ticks before an unoccupied open door auto-closes
-export const CORRUPT_M_RANGE = 8;
-const MELEE_DAMAGE = 3; // weak unarmed strike (no module)
+export const CORRUPT_M_RANGE = _CORRUPT_M_RANGE;
+const MELEE_DAMAGE = PLAYER_MELEE_DAMAGE;
 
 /** Try to push an entity one tile away from pusher. Returns true if successful. */
 export function tryPushEntity(
@@ -424,13 +430,7 @@ export function getEntityAt(state: GameState, cluster: Cluster, x: number, y: nu
   );
 }
 
-const CORRUPT_M_DAMAGE   = 40;
-const CORRUPT_M_COOLDOWN = 10; // ticks between shots
-const CORRUPT_M_FREE_SHOTS = 2; // shots per cluster with no coherence drain
-
-const CLOAK_DURATION   = 10; // ticks of invisibility
-const CLOAK_COOLDOWN   = 25; // ticks before can reactivate
-const CLOAK_FREE_USES  = 2;  // free activations per cluster
+// Module constants imported from balance.ts
 
 function tryShoot(state: GameState, target: Position): boolean {
   const cluster = getCurrentCluster(state);
@@ -472,7 +472,7 @@ function tryShoot(state: GameState, target: Position): boolean {
   const shotCount = corrupt.clusterShotCount ?? 0;
   const overQuota = shotCount - CORRUPT_M_FREE_SHOTS + 1; // >0 means this shot drains
   if (overQuota > 0 && state.player.coherence != null && !state.godMode) {
-    const drain = overQuota * 3;
+    const drain = overQuota * CORRUPT_M_DRAIN_PER_EXTRA;
     state.player.coherence = Math.max(0, state.player.coherence - drain);
     const rolledState = pick(['heap corruption', 'memory corruption', 'buffer overflow', 'stack overflow', 'BUG', 'error'])
     addMessage(state, `[LEAK] ${rolledState} in corrupt.m — coherence drain: −${drain} (${state.player.coherence}/${state.player.maxCoherence}).`, 'hazard');
@@ -527,7 +527,7 @@ export function activateCloak(state: GameState, cloak: PlayerModule): boolean {
   const useCount = cloak.clusterUseCount ?? 0;
   const overQuota = useCount - CLOAK_FREE_USES + 1; // >0 means this use drains
   if (overQuota > 0 && state.player.coherence != null && !state.godMode) {
-    const drain = overQuota * 5;
+    const drain = overQuota * CLOAK_DRAIN_PER_EXTRA;
     state.player.coherence = Math.max(0, state.player.coherence - drain);
     const rolledState = pick(['signal leak', 'phase drift', 'sync loss', 'buffer underrun', 'echo bleed']);
     addMessage(state, `[LEAK] ${rolledState} in cloak.m — coherence drain: −${drain} (${state.player.coherence}/${state.player.maxCoherence}).`, 'hazard');
@@ -625,7 +625,7 @@ function tryMove(state: GameState, dx: number, dy: number): boolean {
           state.smokeEffects.push({
             x: bumpedEntity.position.x, y: bumpedEntity.position.y,
             fg: _sf === 'aggressive' ? '#cc4444' : _sf === 'friendly' ? '#23d2a6' : _sf === 'titan' ? '#ff44ff' : '#aaaa66',
-            spawnTime: performance.now(),
+            spawnTime: 0, // stamped by presentation layer
           });
           if (bumpedEntity.ai) {
             state.killedEntities.push({ name: bumpedEntity.name, kind: bumpedEntity.ai.kind });
@@ -780,9 +780,6 @@ function tryTransfer(state: GameState): boolean {
   state.entities = state.entities.filter(e => e.clusterId === iface.targetClusterId || e.id === state.player.id);
 
   // Cap log arrays to prevent memory bloat over long sessions
-  const MAX_MESSAGES = 500;
-  const MAX_DEBUG_LOG = 500;
-  const MAX_ACTION_LOG = 500;
   if (state.messages.length > MAX_MESSAGES) state.messages = state.messages.slice(-MAX_MESSAGES);
   if (state.debugLog.length > MAX_DEBUG_LOG) state.debugLog = state.debugLog.slice(-MAX_DEBUG_LOG);
   if (state.actionLog.length > MAX_ACTION_LOG) state.actionLog = state.actionLog.slice(-MAX_ACTION_LOG);
@@ -925,7 +922,7 @@ export function processAction(state: GameState, action: PlayerAction): boolean {
           state.smokeEffects.push({
             x: e.position.x, y: e.position.y,
             fg: _sf === 'aggressive' ? '#cc4444' : _sf === 'friendly' ? '#23d2a6' : '#aaaa66',
-            spawnTime: performance.now(),
+            spawnTime: 0, // stamped by presentation layer
           });
         }
         e._pendingRemoval = true;
@@ -1034,7 +1031,7 @@ export function hackFinalTerminal(state: GameState, terminalId: string, clusterI
   for (let i = 0; i < miteCount && i < candidates.length; i++) {
     const pos = candidates[i];
     const enemy = makeBitMite(pos, clusterId);
-    enemy.id = Date.now() % 100000 + Math.floor(random() * 1000) + i;
+    // enemy.id already assigned by makeBitMite (deterministic _nextEntityId++)
     state.entities.push(enemy);
     spawned++;
   }
@@ -1196,8 +1193,9 @@ export function executeInteractableAction(
       item.rewardTaken = true;
 
       // Lost echoes dissolve into a damaged fragment after extraction (2–5 seconds, real-time)
+      // Store negative delay so presentation layer can stamp: echoFadeAtTime = performance.now() + abs(value)
       if (item.kind === 'lost_echo') {
-        item.echoFadeAtTime = performance.now() + randInt(2000, 5000);
+        item.echoFadeAtTime = -randInt(2000, 5000); // negative = unstamped delay
       }
 
       if ((item.alertCost ?? 0) > 0) {

@@ -629,7 +629,7 @@ function removeEntity(state: GameState, target: Entity) {
   state.smokeEffects.push({
     x: target.position.x, y: target.position.y,
     fg: factionSmokeColor(target.ai?.faction),
-    spawnTime: performance.now(),
+    spawnTime: 0, // stamped by presentation layer
   });
   target._pendingRemoval = true;
   state.markedEntities.delete(target.id);

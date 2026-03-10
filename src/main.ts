@@ -156,18 +156,32 @@ function runSmokeLoop() {
   const now = performance.now();
   let needsRender = false;
 
+  // Stamp any unstamped smoke effects from game logic (spawnTime === 0)
+  for (const s of state.smokeEffects) {
+    if (s.spawnTime === 0) s.spawnTime = now;
+  }
+
   // Expire smoke effects
   const before = state.smokeEffects.length;
   state.smokeEffects = state.smokeEffects.filter(s => now - s.spawnTime < SMOKE_DURATION_MS);
   if (state.smokeEffects.length !== before) needsRender = true;
   if (state.smokeEffects.length > 0) needsRender = true;
 
-  // Check echo fades
+  // Stamp any unstamped echo fade delays from game logic (echoFadeAtTime < 0 = delay in ms)
   const cluster = state.clusters.get(state.currentClusterId);
+  if (cluster) {
+    for (const item of cluster.interactables) {
+      if (item.echoFadeAtTime != null && item.echoFadeAtTime < 0) {
+        item.echoFadeAtTime = now + Math.abs(item.echoFadeAtTime);
+      }
+    }
+  }
+
+  // Check echo fades
   if (cluster) {
     for (let i = cluster.interactables.length - 1; i >= 0; i--) {
       const item = cluster.interactables[i];
-      if (item.echoFadeAtTime != null && now >= item.echoFadeAtTime) {
+      if (item.echoFadeAtTime != null && item.echoFadeAtTime > 0 && now >= item.echoFadeAtTime) {
         state.smokeEffects.push({ x: item.position.x, y: item.position.y, fg: '#aaaa66', spawnTime: now });
         const bm = makeDamagedBitMite(item.position, cluster.id);
         state.entities.push(bm);
@@ -793,7 +807,7 @@ function renderDataArchive(item: import('./types').Interactable) {
     exitBtn.className = 'ia-choice-btn';
     exitBtn.textContent = '> [CLEAR] PURGE ARCHIVE';
     exitBtn.addEventListener('click', () => {
-      item.echoFadeAtTime = performance.now() + 800;
+      item.echoFadeAtTime = -800; // negative = delay, stamped by smoke loop
       closeInteractableOverlay();
       renderAll();
     });
