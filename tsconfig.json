@@ -15,5 +15,5 @@
     "outDir": "./dist"
   },
   "include": ["src"],
-  "exclude": ["src/sim-test.ts", "src/gen-html.ts"]
+  "exclude": ["src/tests"]
 }

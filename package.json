@@ -7,6 +7,11 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "test": "tsx src/tests/run-all.ts",
+    "test:sim": "tsx src/tests/sim-test.ts",
+    "test:dialog": "tsx src/tests/dialog-input-test.ts",
+    "test:ai": "tsx src/tests/ai-player.ts",
+    "gen-html": "tsx src/tests/gen-html.ts",
     "graph-stats": "tsx scripts/graph-stats.ts",
     "test-glitch": "tsx scripts/test-glitch.ts"
   },

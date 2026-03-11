@@ -12,20 +12,16 @@ Coherence — a cyberpunk roguelike where you play as an uploaded mind navigatin
 - `npm run build` — Type-check (`tsc`) then bundle (`vite build`)
 - `npm run preview` — Serve the production build locally
 
-No test framework is configured. No linter is configured.
+No linter is configured. Tests use a custom headless harness (no framework).
 
-Simulation tests (no browser needed):
-
-- `npx tsx src/sim-test.ts` — Run the balancing/integration test suite (headless, no browser needed)
-  - `--seeds N` — number of seeds to test (default 50)
-  - `--ticks N` — ticks to simulate per seed (default 250)
-  - `--cluster N` — cluster depth for per-seed detail table (default 0)
-
-- `npx tsx src/gen-html.ts` — Generate animated HTML map visualizations (output to `maps/`)
-  - `--seeds 1,3,7` — comma-separated seed list (default 1-5)
-  - `--cluster N` — cluster depth to render (default 3; depth 0 has no hazards)
-  - `--ticks N` — ticks to simulate (default 100)
-  - Open `maps/index.html` in a browser; spacebar/arrow keys control playback
+- `npm test` — Run all tests (dialog-input, sim-test, ai-player)
+- `npm run test:sim` — Balancing/integration sim-test (default 50 seeds, 250 ticks)
+  - `-- --seeds N` / `-- --ticks N` / `-- --cluster N`
+- `npm run test:dialog` — Dialog input unit + integration tests
+- `npm run test:ai` — AI player full-game completion tests (default 10 seeds)
+  - `-- --seeds N` / `-- --max-ticks N` / `-- --verbose`
+- `npm run gen-html` — Generate animated HTML map visualizations (output to `maps/`)
+  - `-- --seeds 1,3,7` / `-- --cluster N` / `-- --ticks N`
 
 ## Architecture
 
@@ -51,8 +47,14 @@ Simulation tests (no browser needed):
 - **glitch.ts** — Screen glitch effects: CSS effects (shake, chromatic, bars, flicker, hue) animate `#game`; canvas effects (static burst, horizontal tear, data bleed) use `GlitchRenderer.drawOver()`. Canvas effects are temporary — `renderAll()` in `main.ts` restores. `GLITCH_EFFECTS` registry used by admin panel.
 - **audio.ts** — Web Audio API singleton `soundManager`. Categories: `sfx`, `ui`, `ambient` with independent gain controls. `play()` for one-shots, `startAmbient()` for looping hazard sounds, `startAmbientOnce()` for non-looping ambient (overlay sounds). Only one ambient source at a time; crossfades on switch.
 - **narrative/** — Content modules: `terminals.ts` (terminal dialog trees per cluster), `echoes.ts` (lost echo encounters), `archives.ts` (data archive fragments), `whispers.ts` (ambient messages), `triggers.ts` (event-driven narrative beats), `epilogues.ts` (victory/death endings), `messages.ts` (system messages), `dialog.ts` (dialog node types), `index.ts` (re-exports)
+- **dialog-input.ts** — Pure (no-DOM) overlay keyboard handling (`handleOverlayKey`) and map click logic (`mapClickAction`). Consumed by main.ts; tested headlessly by `tests/dialog-input-test.ts`.
 - **editor/** — Map editor (`editor-main.ts`) with simulation playback; `serialize.ts` for map import/export
-- **sim-test.ts** — Headless balancing/integration test suite. Run with `npx tsx src/sim-test.ts`. Simulates clusters using real game logic, snapshots metrics every 10 ticks, reports connectivity/path damage/entity/alert/determinism checks across N seeds. Severity levels: CRITICAL (must pass), HIGH, MEDIUM, LOW.
+- **tests/** — All test and tool scripts (excluded from build via tsconfig):
+  - `run-all.ts` — Test suite runner (`npm test`)
+  - `sim-test.ts` — Headless balancing/integration tests. Severity levels: CRITICAL, HIGH, MEDIUM, LOW.
+  - `dialog-input-test.ts` — Dialog input unit + integration tests (walk to terminal, select choices, close)
+  - `ai-player.ts` — Deterministic bot that completes all 6 clusters. Tests reachability and determinism.
+  - `gen-html.ts` — Generates animated HTML map visualizations for visual inspection
 - **types.ts** — All type definitions, enums, constants, color palette
 
 **Key concepts:**

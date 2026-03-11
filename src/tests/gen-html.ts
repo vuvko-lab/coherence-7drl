@@ -2,21 +2,21 @@
  * Generates self-contained animated HTML map files for visual inspection.
  *
  * Usage:
- *   npx tsx src/gen-html.ts                        # seeds 1-5, cluster 3, 100 ticks
- *   npx tsx src/gen-html.ts --seeds 1,3,7          # specific seeds
- *   npx tsx src/gen-html.ts --cluster 5 --ticks 60 # deeper cluster, shorter sim
+ *   npx tsx src/tests/gen-html.ts                        # seeds 1-5, cluster 3, 100 ticks
+ *   npx tsx src/tests/gen-html.ts --seeds 1,3,7          # specific seeds
+ *   npx tsx src/tests/gen-html.ts --cluster 5 --ticks 60 # deeper cluster, shorter sim
  *
  * Output: maps/seed-N-clN.html  (open in browser, no server required)
  */
 
 import { mkdirSync, writeFileSync } from 'fs';
-import { processAction } from './game';
-import { generateCluster, placeEntryPoint } from './cluster';
-import { computeFOV } from './fov';
-import { seed as seedRng } from './rng';
-import { makeEntity } from './entity-defs';
-import { TileType, COLORS } from './types';
-import type { GameState, Entity, Cluster, Position } from './types';
+import { processAction } from '../game';
+import { generateCluster, placeEntryPoint } from '../cluster';
+import { computeFOV } from '../fov';
+import { seed as seedRng } from '../rng';
+import { makeEntity } from '../entity-defs';
+import { TileType, COLORS } from '../types';
+import type { GameState, Entity, Cluster, Position } from '../types';
 
 // ── CLI args ──
 

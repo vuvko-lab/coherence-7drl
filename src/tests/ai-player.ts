@@ -9,20 +9,20 @@
  * The AI restores coherence when low (tests game completion, not combat).
  *
  * Usage:
- *   npx tsx src/ai-player.ts                    # run seeds 1-10
- *   npx tsx src/ai-player.ts --seeds 50         # stress test
- *   npx tsx src/ai-player.ts --max-ticks 2000   # longer timeout
- *   npx tsx src/ai-player.ts --verbose          # show per-tick actions
+ *   npx tsx src/tests/ai-player.ts                    # run seeds 1-10
+ *   npx tsx src/tests/ai-player.ts --seeds 50         # stress test
+ *   npx tsx src/tests/ai-player.ts --max-ticks 2000   # longer timeout
+ *   npx tsx src/tests/ai-player.ts --verbose          # show per-tick actions
  */
 
 import {
   createGame, processAction, grantExitAccess, hackFinalTerminal,
   activateTerminal, deactivateHazardRoom, executeInteractableAction,
-} from './game';
-import { tileHazardDamage } from './hazards';
-import { saveRngState, restoreRngState } from './rng';
-import type { GameState, Cluster, Position, PlayerAction } from './types';
-import { TileType } from './types';
+} from '../game';
+import { tileHazardDamage } from '../hazards';
+import { saveRngState, restoreRngState } from '../rng';
+import type { GameState, Cluster, Position, PlayerAction } from '../types';
+import { TileType } from '../types';
 
 // ── CLI args ──
 

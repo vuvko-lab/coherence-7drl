@@ -11,6 +11,7 @@ import { FINAL_TERMINAL_CONFIRM } from './narrative/final-terminal';
 import { hasLOS } from './fov';
 import { canSee } from './ai';
 import { soundManager } from './audio';
+import { handleOverlayKey, mapClickAction } from './dialog-input';
 
 // ── Bootstrap ──
 
@@ -711,9 +712,14 @@ function openTerminalOverlay() {
 
   const closeBtn = document.createElement('button');
   closeBtn.className = 'terminal-opt-btn opt-close';
-  closeBtn.textContent = '> [ESC] disconnect';
+  closeBtn.textContent = '> [BKSP] disconnect';
   closeBtn.addEventListener('click', closeTerminalOverlay);
   terminalOptions.appendChild(closeBtn);
+
+  // Prefix terminal options with number keys
+  terminalOptions.querySelectorAll<HTMLButtonElement>('.terminal-opt-btn').forEach((btn, i) => {
+    btn.textContent = `${i + 1}${btn.textContent}`;
+  });
 
   revealLines(terminalOptions.querySelectorAll('.terminal-opt-btn'), contentEls.length * 40 + 20);
   terminalOverlay.classList.add('open');
@@ -731,7 +737,7 @@ function showFinalTerminalConfirmation(choice: 'restore' | 'jump') {
   terminalOptions.innerHTML = '';
   const closeBtn = document.createElement('button');
   closeBtn.className = 'terminal-opt-btn opt-close';
-  closeBtn.textContent = '> [ESC] disconnect';
+  closeBtn.textContent = '1> [BKSP] disconnect';
   closeBtn.addEventListener('click', closeTerminalOverlay);
   terminalOptions.appendChild(closeBtn);
 
@@ -828,6 +834,9 @@ function renderDataArchive(item: import('./types').Interactable) {
       renderAll();
     });
     iaChoices.appendChild(exitBtn);
+    iaChoices.querySelectorAll<HTMLButtonElement>('.ia-choice-btn').forEach((btn, i) => {
+      btn.textContent = `${i + 1}${btn.textContent}`;
+    });
     revealLines(iaContent.querySelectorAll('.ia-line'));
     revealLines(iaChoices.querySelectorAll('.ia-choice-btn'), 4 * 40 + 20);
     interactableOverlay.classList.add('open');
@@ -895,7 +904,7 @@ function renderDataArchive(item: import('./types').Interactable) {
 
     const exitBtn = document.createElement('button');
     exitBtn.className = 'ia-choice-btn';
-    exitBtn.textContent = '> [ESC] DISCONNECT';
+    exitBtn.textContent = '> [BKSP] DISCONNECT';
     exitBtn.addEventListener('click', () => { closeInteractableOverlay(); renderAll(); });
     iaChoices.appendChild(exitBtn);
 
@@ -921,6 +930,11 @@ function renderDataArchive(item: import('./types').Interactable) {
     });
     iaChoices.appendChild(backBtn);
   }
+
+  // Prefix archive choices with number keys
+  iaChoices.querySelectorAll<HTMLButtonElement>('.ia-choice-btn').forEach((btn, i) => {
+    btn.textContent = `${i + 1}${btn.textContent}`;
+  });
 
   revealLines(iaContent.querySelectorAll('.ia-line'));
   revealLines(iaChoices.querySelectorAll('.ia-choice-btn'),
@@ -967,6 +981,7 @@ function openInteractableOverlay() {
   revealLines(iaContent.querySelectorAll('.ia-line'));
 
   iaChoices.innerHTML = '';
+  let iaChoiceNum = 0;
   for (const choice of node.choices) {
     if (choice.requiresRewardAvailable && item.rewardTaken) continue;
     if (choice.requiresExitLocked && !cluster.exitLocked) continue;
@@ -994,13 +1009,14 @@ function openInteractableOverlay() {
       return false;
     })();
 
+    iaChoiceNum++;
     const btn = document.createElement('button');
     btn.className = 'ia-choice-btn';
     if (isDeactivatedHazard) {
-      btn.textContent = `> ${choice.label} [OVERRIDDEN]`;
+      btn.textContent = `${iaChoiceNum}> ${choice.label} [OVERRIDDEN]`;
       btn.disabled = true;
     } else {
-      btn.textContent = `> ${choice.label}`;
+      btn.textContent = `${iaChoiceNum}> ${choice.label}`;
     }
     btn.addEventListener('click', () => {
       if (choice.nodeId) {
@@ -1747,18 +1763,21 @@ function onMapClick(pos: Position) {
     if (tryShootAt(pos)) return;
   }
 
-  // Check if clicking adjacent tile — single step
-  const dx = Math.abs(pos.x - state.player.position.x);
-  const dy = Math.abs(pos.y - state.player.position.y);
+  const clickAction = mapClickAction(pos.x, pos.y, {
+    playerX: state.player.position.x,
+    playerY: state.player.position.y,
+  });
 
-  if (dx + dy === 1) {
-    const dir = pos.x > state.player.position.x ? 'right'
-      : pos.x < state.player.position.x ? 'left'
-      : pos.y > state.player.position.y ? 'down'
-      : 'up';
+  if (clickAction?.kind === 'wait') {
+    processAction(state, { kind: 'wait' });
+    renderAll();
+    return;
+  }
+
+  if (clickAction?.kind === 'move') {
     state.autoPath = [];
     renderer.setPathHighlight([]);
-    processAction(state, { kind: 'move', dir });
+    processAction(state, { kind: 'move', dir: clickAction.dir });
     renderAll();
     return;
   }
@@ -2204,32 +2223,35 @@ panelEl.addEventListener('mouseout', (e) => {
 });
 
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') {
-    if (aimMode) {
-      exitAim();
-      renderAll();
-      e.stopPropagation();
-      return;
+  const overlayState: import('./dialog-input').OverlayState = {
+    aimMode,
+    interactableOpen: interactableOverlay.classList.contains('open'),
+    terminalOpen: terminalOverlay.classList.contains('open'),
+    aboutOpen: aboutOverlay.classList.contains('open'),
+    settingsOpen: settingsOverlay.classList.contains('open'),
+    interactableEnabledCount: iaChoices.querySelectorAll<HTMLButtonElement>('.ia-choice-btn:not([disabled])').length,
+    terminalEnabledCount: terminalOptions.querySelectorAll<HTMLButtonElement>('.terminal-opt-btn:not([disabled])').length,
+  };
+
+  const action = handleOverlayKey(e.key, overlayState);
+  if (!action) return;
+
+  e.stopPropagation();
+  switch (action.kind) {
+    case 'exit_aim': exitAim(); renderAll(); break;
+    case 'close_interactable': closeInteractableOverlay(); renderAll(); break;
+    case 'close_terminal': closeTerminalOverlay(); break;
+    case 'close_about': aboutOverlay.classList.remove('open'); break;
+    case 'close_settings': settingsOverlay.classList.remove('open'); break;
+    case 'select_interactable_choice': {
+      const buttons = iaChoices.querySelectorAll<HTMLButtonElement>('.ia-choice-btn:not([disabled])');
+      buttons[action.index]?.click();
+      break;
     }
-    if (interactableOverlay.classList.contains('open')) {
-      closeInteractableOverlay();
-      renderAll();
-      e.stopPropagation();
-      return;
-    }
-    if (terminalOverlay.classList.contains('open')) {
-      closeTerminalOverlay();
-      e.stopPropagation();
-      return;
-    }
-    if (aboutOverlay.classList.contains('open')) {
-      aboutOverlay.classList.remove('open');
-      e.stopPropagation();
-      return;
-    }
-    if (settingsOverlay.classList.contains('open')) {
-      settingsOverlay.classList.remove('open');
-      e.stopPropagation();
+    case 'select_terminal_choice': {
+      const buttons = terminalOptions.querySelectorAll<HTMLButtonElement>('.terminal-opt-btn:not([disabled])');
+      buttons[action.index]?.click();
+      break;
     }
   }
 });

@@ -5,19 +5,19 @@
  * Extracts metrics to catch balance problems before playtesting.
  *
  * Usage:
- *   npx tsx src/sim-test.ts               # early cluster, seeds 1-50
- *   npx tsx src/sim-test.ts --seeds 200   # stress test
- *   npx tsx src/sim-test.ts --ticks 150   # longer simulation
+ *   npx tsx src/tests/sim-test.ts               # early cluster, seeds 1-50
+ *   npx tsx src/tests/sim-test.ts --seeds 200   # stress test
+ *   npx tsx src/tests/sim-test.ts --ticks 150   # longer simulation
  */
 
 import { writeFileSync, mkdirSync } from 'fs';
-import { createGame, processAction, sampleEntitySpawn, adminTeleportToCluster } from './game';
-import { findPath } from './pathfinding';
-import { generateCluster } from './cluster';
-import { seed as seedRng } from './rng';
-import { tileHazardDamage } from './hazards';
-import { Cluster, Position, TileType, HazardOverlayType, RoomType, RoomScenario, Faction } from './types';
-import type { GameState } from './types';
+import { createGame, processAction, sampleEntitySpawn, adminTeleportToCluster } from '../game';
+import { findPath } from '../pathfinding';
+import { generateCluster } from '../cluster';
+import { seed as seedRng } from '../rng';
+import { tileHazardDamage } from '../hazards';
+import { Cluster, Position, TileType, HazardOverlayType, RoomType, RoomScenario, Faction } from '../types';
+import type { GameState } from '../types';
 
 // ── Constants ──
 
