@@ -1,7 +1,7 @@
 import {
-  GameState, Cluster, Room, Position, TileType,
+  GameState, Cluster, Room, Position, TileType, Faction,
   CorruptionStage, CLUSTER_WIDTH, CLUSTER_HEIGHT, COLORS,
-  ALERT_SUSPICIOUS,
+  ALERT_SUSPICIOUS, ALERT_ENEMY, FACTION_RELATIONS,
 } from './types';
 import type { Intent } from './intents';
 import { addMessage } from './game';
@@ -1279,12 +1279,13 @@ function isRoomDangerous(room: Room): boolean {
 
 /** Dijkstra flood-fill from player position with weighted tile costs */
 function alertFloodFill(
+  state: GameState,
   cluster: Cluster,
   origin: Position,
   budget: number,
-): { filled: Map<string, number>; threats: { x: number; y: number; desc: string }[] } {
+): { filled: Map<string, number>; threats: { x: number; y: number; desc: string; source: 'hazard' | 'entity' }[] } {
   const filled = new Map<string, number>();
-  const threats: { x: number; y: number; desc: string }[] = [];
+  const threats: { x: number; y: number; desc: string; source: 'hazard' | 'entity' }[] = [];
   const key = (x: number, y: number) => `${x},${y}`;
 
   // Simple priority queue via sorted array (map is small: 50x30)
@@ -1361,8 +1362,30 @@ function alertFloodFill(
     }
 
     if (isThreat) {
-      threats.push({ x, y, desc: describeTileThreat(tile, room) });
+      threats.push({ x, y, desc: describeTileThreat(tile, room), source: 'hazard' });
     }
+  }
+
+  // Scan for hostile entities within the filled area
+  const hostileFactions = new Set<Faction>();
+  for (const rel of Object.entries(FACTION_RELATIONS.player ?? {})) {
+    if (rel[1] === 'attack') hostileFactions.add(rel[0] as Faction);
+  }
+  // Friendly faction becomes hostile at high alert
+  if (state.alertLevel >= ALERT_ENEMY) hostileFactions.add('friendly');
+
+  for (const entity of state.entities) {
+    if (entity.clusterId !== cluster.id) continue;
+    if (entity._pendingRemoval) continue;
+    const faction = entity.ai?.faction;
+    if (!faction || !hostileFactions.has(faction)) continue;
+    const ek = key(entity.position.x, entity.position.y);
+    if (!filled.has(ek)) continue;
+    threats.push({
+      x: entity.position.x, y: entity.position.y,
+      desc: `hostile: ${entity.name}`,
+      source: 'entity',
+    });
   }
 
   return { filled, threats };
@@ -1383,7 +1406,7 @@ export function updateAlertModule(state: GameState) {
   if (!alertMod.lastAlertTicks) alertMod.lastAlertTicks = new Map();
 
   const wasActive = alertMod.alertActive ?? false;
-  const { filled, threats } = alertFloodFill(cluster, state.player.position, ALERT_FILL_BUDGET);
+  const { filled, threats } = alertFloodFill(state, cluster, state.player.position, ALERT_FILL_BUDGET);
 
   // Store for debug overlay
   state.alertFill = filled;
@@ -1393,14 +1416,15 @@ export function updateAlertModule(state: GameState) {
   alertMod.alertActive = detected;
 
   // Post throttled alert messages — group by description
-  const threatsByDesc = new Map<string, { x: number; y: number; desc: string }>();
+  const threatsByDesc = new Map<string, { x: number; y: number; desc: string; source: 'hazard' | 'entity' }>();
   for (const t of threats) {
     if (!threatsByDesc.has(t.desc)) threatsByDesc.set(t.desc, t);
   }
-  for (const [desc, _t] of threatsByDesc) {
+  for (const [desc, t] of threatsByDesc) {
     const lastTick = alertMod.lastAlertTicks.get(desc) ?? -Infinity;
     if (state.tick - lastTick >= ALERT_THROTTLE_TICKS) {
-      addMessage(state, `alert.m ▲ ${desc}`, 'alert');
+      const style = t.source === 'entity' ? 'combat' as const : 'alert' as const;
+      addMessage(state, `alert.m ▲ ${desc}`, style);
       alertMod.lastAlertTicks.set(desc, state.tick);
     }
   }

@@ -209,7 +209,7 @@ export class Renderer {
       smokeEffects?: SmokeEffect[];
       markEffects?: import('./types').MarkEffect[];
       invisibleMode?: boolean;
-      alertThreats?: { x: number; y: number; desc: string }[];
+      alertThreats?: { x: number; y: number; desc: string; source: 'hazard' | 'entity' }[];
     },
   ) {
     if (!this.display) return;
@@ -217,10 +217,16 @@ export class Renderer {
     const tick = extras?.tick ?? 0;
     const hazardFogMarks = extras?.hazardFogMarks;
 
-    // Build alert threat tile lookup
-    const alertThreatKeys = new Set<string>();
+    // Build alert threat tile lookup (entity threats take priority for color)
+    const alertThreatKeys = new Map<string, 'hazard' | 'entity'>();
     if (extras?.alertThreats) {
-      for (const t of extras.alertThreats) alertThreatKeys.add(`${t.x},${t.y}`);
+      for (const t of extras.alertThreats) {
+        const k = `${t.x},${t.y}`;
+        // Entity source overwrites hazard; don't downgrade entity→hazard
+        if (!alertThreatKeys.has(k) || t.source === 'entity') {
+          alertThreatKeys.set(k, t.source);
+        }
+      }
     }
 
     // Build room functional tag map for lighting
@@ -302,7 +308,7 @@ export class Renderer {
           } else if (alertThreatKeys.has(tileKey)) {
             // Alert threat in unexplored area
             glyph = '!';
-            fg = '#cc2222';
+            fg = alertThreatKeys.get(tileKey) === 'entity' ? '#cc8822' : '#cc2222';
             bg = COLORS.bg;
           } else {
             glyph = ' ';
@@ -320,13 +326,13 @@ export class Renderer {
           // Alert threat in remembered (out-of-sight) area
           if (alertThreatKeys.has(tileKey)) {
             glyph = '!';
-            fg = '#cc2222';
+            fg = alertThreatKeys.get(tileKey) === 'entity' ? '#cc8822' : '#cc2222';
           }
         }
 
         // Alert threat on visible tiles — tint background
         if (isVisible && alertThreatKeys.has(tileKey)) {
-          bg = '#2a0a0a';
+          bg = alertThreatKeys.get(tileKey) === 'entity' ? '#2a1a0a' : '#2a0a0a';
         }
 
         // Aim range overlay

@@ -477,7 +477,7 @@ export interface GameState {
   showAlertOverlay: boolean;
   showEnemyVision: boolean;
   alertFill?: Map<string, number>;
-  alertThreats?: { x: number; y: number; desc: string }[];
+  alertThreats?: { x: number; y: number; desc: string; source: 'hazard' | 'entity' }[];
   openTerminal?: { terminalId: string; clusterId: number };
   openInteractable?: { id: string; clusterId: number };
   revealEffects: RevealEffect[];

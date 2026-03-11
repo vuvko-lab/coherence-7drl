@@ -73,6 +73,9 @@ interface SimSnapshot {
   factionCounts: Record<Faction, number>;
   // Room emptiness: % of rooms with no entity for 10+ consecutive ticks (after tick 20)
   emptyRoomPct: number;
+  // Alert module: does alert.m detect nearby hostile entities?
+  alertDetectsEntities: boolean;  // true if alertThreats contains at least one entity-source threat
+  alertEntityCount: number;       // number of entity-source threats in alertThreats
 }
 
 interface SeedResult {
@@ -396,6 +399,11 @@ function snapshotCluster(
     emptyRoomPct = nonHallRooms.length > 0 ? (emptyCount / nonHallRooms.length) * 100 : 0;
   }
 
+  // Alert module entity detection
+  const entityThreats = (state.alertThreats ?? []).filter(t => t.source === 'entity');
+  const alertDetectsEntities = entityThreats.length > 0;
+  const alertEntityCount = entityThreats.length;
+
   return {
     tick: state.tick,
     exitReachable,
@@ -416,6 +424,8 @@ function snapshotCluster(
     totalTiles,
     factionCounts,
     emptyRoomPct,
+    alertDetectsEntities,
+    alertEntityCount,
   };
 }
 
@@ -1083,6 +1093,25 @@ async function main() {
   });
   const avgEmptyPct = mean(finalEmptyPcts);
   printMetric(`Avg empty rooms (no entity 10+ ticks) @${TOTAL_TICKS}`, `${avgEmptyPct.toFixed(1)}%`, true, 'low');
+
+  // Alert module entity detection check: on seeds with hostile entities nearby,
+  // alert.m should detect them as entity-source threats
+  const seedsWithEntitiesAt50 = validResults.filter(r => {
+    const snap = getSnap(r, 50);
+    return snap && (snap.factionCounts.aggressive > 0 || snap.factionCounts.titan > 0);
+  });
+  const seedsWithEntityAlerts = seedsWithEntitiesAt50.filter(r => {
+    const snap = getSnap(r, 50);
+    return snap?.alertDetectsEntities;
+  });
+  const alertEntityPct = seedsWithEntitiesAt50.length > 0
+    ? seedsWithEntityAlerts.length / seedsWithEntitiesAt50.length : 1;
+  console.log('\nAlert module:');
+  printMetric(
+    'alert.m detects hostile entities @50',
+    `${seedsWithEntityAlerts.length}/${seedsWithEntitiesAt50.length} seeds with hostiles`,
+    alertEntityPct >= 0.30, 'high',
+  );
 
   // Quarantine deactivation check
   const totalQRooms = validResults.reduce((s, r) => s + r.totalQuarantine, 0);
