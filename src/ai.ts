@@ -229,7 +229,7 @@ function chroniclerAI(state: GameState, entity: Entity, cluster: Cluster): Inten
       const pos = target?.position ?? ai.lastTargetPos ?? entity.position;
 
       if (targetId !== undefined) {
-        intents.push({ kind: 'mark_entity', entityId: targetId });
+        intents.push({ kind: 'mark_entity', entityId: targetId, catalogerId: entity.id });
       }
 
       // floodFillReveal is read-only (computes positions) — safe to call here
@@ -483,7 +483,7 @@ function sentryAI(state: GameState, entity: Entity, cluster: Cluster): Intent[] 
       } else {
         intents.push(
           { kind: 'set_target', entityId: entity.id, targetId: target.id, lastTargetPos: { ...target.position } },
-          { kind: 'mark_entity', entityId: target.id },
+          { kind: 'mark_entity', entityId: target.id, catalogerId: entity.id },
         );
       }
 

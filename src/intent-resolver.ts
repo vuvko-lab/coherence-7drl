@@ -139,6 +139,12 @@ function resolveRemoveEntity(state: GameState, intent: RemoveEntityIntent): void
   if (intent.cause === 'killed') {
     state.killedEntities.push({ name: entity.name, kind: entity.ai!.kind });
     state.markedEntities.delete(entity.id);
+    // If a chronicler dies, remove all marks it created
+    if (entity.ai!.kind === 'chronicler') {
+      for (const [markedId, catalogerId] of state.markedEntities) {
+        if (catalogerId === entity.id) state.markedEntities.delete(markedId);
+      }
+    }
   }
 }
 
@@ -172,7 +178,7 @@ function resolveSetCooldown(state: GameState, intent: SetCooldownIntent): void {
 function resolveCatalog(state: GameState, intent: CatalogIntent): void {
   const target = findEntity(state, intent.targetId);
   if (!target) return;
-  state.markedEntities.add(intent.targetId);
+  state.markedEntities.set(intent.targetId, intent.catalogerId);
   // Reveal tiles around the cataloged entity
   const cluster = getCluster(state);
   for (const posKey of intent.positions) {
@@ -185,7 +191,21 @@ function resolveCatalog(state: GameState, intent: CatalogIntent): void {
 }
 
 function resolveMarkEntity(state: GameState, intent: MarkEntityIntent): void {
-  state.markedEntities.add(intent.entityId);
+  const alreadyMarked = state.markedEntities.has(intent.entityId);
+  state.markedEntities.set(intent.entityId, intent.catalogerId);
+  // Spawn converging-square animation only on first mark
+  if (!alreadyMarked) {
+    const target = findEntity(state, intent.entityId);
+    if (target) {
+      state.markEffects.push({
+        targetId: intent.entityId,
+        x: target.position.x,
+        y: target.position.y,
+        fg: '#ffee44',
+        spawnTime: 0,
+      });
+    }
+  }
 }
 
 function resolveMessage(state: GameState, intent: MessageIntent): void {

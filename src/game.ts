@@ -149,13 +149,14 @@ export function createGame(initialSeed?: number): GameState {
     animation: null,
     hazardFogMarks: new Map(),
     alertLevel: 0,
-    markedEntities: new Set(),
+    markedEntities: new Map(),
     rootPrivileges: [],
     killedEntities: [],
     finalClusterId: 5,
     collapseGlitchTiles: new Map(),
     selfPanelRevealed: false,
     smokeEffects: [],
+    markEffects: [],
     pendingSounds: [],
     firedTriggerIds: new Set(),
     corruptShotsFired: 0,
@@ -941,6 +942,12 @@ export function processAction(state: GameState, action: PlayerAction): boolean {
         if (e.ai) {
           state.killedEntities.push({ name: e.name, kind: e.ai.kind });
           state.markedEntities.delete(e.id);
+          // If a chronicler dies, remove all marks it created
+          if (e.ai.kind === 'chronicler') {
+            for (const [markedId, catalogerId] of state.markedEntities) {
+              if (catalogerId === e.id) state.markedEntities.delete(markedId);
+            }
+          }
           dlog(state, 'entity', 'killed', `name=${e.name} kind=${e.ai.kind} pos=(${e.position.x},${e.position.y})`);
           checkNarrativeTriggers(state, 'entity_killed', { killedFaction: e.ai.faction });
         }

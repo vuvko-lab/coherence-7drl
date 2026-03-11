@@ -69,7 +69,7 @@ export function findNearestHostile(
   return best;
 }
 
-/** Get all entities in cluster visible to this entity. */
+/** Get all entities in cluster visible to this entity (includes marked entities regardless of LOS). */
 function getAllVisible(state: GameState, entity: Entity, cluster: Cluster): Entity[] {
   const ai = entity.ai!;
   const result: Entity[] = [];
@@ -82,7 +82,9 @@ function getAllVisible(state: GameState, entity: Entity, cluster: Cluster): Enti
   for (const e of state.entities) {
     if (e.id === entity.id || e.clusterId !== cluster.id) continue;
     if (e._pendingRemoval) continue;
-    if (canSee(cluster, entity.position, e.position, ai.sightRadius, ai.wallPenetration)) {
+    // Marked entities are visible to all (chronicler broadcast)
+    if (state.markedEntities.has(e.id) ||
+        canSee(cluster, entity.position, e.position, ai.sightRadius, ai.wallPenetration)) {
       result.push(e);
     }
   }
@@ -314,9 +316,10 @@ export function behaviorRemoveEntity(
  * Mark an entity (for Chronicler/White-Hat broadcast).
  */
 export function behaviorMarkEntity(
+  catalogerId: number,
   targetId: number,
 ): Intent[] {
-  return [{ kind: 'mark_entity', entityId: targetId }];
+  return [{ kind: 'mark_entity', entityId: targetId, catalogerId }];
 }
 
 // ── Internal helpers ──

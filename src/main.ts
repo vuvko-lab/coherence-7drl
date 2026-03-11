@@ -3,7 +3,7 @@ import { makeEntity } from './entity-defs';
 import { setDamageParams, getDamageParams, setGenSizeOverride, clearGenSizeOverride, getGenSizeOverride, clusterScaleForId } from './cluster';
 import { Renderer, renderSelfPanel, renderLogs, renderOverviewPanel, renderMapStatusBar } from './renderer';
 import { InputHandler } from './input';
-import { PlayerAction, Position, TileType, SMOKE_DURATION_MS } from './types';
+import { PlayerAction, Position, TileType, SMOKE_DURATION_MS, MARK_DURATION_MS } from './types';
 import { generateSeed } from './rng';
 import { GLITCH_EFFECTS, initGlitch, glitchShake, glitchChromatic, glitchBarSweep, glitchStaticBurst, glitchHorizontalTear, glitchDataBleed } from './glitch';
 import { VICTORY_EPILOGUES } from './narrative/index';
@@ -168,6 +168,18 @@ function runSmokeLoop() {
   if (state.smokeEffects.length !== before) needsRender = true;
   if (state.smokeEffects.length > 0) needsRender = true;
 
+  // Stamp and expire mark effects (converging-square animation, 480ms)
+  for (const m of state.markEffects) {
+    if (m.spawnTime === 0) m.spawnTime = now;
+    // Track entity position each frame
+    const target = state.entities.find(e => e.id === m.targetId);
+    if (target) { m.x = target.position.x; m.y = target.position.y; }
+  }
+  const markBefore = state.markEffects.length;
+  state.markEffects = state.markEffects.filter(m => now - m.spawnTime < MARK_DURATION_MS);
+  if (state.markEffects.length !== markBefore) needsRender = true;
+  if (state.markEffects.length > 0) needsRender = true;
+
   // Stamp any unstamped echo fade delays from game logic (echoFadeAtTime < 0 = delay in ms)
   const cluster = state.clusters.get(state.currentClusterId);
   if (cluster) {
@@ -200,7 +212,7 @@ function runSmokeLoop() {
 
   // Keep looping while there are active effects or pending fades
   const hasPendingEcho = cluster?.interactables.some(i => i.echoFadeAtTime != null) ?? false;
-  if (state.smokeEffects.length > 0 || hasPendingEcho) {
+  if (state.smokeEffects.length > 0 || state.markEffects.length > 0 || hasPendingEcho) {
     smokeLoopId = requestAnimationFrame(runSmokeLoop);
   }
 }
@@ -1505,6 +1517,7 @@ function renderAll() {
     enemyVisionColor,
     collapseGlitchTiles: state.collapseGlitchTiles,
     smokeEffects: state.smokeEffects,
+    markEffects: state.markEffects,
     invisibleMode: state.invisibleMode,
     alertThreats: state.alertThreats,
   });

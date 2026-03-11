@@ -201,12 +201,13 @@ export class Renderer {
       revealEffects?: RevealEffect[];
       shootingEffects?: ShootingEffect[];
       hazardFogMarks?: Map<string, HazardOverlayType>;
-      markedEntities?: Set<number>;
+      markedEntities?: Map<number, number>;
       aimOverlay?: { origin: Position; radius: number; target?: Position; showCursor?: boolean };
       enemyVision?: Set<string>; // "x,y" keys of tiles visible to hovered entity
       enemyVisionColor?: string; // tint color for the vision overlay
       collapseGlitchTiles?: Map<string, { glyph: string; fg: string; expireTick: number }>;
       smokeEffects?: SmokeEffect[];
+      markEffects?: import('./types').MarkEffect[];
       invisibleMode?: boolean;
       alertThreats?: { x: number; y: number; desc: string }[];
     },
@@ -426,19 +427,15 @@ export class Renderer {
       if (entity.clusterId !== cluster.id) continue;
       const { x, y } = entity.position;
       if (x < 0 || x >= this.width || y < 0 || y >= this.height) continue;
-      const tile = cluster.tiles[y][x];
-      if (!tile.visible && !mapReveal) continue;
-      // Logic Leech invisible during stalk — only show if debug/mapReveal
-      if (entity.ai?.invisible && !mapReveal) continue;
       const isMarked = markedEntities?.has(entity.id) ?? false;
+      const tile = cluster.tiles[y][x];
+      // Marked entities are visible regardless of FOV (chronicler broadcast)
+      if (!tile.visible && !mapReveal && !isMarked) continue;
+      // Logic Leech invisible during stalk — marking overrides invisibility
+      if (entity.ai?.invisible && !mapReveal && !isMarked) continue;
       let fg = entity.fg;
-      // Marked entities get a yellow-tinted glyph (faction color kept, just desaturate/tint)
       if (isMarked) fg = '#ffee44';
       this.display.draw(x, y, entity.glyph, fg, this.bgCache[y][x]);
-      // Overlay a small ◈ marker one cell above if marked and room permits
-      if (isMarked && y > 0 && (cluster.tiles[y - 1]?.[x]?.visible || mapReveal)) {
-        this.display.draw(x, y - 1, '▲', '#ffee44', this.bgCache[y - 1]?.[x] ?? '#0a0a0a');
-      }
     }
 
     // Interactable pass — drawn on top of tiles/entities
@@ -553,6 +550,52 @@ export class Renderer {
             if (cluster.tiles[ny]?.[nx]?.type === TileType.Wall) continue;
             this.drawOver(nx, ny, diagG, s.fg);
           }
+        }
+      }
+    }
+
+    // Mark animation effects (converging square: 3×3 → 1×1 → flash)
+    if (extras?.markEffects) {
+      const now = performance.now();
+      for (const m of extras.markEffects) {
+        const elapsed = now - m.spawnTime;
+        if (elapsed < 0 || elapsed >= 480) continue;
+        const phase = Math.floor(elapsed / 160); // 0, 1, or 2
+        const alt = Math.floor(now / 80) % 2;
+
+        if (phase === 0) {
+          // 3×3 bracket corners converging inward
+          const corners: [number, number, string][] = [
+            [m.x - 1, m.y - 1, '┌'], [m.x + 1, m.y - 1, '┐'],
+            [m.x - 1, m.y + 1, '└'], [m.x + 1, m.y + 1, '┘'],
+          ];
+          const edges: [number, number, string][] = [
+            [m.x, m.y - 1, '─'], [m.x, m.y + 1, '─'],
+            [m.x - 1, m.y, '│'], [m.x + 1, m.y, '│'],
+          ];
+          const glyphs = alt === 0 ? corners : edges;
+          for (const [gx, gy, g] of glyphs) {
+            if (gx >= 0 && gx < this.width && gy >= 0 && gy < this.height) {
+              this.drawOver(gx, gy, g, m.fg);
+            }
+          }
+        } else if (phase === 1) {
+          // Orthogonal neighbors — crosshair closing in
+          const cross: [number, number, string][] = [
+            [m.x, m.y - 1, alt === 0 ? '▼' : '╷'],
+            [m.x, m.y + 1, alt === 0 ? '▲' : '╵'],
+            [m.x - 1, m.y, alt === 0 ? '▶' : '╶'],
+            [m.x + 1, m.y, alt === 0 ? '◀' : '╴'],
+          ];
+          for (const [gx, gy, g] of cross) {
+            if (gx >= 0 && gx < this.width && gy >= 0 && gy < this.height) {
+              this.drawOver(gx, gy, g, m.fg);
+            }
+          }
+        } else {
+          // Phase 2: flash on target cell
+          const flash = alt === 0 ? '✦' : '◆';
+          this.drawOver(m.x, m.y, flash, '#ffffff');
         }
       }
     }

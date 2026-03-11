@@ -253,6 +253,7 @@ export interface AlertDeltaIntent {
 export interface MarkEntityIntent {
   kind: 'mark_entity';
   entityId: number;
+  catalogerId: number;
 }
 
 // ── AI internal state (generic field setter for bookkeeping counters) ──
