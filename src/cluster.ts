@@ -2453,6 +2453,120 @@ function placeScenarios(tiles: Tile[][], rooms: Room[], interactables: Interacta
   }
 }
 
+// ── Post-placement connectivity fix ──
+
+/**
+ * After terminals and interactables are placed (which can make tiles non-walkable),
+ * verify all exit interfaces are still reachable from the entry interface.
+ * If not, relocate the blocking terminal/interactable to restore connectivity.
+ */
+function ensureExitConnectivity(
+  tiles: Tile[][], interfaces: InterfaceExit[],
+  terminals: TerminalDef[], interactables: Interactable[],
+) {
+  const H = tiles.length, W = tiles[0].length;
+
+  // Find entry (x=0) from tile grid, exits from interfaces (which only has x>0)
+  let entryPos: { x: number; y: number } | null = null;
+  for (let y = 0; y < H; y++) {
+    if (tiles[y][0]?.type === TileType.InterfaceExit) { entryPos = { x: 0, y }; break; }
+  }
+  if (!entryPos || interfaces.length === 0) return;
+
+  // BFS flood fill from entry, treating non-sealed doors as passable
+  const reachable = new Set<string>();
+  const queue: { x: number; y: number }[] = [{ x: entryPos.x, y: entryPos.y }];
+  reachable.add(`${entryPos.x},${entryPos.y}`);
+  while (queue.length > 0) {
+    const { x, y } = queue.shift()!;
+    for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+      const nx = x + dx, ny = y + dy;
+      if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
+      const k = `${nx},${ny}`;
+      if (reachable.has(k)) continue;
+      const t = tiles[ny][nx];
+      if (!t.walkable && t.type !== TileType.Door) continue;
+      reachable.add(k);
+      queue.push({ x: nx, y: ny });
+    }
+  }
+
+  // Only fix if ALL forward exits are unreachable — if at least one is reachable, the AI can use it
+  const anyReachable = interfaces.some(i => reachable.has(`${i.position.x},${i.position.y}`));
+  if (anyReachable) return;
+
+  for (const exit of interfaces) {
+    const ek = `${exit.position.x},${exit.position.y}`;
+    if (reachable.has(ek)) continue;
+
+    // Exit is unreachable — find what's blocking it
+    // Check neighbors of the exit tile for a non-walkable terminal/interactable
+    for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+      const bx = exit.position.x + dx, by = exit.position.y + dy;
+      if (bx < 0 || bx >= W || by < 0 || by >= H) continue;
+      const bt = tiles[by][bx];
+
+      if (bt.type === TileType.Terminal && bt.terminalId) {
+        const term = terminals.find(t => t.id === bt.terminalId);
+        if (term) {
+          // Find an alternative floor tile in the same room
+          // Convert this tile back to floor and relocate terminal
+          bt.type = TileType.Floor;
+          bt.glyph = '·';
+          bt.walkable = true;
+          bt.fg = '#666';
+          delete bt.terminalId;
+          // Move terminal to a different tile in its room — find nearest floor
+          let moved = false;
+          for (let r = 1; r < 5 && !moved; r++) {
+            for (const [ddx, ddy] of [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[1,-1],[-1,1],[1,1]]) {
+              const nx = bx + ddx * r, ny = by + ddy * r;
+              if (nx < 1 || nx >= W - 1 || ny < 1 || ny >= H - 1) continue;
+              const nt = tiles[ny][nx];
+              if (nt.type === TileType.Floor && nt.walkable) {
+                nt.type = TileType.Terminal;
+                nt.glyph = '◈';
+                nt.fg = '#00aaff';
+                nt.walkable = false;
+                nt.transparent = true;
+                nt.terminalId = term.id;
+                term.position = { x: nx, y: ny };
+                moved = true;
+                break;
+              }
+            }
+          }
+          break;
+        }
+      }
+
+      // Check if an interactable is blocking (non-walkable tile where interactable sits)
+      if (!bt.walkable) {
+        const ia = interactables.find(i => i.position.x === bx && i.position.y === by && !i.hidden);
+        if (ia) {
+          // Move interactable to a different tile
+          for (let r = 1; r < 5; r++) {
+            for (const [ddx, ddy] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+              const nx = bx + ddx * r, ny = by + ddy * r;
+              if (nx < 1 || nx >= W - 1 || ny < 1 || ny >= H - 1) continue;
+              const nt = tiles[ny][nx];
+              if (nt.type === TileType.Floor && nt.walkable) {
+                ia.position = { x: nx, y: ny };
+                // Restore original tile
+                bt.type = TileType.Floor;
+                bt.glyph = '·';
+                bt.walkable = true;
+                bt.fg = '#666';
+                return;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 // ── Main generation ──
 
 export function generateCluster(id: number): Cluster {
@@ -2553,6 +2667,9 @@ export function generateCluster(id: number): Cluster {
 
   // Room scenarios: thematic vignettes for clusters 1+
   if (id >= 1) placeScenarios(tiles, allRooms, interactables, id);
+
+  // Post-placement connectivity: ensure all exit interfaces remain reachable from entry
+  ensureExitConnectivity(tiles, interfaces, terminals, interactables);
 
   const cluster: Cluster = { id, width: CLUSTER_WIDTH, height: CLUSTER_HEIGHT, tiles, rooms: allRooms, interfaces, wallAdjacency, doorAdjacency, collapseMap, terminals, interactables, exitLocked: true };
 
