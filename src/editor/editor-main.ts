@@ -2,7 +2,7 @@ import { generateCluster, placeEntryPoint } from '../cluster';
 import { computeFOV } from '../fov';
 import { processAction } from '../game';
 import { seed as seedRng } from '../rng';
-import { makeChronicler, makeBitMite, makeLogicLeech, makeSentry, makeGateKeeper, makeRepairScrapper, makeTitanSpawn } from '../ai';
+import { makeEntity } from '../entity-defs';
 import { TileType, COLORS, CLUSTER_WIDTH, CLUSTER_HEIGHT } from '../types';
 import type {
   Cluster, Entity, GameState, Position, Room,
@@ -337,18 +337,8 @@ function renderEntityList() {
 
 // ── Entity Placement ──
 
-const entityFactories: Record<EntityKind, (pos: Position, clusterId: number) => Entity> = {
-  chronicler: makeChronicler,
-  bit_mite: makeBitMite,
-  logic_leech: makeLogicLeech,
-  sentry: makeSentry,
-  gate_keeper: makeGateKeeper,
-  repair_scrapper: makeRepairScrapper,
-  titan_spawn: makeTitanSpawn,
-};
-
 function placeEntity(kind: EntityKind, pos: Position) {
-  const entity = entityFactories[kind](pos, state.cluster.id);
+  const entity = makeEntity(kind, pos, state.cluster.id);
   state.entities.push(entity);
   renderEntityList();
   render();

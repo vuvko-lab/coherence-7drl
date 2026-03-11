@@ -1,14 +1,12 @@
 /**
- * Data-driven entity type definitions.
+ * Data-driven entity type definitions and factory.
  *
  * Each EntityDef declares the static properties of an entity type.
- * Factory functions in ai.ts will be migrated to use these definitions
- * so that adding a new entity type is just adding a registry entry.
+ * `makeEntity()` creates entities from the registry — adding a new
+ * entity type is just adding a registry entry.
  */
 
-import type { EntityKind, Faction } from './types';
-import { ENTITY_STATS } from './balance';
-
+import type { EntityKind, Faction, Entity, Position, AIState } from './types';
 export type AIStartState = string;
 
 export interface EntityDef {
@@ -66,11 +64,11 @@ export const ENTITY_DEFS: Record<EntityKind, EntityDef> = {
     fg: '#aaaa66',
     faction: 'neutral',
     startState: 'wander',
-    speed: ENTITY_STATS.chronicler.speed,
+    speed: 40,
     coherence: 30,
-    attackValue: ENTITY_STATS.chronicler.attackValue,
-    attackDistance: ENTITY_STATS.chronicler.attackDistance,
-    sightRadius: ENTITY_STATS.chronicler.sightRadius,
+    attackValue: 0,
+    attackDistance: 0,
+    sightRadius: 6,
     wallPenetration: 0,
     startEnergy: 0,
     states: ['wander', 'catalog', 'broadcast'],
@@ -84,11 +82,11 @@ export const ENTITY_DEFS: Record<EntityKind, EntityDef> = {
     fg: '#cc4444',
     faction: 'aggressive',
     startState: 'wander',
-    speed: ENTITY_STATS.bit_mite.speed,
-    coherence: ENTITY_STATS.bit_mite.coherence,
-    attackValue: ENTITY_STATS.bit_mite.attackValue,
-    attackDistance: ENTITY_STATS.bit_mite.attackDistance,
-    sightRadius: ENTITY_STATS.bit_mite.sightRadius,
+    speed: 12,
+    coherence: 15,
+    attackValue: 4,
+    attackDistance: 1,
+    sightRadius: 8,
     wallPenetration: 0,
     startEnergy: 0,
     states: ['wander', 'chase'],
@@ -102,11 +100,11 @@ export const ENTITY_DEFS: Record<EntityKind, EntityDef> = {
     fg: '#cc4444',
     faction: 'aggressive',
     startState: 'wall_walk',
-    speed: ENTITY_STATS.logic_leech.speed,
-    coherence: ENTITY_STATS.logic_leech.coherence,
-    attackValue: ENTITY_STATS.logic_leech.attackValue,
-    attackDistance: ENTITY_STATS.logic_leech.attackDistance,
-    sightRadius: ENTITY_STATS.logic_leech.sightRadius,
+    speed: 20,
+    coherence: 25,
+    attackValue: 12,
+    attackDistance: 1,
+    sightRadius: 15,
     wallPenetration: 2,
     startEnergy: 0,
     states: ['wall_walk', 'stalk', 'charge', 'rest'],
@@ -120,11 +118,11 @@ export const ENTITY_DEFS: Record<EntityKind, EntityDef> = {
     fg: '#23d2a6',
     faction: 'friendly',
     startState: 'patrol',
-    speed: ENTITY_STATS.sentry.speed,
-    coherence: ENTITY_STATS.sentry.coherence,
-    attackValue: ENTITY_STATS.sentry.attackValue,
-    attackDistance: ENTITY_STATS.sentry.attackDistance,
-    sightRadius: ENTITY_STATS.sentry.sightRadius,
+    speed: 20,
+    coherence: 15,
+    attackValue: 4,
+    attackDistance: 5,
+    sightRadius: 10,
     wallPenetration: 1,
     startEnergy: 0,
     states: ['patrol', 'chase', 'attack'],
@@ -138,14 +136,14 @@ export const ENTITY_DEFS: Record<EntityKind, EntityDef> = {
     fg: '#23d2a6',
     faction: 'friendly',
     startState: 'lockdown',
-    speed: ENTITY_STATS.gate_keeper.speed,
-    coherence: ENTITY_STATS.gate_keeper.coherence,
-    attackValue: ENTITY_STATS.gate_keeper.attackValue,
-    attackDistance: ENTITY_STATS.gate_keeper.attackDistance,
-    sightRadius: ENTITY_STATS.gate_keeper.sightRadius,
+    speed: 15,
+    coherence: 40,
+    attackValue: 12,
+    attackDistance: 6,
+    sightRadius: 6,
     wallPenetration: 0,
     startEnergy: 0,
-    states: ['lockdown'],
+    states: ['lockdown', 'patrol', 'chase', 'attack'],
     description: 'Friendly heavy. Pulls targets to itself and fires beams.',
   },
 
@@ -156,11 +154,11 @@ export const ENTITY_DEFS: Record<EntityKind, EntityDef> = {
     fg: '#aaaa66',
     faction: 'neutral',
     startState: 'patrol',
-    speed: ENTITY_STATS.repair_scrapper.speed,
-    coherence: ENTITY_STATS.repair_scrapper.coherence,
-    attackValue: ENTITY_STATS.repair_scrapper.attackValue,
-    attackDistance: ENTITY_STATS.repair_scrapper.attackDistance,
-    sightRadius: ENTITY_STATS.repair_scrapper.sightRadius,
+    speed: 25,
+    coherence: 35,
+    attackValue: 0,
+    attackDistance: 0,
+    sightRadius: 5,
     wallPenetration: 0,
     startEnergy: 0,
     states: ['patrol', 'repair'],
@@ -174,11 +172,11 @@ export const ENTITY_DEFS: Record<EntityKind, EntityDef> = {
     fg: '#ff44ff',
     faction: 'titan',
     startState: 'hunt',
-    speed: ENTITY_STATS.titan_spawn.speed,
-    coherence: ENTITY_STATS.titan_spawn.coherence,
-    attackValue: ENTITY_STATS.titan_spawn.attackValue,
-    attackDistance: ENTITY_STATS.titan_spawn.attackDistance,
-    sightRadius: ENTITY_STATS.titan_spawn.sightRadius,
+    speed: 15,
+    coherence: 60,
+    attackValue: 20,
+    attackDistance: 4,
+    sightRadius: 12,
     wallPenetration: 1,
     startEnergy: -400,
     states: ['hunt'],
@@ -199,4 +197,41 @@ export function factionColor(faction: Faction): string {
     case 'titan': return '#ff44ff';
     default: return '#aaaa66';
   }
+}
+
+// ── Entity factory ──
+
+let _nextEntityId = 1000;
+
+/** Get the next entity ID (shared counter for all entity creation). */
+export function nextEntityId(): number {
+  return _nextEntityId++;
+}
+
+/** Create an entity from the data-driven registry. Overrides apply on top of defaults. */
+export function makeEntity(kind: EntityKind, pos: Position, clusterId: number, overrides?: Partial<Entity>): Entity {
+  const def = ENTITY_DEFS[kind];
+  return {
+    id: _nextEntityId++,
+    name: def.name,
+    glyph: def.glyph,
+    fg: def.fg,
+    position: { ...pos },
+    clusterId,
+    speed: def.speed,
+    energy: def.startEnergy,
+    coherence: def.coherence,
+    maxCoherence: def.coherence,
+    attackDistance: def.attackDistance,
+    attackValue: def.attackValue,
+    ai: {
+      kind,
+      faction: def.faction,
+      aiState: def.startState as AIState,
+      sightRadius: def.sightRadius,
+      wallPenetration: def.wallPenetration,
+      ...(kind === 'logic_leech' ? { invisible: false } : {}),
+    },
+    ...overrides,
+  };
 }

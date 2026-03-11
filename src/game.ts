@@ -10,11 +10,9 @@ import { computeFOV, floodFillReveal, hasLOS } from './fov';
 import { findPath } from './pathfinding';
 import { updateHazards, onPlayerEnterRoom, getPlayerRoom, applyTileHazardToPlayer, updateAlertModule } from './hazards';
 import { seed as seedRng, generateSeed, random, randInt, pick, shuffle } from './rng';
-import {
-  updateEntityAI, makeChronicler, makeBitMite, makeLogicLeech, makeSentry, makePropEntity, makeGateKeeper, makeRepairScrapper, makeTitanSpawn,
-} from './ai';
+import { updateEntityAI, makePropEntity } from './ai';
 import { NARRATIVE_TRIGGERS, GAME_MESSAGES } from './narrative/index';
-export { makeDamagedBitMite } from './ai';
+import { makeEntity } from './entity-defs';
 import { shootingAnimation } from './combat_animations';
 import {
   DOOR_CLOSE_DELAY, CORRUPT_M_RANGE as _CORRUPT_M_RANGE,
@@ -245,7 +243,7 @@ function spawnClusterEntities(state: GameState, cluster: Cluster) {
       }
       shuffle(nearby);
       for (let i = 0; i < Math.min(guardCount, nearby.length); i++) {
-        spawned.push(makeBitMite(nearby[i], id));
+        spawned.push(makeEntity('bit_mite', nearby[i], id));
       }
     }
   }
@@ -301,17 +299,17 @@ function spawnClusterEntities(state: GameState, cluster: Cluster) {
 
     let entity: Entity;
     if (roll < w[0]) {
-      entity = makeBitMite(pos, id);
+      entity = makeEntity('bit_mite', pos, id);
     } else if (roll < w[0] + w[1]) {
-      entity = makeLogicLeech(pos, id);
+      entity = makeEntity('logic_leech', pos, id);
     } else if (roll < w[0] + w[1] + w[2]) {
-      entity = makeChronicler(pos, id);
+      entity = makeEntity('chronicler', pos, id);
     } else if (roll < w[0] + w[1] + w[2] + w[3]) {
-      entity = makeSentry(pos, id);
+      entity = makeEntity('sentry', pos, id);
     } else if (roll < w[0] + w[1] + w[2] + w[3] + w[4]) {
-      entity = makeGateKeeper(pos, id);
+      entity = makeEntity('gate_keeper', pos, id);
     } else {
-      entity = makeRepairScrapper(pos, id);
+      entity = makeEntity('repair_scrapper', pos, id);
     }
 
     // Apply functional tag modifiers to entity stats
@@ -328,7 +326,7 @@ function spawnClusterEntities(state: GameState, cluster: Cluster) {
     for (const p of props) {
       // Special prop tags that resolve to real entities instead of static props
       if (p.propTag === 'ritual_gatekeeper') {
-        spawned.push(makeGateKeeper(p.position, id));
+        spawned.push(makeEntity('gate_keeper', p.position, id));
       } else {
         spawned.push(makePropEntity(p.position, id, p.glyph, p.fg, p.name, p.propTag));
       }
@@ -345,7 +343,7 @@ function spawnClusterEntities(state: GameState, cluster: Cluster) {
     const titanCount = Math.min(randInt(1, 2), highCollapse.length);
     for (let ti = 0; ti < titanCount; ti++) {
       const pos = pickWalkableTile(highCollapse[ti]);
-      if (pos) spawned.push(makeTitanSpawn(pos, id));
+      if (pos) spawned.push(makeEntity('titan_spawn', pos, id));
     }
   }
 
@@ -1051,8 +1049,7 @@ export function hackFinalTerminal(state: GameState, terminalId: string, clusterI
   }
   for (let i = 0; i < miteCount && i < candidates.length; i++) {
     const pos = candidates[i];
-    const enemy = makeBitMite(pos, clusterId);
-    // enemy.id already assigned by makeBitMite (deterministic _nextEntityId++)
+    const enemy = makeEntity('bit_mite', pos, clusterId);
     state.entities.push(enemy);
     spawned++;
   }

@@ -1,4 +1,5 @@
-import { createGame, processAction, handleMapClick, stepAutoPath, addMessage, exportSave, exportDebugLog, loadSave, adminRegenCluster, adminTeleportToCluster, grantExitAccess, activateTerminal, executeInteractableAction, deactivateHazardRoom, getEntityAt, CORRUPT_M_RANGE, hackFinalTerminal, makeDamagedBitMite, activateCloak } from './game';
+import { createGame, processAction, handleMapClick, stepAutoPath, addMessage, exportSave, exportDebugLog, loadSave, adminRegenCluster, adminTeleportToCluster, grantExitAccess, activateTerminal, executeInteractableAction, deactivateHazardRoom, getEntityAt, CORRUPT_M_RANGE, hackFinalTerminal, activateCloak } from './game';
+import { makeEntity } from './entity-defs';
 import { setDamageParams, getDamageParams, setGenSizeOverride, clearGenSizeOverride, getGenSizeOverride, clusterScaleForId } from './cluster';
 import { Renderer, renderSelfPanel, renderLogs, renderOverviewPanel, renderMapStatusBar } from './renderer';
 import { InputHandler } from './input';
@@ -183,7 +184,10 @@ function runSmokeLoop() {
       const item = cluster.interactables[i];
       if (item.echoFadeAtTime != null && item.echoFadeAtTime > 0 && now >= item.echoFadeAtTime) {
         state.smokeEffects.push({ x: item.position.x, y: item.position.y, fg: '#aaaa66', spawnTime: now });
-        const bm = makeDamagedBitMite(item.position, cluster.id);
+        const bm = makeEntity('bit_mite', item.position, cluster.id, {
+          speed: 18, coherence: 5, maxCoherence: 5, attackValue: 2,
+          name: 'Corrupted Echo Fragment', fg: '#aa6644',
+        });
         state.entities.push(bm);
         addMessage(state, '...echo fragment destabilised.', 'system');
         cluster.interactables.splice(i, 1);

@@ -12,13 +12,18 @@ import type {
 import type {
   Intent, MoveIntent, OpenDoorIntent, PushEntityIntent,
   MeleeAttackIntent, RangedAttackIntent, AoeAttackIntent, PullIntent,
-  RemoveEntityIntent,
+  SpawnEntityIntent, RemoveEntityIntent,
   ChangeAIStateIntent, SetInvisibleIntent, SetTargetIntent, SetCooldownIntent,
   CatalogIntent, MarkEntityIntent,
   MessageIntent, SoundIntent, GlitchIntent, SmokeIntent, RevealIntent, ShootAnimationIntent,
   DamageTileIntent, SealDoorIntent, UnsealDoorIntent,
   DamagePlayerIntent, AlertDeltaIntent,
+  BreachTileIntent, SetTilePropsIntent, ClearOverlaysIntent, ClearTileOverlayIntent,
+  SetHazardFieldIntent, CollapseGlitchIntent, MovePlayerIntent, CloseDoorIntent,
+  MarkTileHazardIntent,
 } from './intents';
+import { TileType, COLORS } from './types';
+import { makeEntity } from './entity-defs';
 
 // ── Helpers ──
 
@@ -120,6 +125,11 @@ function resolvePull(state: GameState, intent: PullIntent): void {
   if (!tile?.walkable) return;
   if (isOccupied(state, cluster, { x: nx, y: ny })) return;
   target.position = { x: nx, y: ny };
+}
+
+function resolveSpawnEntity(state: GameState, intent: SpawnEntityIntent): void {
+  const entity = makeEntity(intent.entityKind, intent.position, intent.clusterId, intent.overrides);
+  state.entities.push(entity);
 }
 
 function resolveRemoveEntity(state: GameState, intent: RemoveEntityIntent): void {
@@ -277,6 +287,93 @@ function resolveRepairInteractable(state: GameState, intent: { kind: 'repair_int
   }
 }
 
+function resolveBreachTile(state: GameState, intent: BreachTileIntent): void {
+  const cluster = getCluster(state);
+  const tile = getTile(cluster, intent.position);
+  if (!tile) return;
+  tile.type = TileType.Floor;
+  tile.glyph = '·';
+  tile.fg = COLORS.floorFg;
+  tile.walkable = true;
+  tile.transparent = true;
+}
+
+function resolveSetTileProps(state: GameState, intent: SetTilePropsIntent): void {
+  const cluster = getCluster(state);
+  const tile = getTile(cluster, intent.position);
+  if (!tile) return;
+  const p = intent.props;
+  if (p.glyph !== undefined) tile.glyph = p.glyph;
+  if (p.fg !== undefined) tile.fg = p.fg;
+  if (p.integrity !== undefined) tile.integrity = p.integrity;
+  if (p.walkable !== undefined) tile.walkable = p.walkable;
+  if (p.transparent !== undefined) tile.transparent = p.transparent;
+}
+
+function resolveClearOverlays(state: GameState, intent: ClearOverlaysIntent): void {
+  const cluster = getCluster(state);
+  const { x1, y1, x2, y2 } = intent.region;
+  for (let y = y1; y <= y2; y++) {
+    for (let x = x1; x <= x2; x++) {
+      const tile = cluster.tiles[y]?.[x];
+      if (tile?.hazardOverlay?.type === intent.overlayType) {
+        tile.hazardOverlay = undefined;
+      }
+    }
+  }
+}
+
+function resolveClearTileOverlay(state: GameState, intent: ClearTileOverlayIntent): void {
+  const cluster = getCluster(state);
+  const tile = getTile(cluster, intent.position);
+  if (!tile) return;
+  if (intent.overlayType && tile.hazardOverlay?.type !== intent.overlayType) return;
+  tile.hazardOverlay = undefined;
+}
+
+function resolveSetHazardField(state: GameState, intent: SetHazardFieldIntent): void {
+  const cluster = getCluster(state);
+  const room = cluster.rooms.find(r => r.id === intent.roomId);
+  if (!room?.hazardState) return;
+  (room.hazardState as any)[intent.field] = intent.value;
+}
+
+function resolveCollapseGlitch(state: GameState, intent: CollapseGlitchIntent): void {
+  const key = `${intent.position.x},${intent.position.y}`;
+  state.collapseGlitchTiles.set(key, {
+    glyph: intent.glyph,
+    fg: intent.fg,
+    expireTick: intent.expireTick,
+  });
+}
+
+function resolveMovePlayer(state: GameState, intent: MovePlayerIntent): void {
+  const cluster = getCluster(state);
+  const tile = getTile(cluster, intent.to);
+  if (!tile?.walkable) return;
+  state.player.position.x = intent.to.x;
+  state.player.position.y = intent.to.y;
+}
+
+function resolveCloseDoor(state: GameState, intent: CloseDoorIntent): void {
+  const cluster = getCluster(state);
+  const tile = getTile(cluster, intent.position);
+  if (!tile || tile.type !== TileType.Door) return;
+  tile.doorOpen = false;
+  tile.walkable = false;
+  tile.transparent = false;
+  tile.glyph = tile.sealed ? '▪' : '+';
+}
+
+function resolveMarkTileHazard(state: GameState, intent: MarkTileHazardIntent): void {
+  const cluster = getCluster(state);
+  const { x, y } = intent.position;
+  const roomId = cluster.tiles[y]?.[x]?.roomId;
+  if (roomId == null || roomId < 0) return;
+  const room = cluster.rooms.find(r => r.id === roomId);
+  if (room) room.containedHazards.add(intent.hazardType as any);
+}
+
 // ── Main entry point ──
 
 /**
@@ -299,7 +396,7 @@ export function resolveIntents(state: GameState, intents: Intent[]): void {
       case 'aoe_attack':       resolveAoeAttack(state, intent); break;
       case 'pull':             resolvePull(state, intent); break;
       // Entity lifecycle
-      case 'spawn_entity':     /* Phase 2: wire to entity factory */ break;
+      case 'spawn_entity':     resolveSpawnEntity(state, intent); break;
       case 'remove_entity':    resolveRemoveEntity(state, intent); break;
       // AI state
       case 'change_ai_state':  resolveChangeAIState(state, intent); break;
@@ -320,14 +417,23 @@ export function resolveIntents(state: GameState, intents: Intent[]): void {
       case 'shoot_animation':  resolveShootAnimation(state, intent); break;
       // Hazard / room
       case 'damage_tile':      resolveDamageTile(state, intent); break;
-      case 'spread_hazard':    /* Phase 2: wire to hazard system */ break;
+      case 'spread_hazard':    /* future: wire to hazard system */ break;
+      case 'breach_tile':      resolveBreachTile(state, intent); break;
+      case 'set_tile_props':   resolveSetTileProps(state, intent); break;
+      case 'clear_overlays':   resolveClearOverlays(state, intent); break;
+      case 'clear_tile_overlay': resolveClearTileOverlay(state, intent); break;
+      case 'set_hazard_field': resolveSetHazardField(state, intent); break;
+      case 'collapse_glitch':  resolveCollapseGlitch(state, intent); break;
+      case 'move_player':      resolveMovePlayer(state, intent); break;
+      case 'close_door':       resolveCloseDoor(state, intent); break;
+      case 'mark_tile_hazard': resolveMarkTileHazard(state, intent); break;
       case 'seal_door':        resolveSealDoor(state, intent); break;
       case 'unseal_door':      resolveUnsealDoor(state, intent); break;
       case 'damage_player':    resolveDamagePlayer(state, intent); break;
       case 'alert_delta':      resolveAlertDelta(state, intent); break;
       // Interaction
-      case 'transfer':         /* Phase 3: wire to transfer logic */ break;
-      case 'activate_terminal': /* Phase 3: wire to terminal logic */ break;
+      case 'transfer':         /* future: wire to transfer logic */ break;
+      case 'activate_terminal': /* future: wire to terminal logic */ break;
       // No-op
       case 'wait':             break;
     }

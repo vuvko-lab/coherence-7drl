@@ -34,20 +34,6 @@ export const DOOR_CLOSE_DELAY = 5;          // ticks before unoccupied door auto
 
 export const ENERGY_PER_TICK = 10;          // energy all entities gain each tick
 
-// ── Entity stats ──
-// Format: [speed, coherence, attackValue, attackDistance, sightRadius]
-
-export const ENTITY_STATS = {
-  chronicler:      { speed: 40, coherence: undefined, attackValue: 0,  attackDistance: 0, sightRadius: 6  },
-  bit_mite:        { speed: 12, coherence: 15,        attackValue: 4,  attackDistance: 1, sightRadius: 8  },
-  bit_mite_damaged:{ speed: 18, coherence: 5,         attackValue: 2,  attackDistance: 1, sightRadius: 8  },
-  logic_leech:     { speed: 20, coherence: 25,        attackValue: 12, attackDistance: 1, sightRadius: 15 },
-  sentry:          { speed: 20, coherence: 15,        attackValue: 4,  attackDistance: 5, sightRadius: 10 },
-  gate_keeper:     { speed: 15, coherence: 40,        attackValue: 12, attackDistance: 6, sightRadius: 6  },
-  repair_scrapper: { speed: 25, coherence: 35,        attackValue: 0,  attackDistance: 0, sightRadius: 5  },
-  titan_spawn:     { speed: 15, coherence: 60,        attackValue: 20, attackDistance: 4, sightRadius: 12 },
-} as const;
-
 // ── Entity AI behavior ──
 
 export const LOGIC_LEECH_STALK_TICKS = 3;   // ticks spent invisible before charge

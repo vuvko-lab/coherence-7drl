@@ -166,12 +166,66 @@ export interface DamageTileIntent {
   kind: 'damage_tile';
   position: Position;
   hazardType: string;
-  stage: number;
+  stage?: number;
 }
 
 export interface SpreadHazardIntent {
   kind: 'spread_hazard';
   roomId: number;
+  hazardType: string;
+}
+
+export interface BreachTileIntent {
+  kind: 'breach_tile';
+  position: Position;
+}
+
+export interface SetTilePropsIntent {
+  kind: 'set_tile_props';
+  position: Position;
+  props: Partial<{ glyph: string; fg: string; integrity: number; walkable: boolean; transparent: boolean }>;
+}
+
+export interface ClearOverlaysIntent {
+  kind: 'clear_overlays';
+  region: { x1: number; y1: number; x2: number; y2: number };
+  overlayType: string;
+}
+
+export interface SetHazardFieldIntent {
+  kind: 'set_hazard_field';
+  roomId: number;
+  field: string;
+  value: any;
+}
+
+export interface CollapseGlitchIntent {
+  kind: 'collapse_glitch';
+  position: Position;
+  glyph: string;
+  fg: string;
+  expireTick: number;
+}
+
+export interface MovePlayerIntent {
+  kind: 'move_player';
+  to: Position;
+}
+
+export interface CloseDoorIntent {
+  kind: 'close_door';
+  position: Position;
+}
+
+export interface ClearTileOverlayIntent {
+  kind: 'clear_tile_overlay';
+  position: Position;
+  overlayType?: string; // if specified, only clear if matching
+}
+
+export interface MarkTileHazardIntent {
+  kind: 'mark_tile_hazard';
+  position: Position;
   hazardType: string;
 }
 
@@ -260,6 +314,15 @@ export type Intent =
   // Hazard / room
   | DamageTileIntent
   | SpreadHazardIntent
+  | BreachTileIntent
+  | SetTilePropsIntent
+  | ClearOverlaysIntent
+  | ClearTileOverlayIntent
+  | SetHazardFieldIntent
+  | CollapseGlitchIntent
+  | MovePlayerIntent
+  | CloseDoorIntent
+  | MarkTileHazardIntent
   | SealDoorIntent
   | UnsealDoorIntent
   | DamagePlayerIntent

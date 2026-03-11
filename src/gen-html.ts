@@ -14,7 +14,7 @@ import { processAction } from './game';
 import { generateCluster, placeEntryPoint } from './cluster';
 import { computeFOV } from './fov';
 import { seed as seedRng } from './rng';
-import { makeChronicler, makeBitMite, makeLogicLeech, makeSentry } from './ai';
+import { makeEntity } from './entity-defs';
 import { TileType, COLORS } from './types';
 import type { GameState, Entity, Cluster, Position } from './types';
 
@@ -68,7 +68,7 @@ function spawnEntities(state: GameState, cluster: Cluster) {
     const room = exitRooms.length > 0 ? exitRooms[Math.floor(Math.random() * exitRooms.length)] : pickRoom();
     if (!room) continue;
     const pos = pickWalkable(room);
-    if (pos) spawned.push(makeBitMite(pos, id));
+    if (pos) spawned.push(makeEntity('bit_mite', pos, id));
   }
 
   const peripheral = rooms.filter(r => r.tags.geometric.has('peripheral') || r.tags.geometric.has('dead_end'));
@@ -76,14 +76,14 @@ function spawnEntities(state: GameState, cluster: Cluster) {
     const pool = peripheral.length > 0 ? peripheral : rooms;
     const room = pool[Math.floor(Math.random() * pool.length)];
     const pos = pickWalkable(room);
-    if (pos) spawned.push(makeLogicLeech(pos, id));
+    if (pos) spawned.push(makeEntity('logic_leech', pos, id));
   }
 
   for (let i = 0; i < numChronicler; i++) {
     const room = pickRoom();
     if (!room) continue;
     const pos = pickWalkable(room);
-    if (pos) spawned.push(makeChronicler(pos, id));
+    if (pos) spawned.push(makeEntity('chronicler', pos, id));
   }
 
   const safe = rooms.filter(r => r.roomType === 'normal');
@@ -91,7 +91,7 @@ function spawnEntities(state: GameState, cluster: Cluster) {
     const pool = safe.length > 0 ? safe : rooms;
     const room = pool[Math.floor(Math.random() * pool.length)];
     const pos = pickWalkable(room);
-    if (pos) spawned.push(makeSentry(pos, id));
+    if (pos) spawned.push(makeEntity('sentry', pos, id));
   }
 
   const ppKey = `${state.player.position.x},${state.player.position.y}`;

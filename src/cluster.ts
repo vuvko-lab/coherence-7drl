@@ -374,25 +374,15 @@ function sampleRoomCollapse(room: Room, collapseMap: number[][]): number {
 
 // ── Hazard assignment by collapse ──
 
+import { getHazardsByTier } from './hazard-defs';
+
 type HazardTier = { type: RoomType; weight: number }[];
 
 const TIER_SAFE: HazardTier = [];
-const TIER_LOW: HazardTier = [
-  { type: 'echo_chamber', weight: 2 },
-  { type: 'quarantine', weight: 1 },
-];
-const TIER_MID: HazardTier = [
-  { type: 'unstable', weight: 2 },
-  { type: 'firewall', weight: 2 },
-];
-const TIER_HIGH: HazardTier = [
-  { type: 'trigger_trap', weight: 2 },
-  { type: 'memory_leak', weight: 2 },
-];
-const TIER_EXTREME: HazardTier = [
-  { type: 'gravity_well', weight: 2 },
-  { type: 'corrupted', weight: 2 },
-];
+const TIER_LOW: HazardTier = getHazardsByTier('low');
+const TIER_MID: HazardTier = getHazardsByTier('mid');
+const TIER_HIGH: HazardTier = getHazardsByTier('high');
+const TIER_EXTREME: HazardTier = getHazardsByTier('extreme');
 
 function weightedPick(pool: HazardTier): RoomType {
   const total = pool.reduce((s, e) => s + e.weight, 0);
