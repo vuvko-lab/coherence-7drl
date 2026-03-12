@@ -10,10 +10,10 @@ export interface OverlayState {
   terminalOpen: boolean;
   aboutOpen: boolean;
   settingsOpen: boolean;
-  /** Number of enabled (clickable) choices in the interactable overlay */
-  interactableEnabledCount: number;
-  /** Number of enabled (clickable) choices in the terminal overlay */
-  terminalEnabledCount: number;
+  /** Total number of choices in the interactable overlay */
+  interactableChoiceCount: number;
+  /** Total number of choices in the terminal overlay */
+  terminalChoiceCount: number;
 }
 
 export type OverlayAction =
@@ -41,10 +41,10 @@ export function handleOverlayKey(key: string, state: OverlayState): OverlayActio
   // Number keys select dialog choices
   if (key >= '1' && key <= '9') {
     const index = parseInt(key, 10) - 1;
-    if (state.interactableOpen && index < state.interactableEnabledCount) {
+    if (state.interactableOpen && index < state.interactableChoiceCount) {
       return { kind: 'select_interactable_choice', index };
     }
-    if (state.terminalOpen && index < state.terminalEnabledCount) {
+    if (state.terminalOpen && index < state.terminalChoiceCount) {
       return { kind: 'select_terminal_choice', index };
     }
   }

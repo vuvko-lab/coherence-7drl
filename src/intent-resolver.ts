@@ -241,12 +241,30 @@ function resolveReveal(state: GameState, intent: RevealIntent): void {
 }
 
 function resolveShootAnimation(state: GameState, intent: ShootAnimationIntent): void {
-  state.shootingEffects.push({
+  const effect = {
     from: intent.from,
     to: intent.to,
     style: intent.style,
     animationFrame: 0,
-  });
+  };
+  state.shootingEffects.push(effect);
+
+  // Accumulate into animation state so the render loop picks them up
+  if (!state.animation || !state.animation.isAnimating) {
+    const DURATIONS: Record<string, number> = { single: 200, rapid: 200, beam: 400 };
+    state.animation = {
+      isAnimating: true,
+      startTime: typeof performance !== 'undefined' ? performance.now() : Date.now(),
+      duration: DURATIONS[intent.style] ?? 200,
+      effects: [effect],
+    };
+  } else {
+    state.animation.effects.push(effect);
+    // Extend duration if the new effect needs more time
+    const DURATIONS: Record<string, number> = { single: 200, rapid: 200, beam: 400 };
+    const needed = DURATIONS[intent.style] ?? 200;
+    if (needed > state.animation.duration) state.animation.duration = needed;
+  }
 }
 
 function resolveDamageTile(state: GameState, intent: DamageTileIntent): void {
@@ -333,13 +351,27 @@ function resolveSetTileProps(state: GameState, intent: SetTilePropsIntent): void
 function resolveClearOverlays(state: GameState, intent: ClearOverlaysIntent): void {
   const cluster = getCluster(state);
   const { x1, y1, x2, y2 } = intent.region;
+  const affectedRoomIds = new Set<number>();
   for (let y = y1; y <= y2; y++) {
     for (let x = x1; x <= x2; x++) {
       const tile = cluster.tiles[y]?.[x];
       if (tile?.hazardOverlay?.type === intent.overlayType) {
         tile.hazardOverlay = undefined;
+        if (tile.roomId >= 0) affectedRoomIds.add(tile.roomId);
       }
     }
+  }
+  // Clear containedHazards for affected rooms if no tiles of this type remain
+  for (const roomId of affectedRoomIds) {
+    const room = cluster.rooms.find(r => r.id === roomId);
+    if (!room) continue;
+    let found = false;
+    for (let y = room.y; y < room.y + room.h && !found; y++) {
+      for (let x = room.x; x < room.x + room.w && !found; x++) {
+        if (cluster.tiles[y]?.[x]?.hazardOverlay?.type === intent.overlayType) found = true;
+      }
+    }
+    if (!found) room.containedHazards.delete(intent.overlayType as any);
   }
 }
 

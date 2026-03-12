@@ -13,7 +13,6 @@ import { seed as seedRng, generateSeed, random, randInt, pick, shuffle } from '.
 import { updateEntityAI, makePropEntity } from './ai';
 import { NARRATIVE_TRIGGERS, GAME_MESSAGES } from './narrative/index';
 import { makeEntity } from './entity-defs';
-import { shootingAnimation } from './combat_animations';
 import {
   DOOR_CLOSE_DELAY, CORRUPT_M_RANGE as _CORRUPT_M_RANGE,
   PLAYER_MELEE_DAMAGE,
@@ -480,9 +479,6 @@ function collectShootIntents(state: GameState, target: Position): { acted: boole
   corrupt.cooldownUntilTick = state.tick + CORRUPT_M_COOLDOWN;
   state.corruptShotsFired++;
   dlog(state, 'player', 'shoot', `target=(${target.x},${target.y}) shot#=${corrupt.clusterShotCount}`);
-
-  // Beam animation (presentation-layer, uses performance.now())
-  shootingAnimation(state, from, target, 'beam');
 
   // Build intents for combat effects
   const intents: Intent[] = [

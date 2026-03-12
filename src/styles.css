@@ -1057,14 +1057,17 @@ body {
   border-color: var(--theme-accent);
 }
 
-.terminal-opt-btn.opt-close {
-  color: #557766;
-  border-color: #334444;
+.terminal-opt-btn:disabled {
+  color: #445566;
+  border-color: #223344;
+  cursor: default;
+  opacity: 0.6;
 }
 
-.terminal-opt-btn.opt-close:hover {
-  color: #88aaaa;
-  border-color: #557766;
+.terminal-opt-btn:disabled:hover {
+  color: #445566;
+  border-color: #223344;
+  background: none;
 }
 
 /* --- Interactable overlay --- */

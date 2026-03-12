@@ -1269,7 +1269,7 @@ function isRoomDangerous(room: Room): boolean {
     case 'trigger_trap': return !hz.detonated;
     case 'corrupted': return !!(hz.corruptionTiles && hz.corruptionTiles.size > 0);
     case 'memory_leak': return (hz.floodLevel ?? 0) > 0;
-    case 'firewall': return !!hz.beams;
+    case 'firewall': return false; // danger detected via containedHazards when beam overlays are active
     case 'unstable': return !hz.coreDestroyed;
     case 'gravity_well': return true;
     case 'quarantine': return !!hz.locked;

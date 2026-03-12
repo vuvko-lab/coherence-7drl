@@ -694,11 +694,12 @@ function openTerminalOverlay() {
       const hazardRoom = cluster.rooms.find(r => r.id === override.hazardRoomId);
       const alreadyDone = hazardRoom?.roomType === 'normal';
       const btn = document.createElement('button');
-      btn.className = 'terminal-opt-btn opt-warn';
       if (alreadyDone) {
+        btn.className = 'terminal-opt-btn';
         btn.textContent = `> [OVERRIDE] ${override.label} [OVERRIDDEN]`;
         btn.disabled = true;
       } else {
+        btn.className = 'terminal-opt-btn opt-warn';
         btn.textContent = `> [OVERRIDE] ${override.label}`;
         btn.addEventListener('click', () => {
           deactivateHazardRoom(state, cluster, override.hazardRoomId);
@@ -711,7 +712,7 @@ function openTerminalOverlay() {
   }
 
   const closeBtn = document.createElement('button');
-  closeBtn.className = 'terminal-opt-btn opt-close';
+  closeBtn.className = 'terminal-opt-btn';
   closeBtn.textContent = '> [BKSP] disconnect';
   closeBtn.addEventListener('click', closeTerminalOverlay);
   terminalOptions.appendChild(closeBtn);
@@ -736,7 +737,7 @@ function showFinalTerminalConfirmation(choice: 'restore' | 'jump') {
 
   terminalOptions.innerHTML = '';
   const closeBtn = document.createElement('button');
-  closeBtn.className = 'terminal-opt-btn opt-close';
+  closeBtn.className = 'terminal-opt-btn';
   closeBtn.textContent = '1> [BKSP] disconnect';
   closeBtn.addEventListener('click', closeTerminalOverlay);
   terminalOptions.appendChild(closeBtn);
@@ -985,7 +986,9 @@ function openInteractableOverlay() {
   for (const choice of node.choices) {
     if (choice.requiresRewardAvailable && item.rewardTaken) continue;
     if (choice.requiresExitLocked && !cluster.exitLocked) continue;
-    if (choice.requiresRootPartAvailable && item.rootPartTaken) continue;
+
+    // Root part already taken: show disabled instead of hiding
+    const isRootPartTaken = choice.requiresRootPartAvailable && item.rootPartTaken;
 
     // Check if this choice targets a hazard that's already been overridden
     const isDeactivatedHazard = (() => {
@@ -1012,34 +1015,35 @@ function openInteractableOverlay() {
     iaChoiceNum++;
     const btn = document.createElement('button');
     btn.className = 'ia-choice-btn';
-    if (isDeactivatedHazard) {
-      btn.textContent = `${iaChoiceNum}> ${choice.label} [OVERRIDDEN]`;
+    if (isDeactivatedHazard || isRootPartTaken) {
+      const suffix = isRootPartTaken ? '[ACQUIRED]' : '[OVERRIDDEN]';
+      btn.textContent = `${iaChoiceNum}> ${choice.label} ${suffix}`;
       btn.disabled = true;
     } else {
       btn.textContent = `${iaChoiceNum}> ${choice.label}`;
-    }
-    btn.addEventListener('click', () => {
-      if (choice.nodeId) {
-        item.currentNodeId = choice.nodeId;
-        openInteractableOverlay();
-      } else if (choice.action) {
-        const useGlitch = choice.action === 'reveal_terminals' || choice.action === 'reveal_exits' || choice.action === 'deactivate_hazard';
-        const shouldClose = executeInteractableAction(
-          state, item.id, openInteractable.clusterId, choice.action, choice,
-        );
-        if (shouldClose) {
-          closeInteractableOverlay();
-          if (useGlitch) {
-            glitchBarSweep().then(() => renderAll());
+      btn.addEventListener('click', () => {
+        if (choice.nodeId) {
+          item.currentNodeId = choice.nodeId;
+          openInteractableOverlay();
+        } else if (choice.action) {
+          const useGlitch = choice.action === 'reveal_terminals' || choice.action === 'reveal_exits' || choice.action === 'deactivate_hazard';
+          const shouldClose = executeInteractableAction(
+            state, item.id, openInteractable.clusterId, choice.action, choice,
+          );
+          if (shouldClose) {
+            closeInteractableOverlay();
+            if (useGlitch) {
+              glitchBarSweep().then(() => renderAll());
+            } else {
+              renderAll();
+            }
           } else {
+            openInteractableOverlay(); // re-render updated node
             renderAll();
           }
-        } else {
-          openInteractableOverlay(); // re-render updated node
-          renderAll();
         }
-      }
-    });
+      });
+    }
     iaChoices.appendChild(btn);
   }
 
@@ -2229,8 +2233,8 @@ document.addEventListener('keydown', (e) => {
     terminalOpen: terminalOverlay.classList.contains('open'),
     aboutOpen: aboutOverlay.classList.contains('open'),
     settingsOpen: settingsOverlay.classList.contains('open'),
-    interactableEnabledCount: iaChoices.querySelectorAll<HTMLButtonElement>('.ia-choice-btn:not([disabled])').length,
-    terminalEnabledCount: terminalOptions.querySelectorAll<HTMLButtonElement>('.terminal-opt-btn:not([disabled])').length,
+    interactableChoiceCount: iaChoices.querySelectorAll<HTMLButtonElement>('.ia-choice-btn').length,
+    terminalChoiceCount: terminalOptions.querySelectorAll<HTMLButtonElement>('.terminal-opt-btn').length,
   };
 
   const action = handleOverlayKey(e.key, overlayState);
@@ -2244,13 +2248,13 @@ document.addEventListener('keydown', (e) => {
     case 'close_about': aboutOverlay.classList.remove('open'); break;
     case 'close_settings': settingsOverlay.classList.remove('open'); break;
     case 'select_interactable_choice': {
-      const buttons = iaChoices.querySelectorAll<HTMLButtonElement>('.ia-choice-btn:not([disabled])');
-      buttons[action.index]?.click();
+      const btn = iaChoices.querySelectorAll<HTMLButtonElement>('.ia-choice-btn')[action.index];
+      if (btn && !btn.disabled) btn.click();
       break;
     }
     case 'select_terminal_choice': {
-      const buttons = terminalOptions.querySelectorAll<HTMLButtonElement>('.terminal-opt-btn:not([disabled])');
-      buttons[action.index]?.click();
+      const btn = terminalOptions.querySelectorAll<HTMLButtonElement>('.terminal-opt-btn')[action.index];
+      if (btn && !btn.disabled) btn.click();
       break;
     }
   }

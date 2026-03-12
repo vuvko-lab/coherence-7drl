@@ -17,7 +17,7 @@ import { generateCluster } from '../cluster';
 import { seed as seedRng } from '../rng';
 import { tileHazardDamage } from '../hazards';
 import { Cluster, Position, TileType, HazardOverlayType, RoomType, RoomScenario, Faction } from '../types';
-import type { GameState } from '../types';
+import type { GameState, Entity } from '../types';
 
 // ── Constants ──
 
@@ -87,6 +87,8 @@ interface SeedResult {
   quarantineUnreachableSwitch: number; // quarantine rooms where switch exists but is unreachable
   quarantineDiagnostics: string[];  // detailed diagnostics for quarantine issues
   totalQuarantine: number;          // total quarantine rooms
+  entityBlockedRooms: number;       // rooms made unreachable by entity placement at tick 0
+  entityBlockedDiagnostics: string[]; // details of which entities block which rooms
 }
 
 // ── BFS reachability ──
@@ -132,6 +134,43 @@ function bfsReachMulti(cluster: Cluster, sources: Position[]): Set<string> {
       if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
       const nk = `${nx},${ny}`;
       if (visited.has(nk)) continue;
+      const tile = cluster.tiles[ny][nx];
+      if (!tile.walkable && tile.type !== TileType.Door) continue;
+      visited.add(nk);
+      queue.push({ x: nx, y: ny });
+    }
+  }
+  return visited;
+}
+
+/** Check if a position is adjacent to a door tile. */
+function isDoorAdjacent(cluster: Cluster, pos: Position): boolean {
+  for (const [dx, dy] of [[0,-1],[0,1],[-1,0],[1,0]]) {
+    const tile = cluster.tiles[pos.y + dy]?.[pos.x + dx];
+    if (tile?.type === TileType.Door) return true;
+  }
+  return false;
+}
+
+/** BFS reachability treating entity-occupied tiles as impassable. */
+function bfsReachBlocked(cluster: Cluster, from: Position, blocked: Set<string>): Set<string> {
+  const w = cluster.width;
+  const h = cluster.height;
+  const visited = new Set<string>();
+  const key = (p: Position) => `${p.x},${p.y}`;
+  const startKey = key(from);
+  if (blocked.has(startKey)) return visited; // entry itself is blocked
+  visited.add(startKey);
+  const queue: Position[] = [from];
+
+  while (queue.length > 0) {
+    const cur = queue.shift()!;
+    for (const [dx, dy] of [[0,-1],[0,1],[-1,0],[1,0]]) {
+      const nx = cur.x + dx;
+      const ny = cur.y + dy;
+      if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+      const nk = `${nx},${ny}`;
+      if (visited.has(nk) || blocked.has(nk)) continue;
       const tile = cluster.tiles[ny][nx];
       if (!tile.walkable && tile.type !== TileType.Door) continue;
       visited.add(nk);
@@ -431,7 +470,7 @@ function snapshotCluster(
 
 // ── Simulation ──
 
-function simulateCluster(seed: number, ticks: number, clusterId: number): { snapshots: SimSnapshot[]; genTimeMs: number; quarantineWithoutSwitch: number; quarantineUnreachableSwitch: number; quarantineDiagnostics: string[]; totalQuarantine: number } {
+function simulateCluster(seed: number, ticks: number, clusterId: number): { snapshots: SimSnapshot[]; genTimeMs: number; quarantineWithoutSwitch: number; quarantineUnreachableSwitch: number; quarantineDiagnostics: string[]; totalQuarantine: number; entityBlockedRooms: number; entityBlockedDiagnostics: string[] } {
   const t0 = performance.now();
   const state = createGame(seed);
 
@@ -449,7 +488,7 @@ function simulateCluster(seed: number, ticks: number, clusterId: number): { snap
   const genTimeMs = performance.now() - t0;
 
   if (!state.clusters.has(clusterId)) {
-    return { snapshots: [], genTimeMs, quarantineWithoutSwitch: 0, quarantineUnreachableSwitch: 0, quarantineDiagnostics: [], totalQuarantine: 0 };
+    return { snapshots: [], genTimeMs, quarantineWithoutSwitch: 0, quarantineUnreachableSwitch: 0, quarantineDiagnostics: [], totalQuarantine: 0, entityBlockedRooms: 0, entityBlockedDiagnostics: [] };
   }
 
   const cluster = state.clusters.get(clusterId)!;
@@ -594,7 +633,54 @@ function simulateCluster(seed: number, ticks: number, clusterId: number): { snap
     }
   }
 
-  return { snapshots, genTimeMs, quarantineWithoutSwitch, quarantineUnreachableSwitch, quarantineDiagnostics, totalQuarantine };
+  // Check entity-blocked doorways: only prop entities (no AI, static) truly block movement.
+  // Hostile entities can be killed, friendly/neutral AI entities can be moved aside.
+  const entityPositions = new Set<string>();
+  for (const e of state.entities) {
+    if (e.clusterId !== clusterId) continue;
+    // Props: no ai field, no coherence — they can't be attacked, pushed, or removed
+    const isProp = !e.ai && e.coherence === undefined;
+    if (isProp) {
+      entityPositions.add(`${e.position.x},${e.position.y}`);
+    }
+  }
+
+  let entityBlockedRooms = 0;
+  const entityBlockedDiagnostics: string[] = [];
+
+  if (entityPositions.size > 0) {
+    const reachableWithEntities = bfsReachBlocked(cluster, entryPos, entityPositions);
+    const reachableWithout = bfsReach(cluster, entryPos);
+
+    // Find rooms that are reachable without entities but NOT with entities
+    for (const room of cluster.rooms) {
+      let reachableWithout_ = false;
+      let reachableWith_ = false;
+      for (let y = room.y; y < room.y + room.h; y++) {
+        for (let x = room.x; x < room.x + room.w; x++) {
+          const k = `${x},${y}`;
+          if (reachableWithout.has(k)) reachableWithout_ = true;
+          if (reachableWithEntities.has(k)) reachableWith_ = true;
+        }
+      }
+      if (reachableWithout_ && !reachableWith_) {
+        entityBlockedRooms++;
+        // Find which prop entity(s) are blocking access
+        const blockingEntities = state.entities.filter(e => {
+          if (e.clusterId !== clusterId) return false;
+          const isProp = !e.ai && e.coherence === undefined;
+          if (!isProp) return false;
+          return entityPositions.has(`${e.position.x},${e.position.y}`);
+        });
+        const entNames = blockingEntities.map(e => `${e.name}@(${e.position.x},${e.position.y})`).join(', ');
+        entityBlockedDiagnostics.push(
+          `  [ENTITY BLOCKED] seed=${seed} cluster=${clusterId} room ${room.id} (${room.roomType}) — blocked by: ${entNames || 'entity on chokepoint'}`
+        );
+      }
+    }
+  }
+
+  return { snapshots, genTimeMs, quarantineWithoutSwitch, quarantineUnreachableSwitch, quarantineDiagnostics, totalQuarantine, entityBlockedRooms, entityBlockedDiagnostics };
 }
 
 // ── Determinism check ──
@@ -887,9 +973,9 @@ async function main() {
     const origLog2 = console.log;
     console.log = () => {};  // suppress cluster-gen logs during simulation runs
     for (const seed of seeds) {
-      const { snapshots, genTimeMs, quarantineWithoutSwitch, quarantineUnreachableSwitch, quarantineDiagnostics, totalQuarantine } = simulateCluster(seed, TOTAL_TICKS, cid);
+      const { snapshots, genTimeMs, quarantineWithoutSwitch, quarantineUnreachableSwitch, quarantineDiagnostics, totalQuarantine, entityBlockedRooms, entityBlockedDiagnostics } = simulateCluster(seed, TOTAL_TICKS, cid);
       const deterministic = checkDeterminism(seed);
-      cidResults.push({ seed, snapshots, genTimeMs, deterministic, quarantineWithoutSwitch, quarantineUnreachableSwitch, quarantineDiagnostics, totalQuarantine });
+      cidResults.push({ seed, snapshots, genTimeMs, deterministic, quarantineWithoutSwitch, quarantineUnreachableSwitch, quarantineDiagnostics, totalQuarantine, entityBlockedRooms, entityBlockedDiagnostics });
     }
     console.log = origLog2;
     allClusterResults.set(cid, cidResults);
@@ -1124,6 +1210,26 @@ async function main() {
   if (allQDiagnostics.length > 0) {
     console.log('\n  Quarantine diagnostics:');
     for (const line of allQDiagnostics) console.log(line);
+  }
+
+  // Entity-blocked doorways check (across ALL clusters, not just CLUSTER_ID)
+  let totalEntityBlockedSeeds = 0;
+  let totalEntityBlockedRooms = 0;
+  const allEntityBlockedDiagnostics: string[] = [];
+  let totalSeedsChecked = 0;
+  for (const [, cidResults] of allClusterResults) {
+    const valid = cidResults.filter(r => r.snapshots.length > 0);
+    totalSeedsChecked += valid.length;
+    totalEntityBlockedSeeds += valid.filter(r => r.entityBlockedRooms > 0).length;
+    totalEntityBlockedRooms += valid.reduce((s, r) => s + r.entityBlockedRooms, 0);
+    allEntityBlockedDiagnostics.push(...valid.flatMap(r => r.entityBlockedDiagnostics));
+  }
+  console.log('\nEntity placement:');
+  printMetric('Seeds with entity-blocked rooms @0 (all clusters)', `${totalEntityBlockedSeeds}/${totalSeedsChecked} seed-clusters`, totalEntityBlockedSeeds === 0, 'high');
+  printMetric('Total entity-blocked rooms @0 (all clusters)', `${totalEntityBlockedRooms}`, totalEntityBlockedRooms === 0, 'high');
+  if (allEntityBlockedDiagnostics.length > 0) {
+    console.log('\n  Entity-blocked room diagnostics:');
+    for (const line of allEntityBlockedDiagnostics) console.log(line);
   }
 
   console.log('\nSeed variance:');

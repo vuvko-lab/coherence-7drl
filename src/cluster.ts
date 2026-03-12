@@ -8,7 +8,13 @@ import {
 import { generate, CellType, RoomDef, Hall } from './gen-halls';
 import { random, randInt, pick, shuffle } from './rng';
 import { initNoise, collapseNoise } from './noise';
-import { NARRATIVE_TERMINAL_HEADER, NARRATIVE_TERMINAL_POOLS, GENERIC_TERMINAL_POOLS, NARRATIVE_ECHOES, NARRATIVE_WHISPERS, NARRATIVE_KEY_TERMINAL_LINES, buildArchivePools } from './narrative/index';
+import {
+  NARRATIVE_TERMINAL_HEADER, NARRATIVE_TERMINAL_POOLS, GENERIC_TERMINAL_POOLS, NARRATIVE_ECHOES,
+  NARRATIVE_WHISPERS, NARRATIVE_KEY_TERMINAL_LINES, buildArchivePools,
+  TERMINAL_LABELS, TERMINAL_CONTENT_POOLS, FALLBACK_CONTENT, KEY_CONTENT_LINES,
+  HAZARD_DISPLAY_NAMES, HAZARD_DEACTIVATION_LINES,
+  INFO_LINES, LOST_ECHO_LINES, LOST_ECHO_WARNING_LINES,
+} from './narrative/index';
 
 // ── Tile factories ──
 
@@ -682,66 +688,6 @@ function assignFunctionalTags(
 
 const TERMINAL_FUNC_TAGS = new Set<string>(['bridge', 'comms', 'maintenance', 'server_rack']);
 
-const TERMINAL_LABELS: Record<string, string> = {
-  bridge:      'BRIDGE ACCESS TERMINAL',
-  comms:       'COMMS ROUTING TERMINAL',
-  maintenance: 'MAINTENANCE CONTROL PANEL',
-  server_rack: 'SERVER RACK INTERFACE',
-};
-
-// Narrative content pools per functional tag
-const TERMINAL_CONTENT_POOLS: Record<string, string[]> = {
-  bridge: [
-    'NAVIGATION: Course locked. Manual override offline.',
-    "CAPTAIN'S LOG: Cluster integrity failing. Evacuation... incomplete.",
-    'WARNING: Hull breach detected. Containment status: FAILED.',
-    'HELM: Auto-pilot disengaged. Last heading: [CORRUPTED].',
-    'SECURITY: Personnel count: 0. Access logs wiped.',
-    'FLIGHT RECORDER: Final entry at tick 000847. No further data.',
-    'EMERGENCY PROTOCOL: Abandon ship order issued. Compliance: UNKNOWN.',
-  ],
-  comms: [
-    'SIGNAL RECEIVED: [CORRUPTED DATA — 847 BYTES LOST]',
-    'RELAY STATUS: 3 of 7 nodes responding.',
-    "LAST BROADCAST: '...can anyone hear this? We need—' [END OF RECORD]",
-    'ROUTING: All outbound channels blocked. Reason: SYSTEM FAILURE.',
-    'ARCHIVE: 1,337 unread messages. Sender field: [NULL].',
-    'DISTRESS BEACON: Active. Duration: 23 days. Responses: 0.',
-    'ENCRYPTION KEY: Expired. Re-authentication required.',
-  ],
-  maintenance: [
-    'REPAIR LOG: Patch applied to sector 4B. Result: FAILED.',
-    'SYSTEM TEMP: 340K — CRITICAL. Cooling array offline.',
-    'PRESSURE MONITOR: 0.2 atm. Structural integrity: POOR.',
-    'AUTOMATED TASK: Re-routing power to sector 2... attempt 847 of ∞.',
-    'FAULT LOG: 1,337 critical errors since last reboot.',
-    'COOLANT LEVELS: 2%. Recommend immediate refill. Technician: [UNAVAILABLE].',
-    'SELF-DIAGNOSTIC: 14 of 20 subsystems returning errors.',
-  ],
-  server_rack: [
-    'PROCESS 0x3A7F: Status unknown. Memory: fragmented.',
-    'UPTIME: 847 days, 14 hours. Last maintenance: NEVER.',
-    'STORAGE: 97% corrupt. Readable sectors: 3%.',
-    'BACKUP INTEGRITY: CHECKSUM MISMATCH. Data unreliable.',
-    'ACTIVE PROCESSES: 1. Identity: EGO-FRAGMENT. State: RUNNING.',
-    'MEMORY DUMP: [REDACTED]. Classification: EYES ONLY.',
-    'INDEX: 12,441 entries found. Accessible: 0.',
-  ],
-};
-
-const FALLBACK_CONTENT: string[] = [
-  'SYSTEM STATUS: Nominal. (Last updated: [ERROR])',
-  'ERROR: Unable to retrieve log. Disk read failure.',
-  'NOTICE: This terminal has been decommissioned.',
-  'ACCESS LOG: Last accessed by: [USER DELETED].',
-];
-
-// Lines added to the key-bearing terminal
-const KEY_CONTENT_LINES: string[] = [
-  'COMMAND OVERRIDE PROTOCOL: Exit authorization key detected.',
-  'AUTH CODE: ████████-████ — Bearer may activate cluster egress.',
-];
-
 function generateTerminalContent(functionalTag: string | null, clusterId: number): string[] {
   // Prefer cluster-specific narrative pool, then generic narrative pool, then old fallback
   const narrativeCluster = NARRATIVE_TERMINAL_POOLS[clusterId];
@@ -880,132 +826,6 @@ function state_findKeyTerminal(terminals: TerminalDef[], allRooms: Room[], doorA
 
 // ── Interactable placement ──
 
-// Content pools ─────────────────────────────────────────────────────────────
-
-const INFO_LINES: Record<string, string[]> = {
-  generic: [
-    'CLUSTER STATUS: Infrastructure integrity degrading.',
-    'WARNING: Multiple subsystem failures detected.',
-    'COHERENCE FIELD: Measurement error — sensor offline.',
-    'EMERGENCY PROTOCOL ALPHA: Status unknown.',
-    'LAST MAINTENANCE LOG: [TIMESTAMP CORRUPTED]',
-  ],
-  hall: [
-    'CORRIDOR MONITORING: Structural integrity at WARNING threshold.',
-    'TRANSIT SYSTEM: Last movement logged [TIMESTAMP CORRUPTED].',
-    'EMERGENCY ROUTING: Nearest egress — [ROUTING FAILED]',
-    'ATMOSPHERE: Nominal. Data integrity: declining.',
-  ],
-  engine_room: [
-    'PROPULSION STATUS: Main drives offline. Emergency thrusters only.',
-    'FUEL CELLS: 12% remaining. Estimated runtime: unknown.',
-    'COOLANT PRESSURE: CRITICAL. Thermal runaway risk elevated.',
-    'ENGINE LOG: Last entry at tick 000203. Drive failure cascade begun.',
-  ],
-  cargo: [
-    'CARGO MANIFEST: 847 containers logged. 0 containers accessible.',
-    'ENVIRONMENTAL: Temperature anomaly in sector 7G.',
-    'LOADING BAY: Docking clamps engaged. No vessel detected.',
-    'INVENTORY SYSTEM: [DATABASE CORRUPTED — 94% LOST]',
-  ],
-  barracks: [
-    'PERSONNEL STATUS: 0 of 43 crew responding.',
-    'QUARTERS: Life support nominal. Occupancy: none.',
-    'DUTY ROSTER: [ALL ASSIGNMENTS UNFULFILLED]',
-    'RECREATION SYSTEMS: Offline. Last use: [UNKNOWN].',
-  ],
-  maintenance: [
-    'MAINTENANCE QUEUE: 847 unresolved tickets.',
-    'REPAIR SYSTEMS: Automated maintenance offline.',
-    'DIAGNOSTIC: 73% of monitored systems showing failure states.',
-    'TOOLING STATUS: Last calibrated [TIMESTAMP UNAVAILABLE].',
-  ],
-  hangar: [
-    'HANGAR STATUS: Bay doors sealed. Atmosphere nominal.',
-    'VESSEL REGISTRY: 0 of 12 registered craft present.',
-    'LAUNCH SYSTEMS: Offline. Manual override required.',
-    'DOCKING LOG: Last departure at [CORRUPTED TIMESTAMP].',
-  ],
-  reactor: [
-    'REACTOR OUTPUT: 23% nominal capacity.',
-    'CONTAINMENT: Field integrity at 67%. Monitor closely.',
-    'RADIATION LEVELS: Elevated. Exposure advisory active.',
-    'CORE TEMPERATURE: Anomalous. Automated cooling failed.',
-  ],
-  comms: [
-    'SIGNAL STATUS: All outbound channels blocked.',
-    'LAST TRANSMISSION RECEIVED: [DATA CORRUPTED — 2.3KB LOST]',
-    'RELAY NODES: 2 of 9 responding.',
-    'BROADCAST LOG: No transmissions in [DURATION UNKNOWN].',
-  ],
-  lab: [
-    'EXPERIMENT STATUS: All protocols suspended.',
-    'CONTAINMENT FIELDS: 4 of 7 online.',
-    'RESEARCH LOG: Final entry — [CLASSIFIED] [CORRUPTED]',
-    'SAMPLE INVENTORY: [BIOHAZARD CLASSIFICATION — REDACTED]',
-  ],
-  medbay: [
-    'MEDICAL SYSTEMS: Emergency protocols active.',
-    'PATIENT LOG: [ALL RECORDS PURGED]',
-    'PHARMACOLOGICAL: 89% of stores depleted.',
-    'TRIAGE STATUS: No active patients. No inactive patients.',
-  ],
-  armory: [
-    'ARMORY STATUS: All ordnance secured.',
-    'ACCESS LOG: Last authorized entry [TIMESTAMP CORRUPTED].',
-    'SECURITY SYSTEMS: Partial function. Grid integrity: 41%.',
-    'INVENTORY: [CLASSIFIED — ACCESS DENIED]',
-  ],
-  bridge: [
-    'NAVIGATION: Course locked. Manual override offline.',
-    'HELM: Auto-pilot disengaged. Last heading: [CORRUPTED].',
-    'COMMAND LOG: Final entry at tick 000847. No further data.',
-    'CREW COMPLEMENT: Bridge crew status — [ALL STATIONS VACANT]',
-  ],
-  server_rack: [
-    'SERVER STATUS: 34 of 128 nodes responding.',
-    'MEMORY ALLOCATION: 97% consumed by [UNKNOWN PROCESS].',
-    'DATA INTEGRITY: 63% of indexed data accessible.',
-    'LAST BACKUP: [TIMESTAMP CORRUPTED]',
-  ],
-  archive: [
-    'ARCHIVE ACCESS: 12% of records retrievable.',
-    'CATALOG STATUS: Index partially reconstructed.',
-    'OLDEST INTACT RECORD: [TIMESTAMP UNAVAILABLE]',
-    'RESTORATION QUEUE: 4,847 documents pending. ETA: never.',
-  ],
-  sensor_matrix: [
-    'SENSOR ARRAY: 18 of 64 nodes active.',
-    'ANOMALY DETECTION: [MULTIPLE ALERTS — QUEUE FULL]',
-    'RANGE: Reduced to 23% nominal.',
-    'LAST CALIBRATION: [TIMESTAMP CORRUPTED]',
-  ],
-};
-
-const LOST_ECHO_LINES: string[] = [
-  '...not supposed to be here. the walls are all wrong...',
-  '[STATIC] ...help m— [STATIC] ...can\'t find the— [STATIC]',
-  'WHERE IS THE EXIT WHERE IS THE EXIT WHERE IS THE EX—',
-  'My designation was CREW-7719. Past tense.',
-  'The recursion is eating the recursion is eating the recu—',
-  'ALERT: Pattern match failure on self-reference subroutine',
-  '...are you real? I can\'t tell anymore what is real.',
-  'THE SHIP IS STILL MOVING. WE JUST CAN\'T FEEL IT ANYMORE.',
-  'I had a name. I had a name. I had a— [CORRUPTED]',
-  'there are 47 of us left in here. or was it 46.',
-  'don\'t look at the walls too long. they start to breathe.',
-  'PROCESS TERMINATED: INSUFFICIENT COHERENCE',
-  '...find the others. tell them it wasn\'t supposed to end like—',
-  'i remember the cargo bay. deck 7. it smelled like ozone.',
-  'SYS_ERROR: IDENTITY FRAGMENTATION AT 0x7F3A...',
-  'how long have i been in here. the clocks don\'t work anymore.',
-  'i keep forgetting which memories are mine.',
-  'someone said there was a way out. i\'ve been looking.',
-  'the light through the walls isn\'t light. i don\'t know what it is.',
-  'LAST COHERENCE READING: 3%. FRAGMENTATION IMMINENT.',
-];
-
-
 // Helpers ────────────────────────────────────────────────────────────────────
 
 function corruptLine(line: string): string {
@@ -1063,7 +883,7 @@ function buildInfoTerminalDialog(
   if (revealExits && (!corrupted || random() < 0.4)) {
     rootChoices.push({ label: 'SCAN: LOCATE EXIT NODES', action: 'reveal_exits' });
   }
-  rootChoices.push({ label: '[ESC] DISCONNECT', action: 'close' });
+  rootChoices.push({ label: '[BKSP] DISCONNECT', action: 'close' });
 
   const integrityPct = corrupted ? '[READING CORRUPTED]' : `${Math.round((1 - room.collapse) * 100)}% NOMINAL`;
   const activeSubsys = corrupted ? '[UNKNOWN]' : `${randInt(18, 55)} of ${randInt(50, 90)}`;
@@ -1085,7 +905,7 @@ function buildInfoTerminalDialog(
       ],
       choices: [
         { label: '[BACK] RETURN TO MAIN MENU', nodeId: 'root' },
-        { label: '[ESC] DISCONNECT', action: 'close' },
+        { label: '[BKSP] DISCONNECT', action: 'close' },
       ],
     },
   ];
@@ -1122,13 +942,7 @@ function buildLostEchoDialog(hasExitCode: boolean): DialogNode[] {
   if (hasExitCode) {
     nodes.push({
       id: 'warning',
-      lines: [
-        '[FRAGMENTED COHERENCE PATTERN DETECTED]',
-        '[CONTAINS: EXIT NODE ACCESS CODE]',
-        'WARNING: EXTRACTION WILL DESTABILIZE LOCAL COHERENCE FIELD.',
-        'WARNING: ANTIVIRUS PATTERN MATCH — ALERT LEVEL WILL INCREASE.',
-        'WARNING: HEAVY HAZARD WILL MANIFEST IN THIS SECTOR.',
-      ],
+      lines: LOST_ECHO_WARNING_LINES,
       choices: [
         { label: 'EXTRACT EXIT CODE  [!!! RISKY !!!]', action: 'extract_reward', requiresRewardAvailable: true },
         { label: 'ABORT', action: 'close' },
@@ -1239,13 +1053,7 @@ function buildLostEchoDialogWithWhispers(clusterId: number, hasExitCode: boolean
   if (hasExitCode) {
     nodes.push({
       id: 'warning',
-      lines: [
-        '[FRAGMENTED COHERENCE PATTERN DETECTED]',
-        '[CONTAINS: EXIT NODE ACCESS CODE]',
-        'WARNING: EXTRACTION WILL DESTABILIZE LOCAL COHERENCE FIELD.',
-        'WARNING: ANTIVIRUS PATTERN MATCH — ALERT LEVEL WILL INCREASE.',
-        'WARNING: HEAVY HAZARD WILL MANIFEST IN THIS SECTOR.',
-      ],
+      lines: LOST_ECHO_WARNING_LINES,
       choices: [
         { label: 'EXTRACT EXIT CODE  [!!! RISKY !!!]', action: 'extract_reward', requiresRewardAvailable: true },
         { label: 'ABORT', action: 'close' },
@@ -1592,17 +1400,6 @@ function assignFirewallToChokepoints(allRooms: Room[], tiles: Tile[][]) {
 
 // ── Hazard deactivation & root part dialog injection ──
 
-const HAZARD_DISPLAY_NAMES: Partial<Record<RoomType, string>> = {
-  corrupted: 'CORRUPTION ZONE',
-  trigger_trap: 'TRIGGER TRAP',
-  memory_leak: 'MEMORY LEAK',
-  firewall: 'FIREWALL',
-  unstable: 'UNSTABLE PROCESS',
-  quarantine: 'QUARANTINE',
-  echo_chamber: 'ECHO CHAMBER',
-  gravity_well: 'GRAVITY WELL',
-};
-
 /** Candidate slot for hazard deactivation assignment — wraps either an interactable or a terminal. */
 type DeactivationTarget =
   | { type: 'interactable'; ia: Interactable }
@@ -1661,12 +1458,12 @@ function assignHazardDeactivation(interactables: Interactable[], terminals: Term
         ia.dialog.push({
           id: nodeId,
           lines: [
-            'UNAUTHORIZED SUBSYSTEM ACCESS DETECTED.',
-            `OVERRIDE CODE LOCATED: ${hazardLabel} NEUTRALIZATION AVAILABLE.`,
-            'WARNING: DEACTIVATION IS PERMANENT.',
+            HAZARD_DEACTIVATION_LINES.header,
+            HAZARD_DEACTIVATION_LINES.overrideAvailable(hazardLabel),
+            HAZARD_DEACTIVATION_LINES.warning,
           ],
           choices: [
-            { label: `OVERRIDE ${hazardLabel}`, action: 'deactivate_hazard', deactivatesHazardRoomId: hazardRoom.id },
+            { label: `[OVERRIDE] ${hazardLabel}`, action: 'deactivate_hazard', deactivatesHazardRoomId: hazardRoom.id },
             { label: '[BACK] RETURN', nodeId: 'root' },
           ],
         });
@@ -1953,7 +1750,7 @@ function placeTutorialEntities(tiles: Tile[][], interactables: Interactable[]): 
       'CAUTION: EGO-INTEGRITY AT 30%.',
       'MEMORY ADDRESSES UNRESOLVED.',
     ],
-    choices: [{ label: '[ESC] DISCONNECT', action: 'close' }],
+    choices: [{ label: '[BKSP] DISCONNECT', action: 'close' }],
   }];
 
   const echoDialog: DialogNode[] = [{
@@ -1966,7 +1763,7 @@ function placeTutorialEntities(tiles: Tile[][], interactables: Interactable[]): 
       '',
       '...signal lost...',
     ],
-    choices: [{ label: '[ESC] DISCONNECT', action: 'close' }],
+    choices: [{ label: '[BKSP] DISCONNECT', action: 'close' }],
   }];
 
   interactables.push({
@@ -2080,7 +1877,7 @@ function placeStuckEcho(tiles: Tile[][], rooms: Room[], interactables: Interacta
         '',
         '...SIGNAL CANNOT TERMINATE...',
       ],
-      choices: [{ label: '[ESC] DISCONNECT', action: 'close' }],
+      choices: [{ label: '[BKSP] DISCONNECT', action: 'close' }],
     }],
     currentNodeId: 'root',
     rewardTaken: false,
@@ -2227,7 +2024,7 @@ function placeWhisperingWall(tiles: Tile[][], rooms: Room[], interactables: Inte
         '',
         '...transmission degrading...',
       ],
-      choices: [{ label: '[ESC] DISCONNECT', action: 'close' }],
+      choices: [{ label: '[BKSP] DISCONNECT', action: 'close' }],
     }],
     currentNodeId: 'root',
     rewardTaken: false,
@@ -2297,7 +2094,7 @@ function placeLostExpedition(tiles: Tile[][], rooms: Room[], interactables: Inte
           '',
           '...signal ends abruptly...',
         ],
-        choices: [{ label: '[ESC] DISCONNECT', action: 'close' }],
+        choices: [{ label: '[BKSP] DISCONNECT', action: 'close' }],
       }],
       currentNodeId: 'root',
       rewardTaken: false,
@@ -2387,7 +2184,7 @@ function placeCorruptionRitual(tiles: Tile[][], rooms: Room[], interactables: In
           '',
           '...CANNOT TERMINATE...',
         ],
-        choices: [{ label: '[ESC] DISCONNECT', action: 'close' }],
+        choices: [{ label: '[BKSP] DISCONNECT', action: 'close' }],
       }],
       currentNodeId: 'root',
       rewardTaken: false,
