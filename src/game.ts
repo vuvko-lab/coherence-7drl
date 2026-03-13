@@ -1305,6 +1305,18 @@ function updateHazardFogMarks(state: GameState, cluster: Cluster) {
 
 // ── Click-to-move ──
 
+/** Build a set of positions blocked by entities and visible interactables. */
+function buildBlockedSet(state: GameState, cluster: Cluster): Set<string> {
+  return new Set([
+    ...state.entities
+      .filter(e => e.clusterId === cluster.id)
+      .map(e => `${e.position.x},${e.position.y}`),
+    ...cluster.interactables
+      .filter(i => !i.hidden)
+      .map(i => `${i.position.x},${i.position.y}`),
+  ]);
+}
+
 export function handleMapClick(state: GameState, target: Position): Position[] {
   const cluster = getCurrentCluster(state);
 
@@ -1313,6 +1325,8 @@ export function handleMapClick(state: GameState, target: Position): Position[] {
     state.autoPath = [];
     return [];
   }
+
+  const blocked = buildBlockedSet(state, cluster);
 
   // Click on a terminal: if adjacent open it, otherwise pathfind to adjacent
   const tile = cluster.tiles[target.y]?.[target.x];
@@ -1329,7 +1343,7 @@ export function handleMapClick(state: GameState, target: Position): Position[] {
       .filter(p => cluster.tiles[p.y]?.[p.x]?.walkable);
     let best: Position[] = [];
     for (const a of adj) {
-      const p = findPath(cluster, pp, a);
+      const p = findPath(cluster, pp, a, blocked);
       if (p && p.length > 0 && (best.length === 0 || p.length < best.length)) best = p;
     }
     state.autoPath = best;
@@ -1342,7 +1356,7 @@ export function handleMapClick(state: GameState, target: Position): Position[] {
     return [];
   }
 
-  const path = findPath(cluster, state.player.position, target);
+  const path = findPath(cluster, state.player.position, target, blocked);
   if (path && path.length > 0) {
     state.autoPath = path;
     return path;
@@ -1357,6 +1371,7 @@ export function stepAutoPath(state: GameState): boolean {
 
   const next = state.autoPath[0];
   const cluster = getCurrentCluster(state);
+  const prevCoherence = state.player.coherence ?? 100;
 
   // Check if next step is a closed door — bump to open it via intents
   const nextTile = cluster.tiles[next.y]?.[next.x];
@@ -1376,6 +1391,12 @@ export function stepAutoPath(state: GameState): boolean {
     applyTileHazardToPlayer(state);
     updateAlertModule(state);
     updateCloak(state);
+
+    // Stop if player took damage
+    if ((state.player.coherence ?? 100) < prevCoherence) {
+      state.autoPath = [];
+      return true;
+    }
     return true;
   }
 
@@ -1386,28 +1407,19 @@ export function stepAutoPath(state: GameState): boolean {
     return false;
   }
 
-  // If next tile has a non-hostile entity or interactable (and it's not the destination), reroute
+  // Check if any tile on the path is now blocked by an entity or interactable — reroute
   const dest = state.autoPath[state.autoPath.length - 1];
-  const isDestination = next.x === dest.x && next.y === dest.y;
+  const blocked = buildBlockedSet(state, cluster);
 
-  const blockerEntity = state.entities.find(
-    e => e.clusterId === cluster.id && e.position.x === next.x && e.position.y === next.y
-  );
-  const blockerInteractable = !isDestination && cluster.interactables.find(
-    i => i.position.x === next.x && i.position.y === next.y && !i.hidden
-  );
+  const pathBlocked = state.autoPath.some(p => {
+    const k = `${p.x},${p.y}`;
+    if (!blocked.has(k)) return false;
+    // Allow walking to the destination even if blocked
+    if (p.x === dest.x && p.y === dest.y) return false;
+    return true;
+  });
 
-  if (blockerInteractable || (blockerEntity && FACTION_RELATIONS['player']?.[blockerEntity.ai?.faction ?? 'neutral'] !== 'attack')) {
-    const blocked = new Set(
-      [
-        ...state.entities
-          .filter(e => e.clusterId === cluster.id)
-          .map(e => `${e.position.x},${e.position.y}`),
-        ...cluster.interactables
-          .filter(i => !i.hidden)
-          .map(i => `${i.position.x},${i.position.y}`),
-      ]
-    );
+  if (pathBlocked) {
     const newPath = findPath(cluster, state.player.position, dest, blocked);
     if (newPath && newPath.length > 0) {
       state.autoPath = newPath;
@@ -1440,6 +1452,12 @@ export function stepAutoPath(state: GameState): boolean {
     applyTileHazardToPlayer(state);
     updateAlertModule(state);
     updateCloak(state);
+
+    // Stop if player took damage
+    if ((state.player.coherence ?? 100) < prevCoherence) {
+      state.autoPath = [];
+      return true;
+    }
 
     return true;
   }

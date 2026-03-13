@@ -731,7 +731,7 @@ body {
   display: none;
   position: fixed;
   inset: 0;
-  z-index: 100;
+  z-index: 500;
   background: rgba(0, 0, 0, 0.7);
   justify-content: center;
   align-items: flex-start;
