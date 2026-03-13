@@ -2,21 +2,21 @@
  * Generates self-contained animated HTML map files for visual inspection.
  *
  * Usage:
- *   npx tsx src/gen-html.ts                        # seeds 1-5, cluster 3, 100 ticks
- *   npx tsx src/gen-html.ts --seeds 1,3,7          # specific seeds
- *   npx tsx src/gen-html.ts --cluster 5 --ticks 60 # deeper cluster, shorter sim
+ *   npx tsx src/tests/gen-html.ts                        # seeds 1-5, cluster 3, 100 ticks
+ *   npx tsx src/tests/gen-html.ts --seeds 1,3,7          # specific seeds
+ *   npx tsx src/tests/gen-html.ts --cluster 5 --ticks 60 # deeper cluster, shorter sim
  *
  * Output: maps/seed-N-clN.html  (open in browser, no server required)
  */
 
 import { mkdirSync, writeFileSync } from 'fs';
-import { processAction } from './game';
-import { generateCluster, placeEntryPoint } from './cluster';
-import { computeFOV } from './fov';
-import { seed as seedRng } from './rng';
-import { makeChronicler, makeBitMite, makeLogicLeech, makeSentry } from './ai';
-import { TileType, COLORS } from './types';
-import type { GameState, Entity, Cluster, Position } from './types';
+import { processAction } from '../game';
+import { generateCluster, placeEntryPoint } from '../cluster';
+import { computeFOV } from '../fov';
+import { seed as seedRng } from '../rng';
+import { makeEntity } from '../entity-defs';
+import { TileType, COLORS } from '../types';
+import type { GameState, Entity, Cluster, Position } from '../types';
 
 // ── CLI args ──
 
@@ -68,7 +68,7 @@ function spawnEntities(state: GameState, cluster: Cluster) {
     const room = exitRooms.length > 0 ? exitRooms[Math.floor(Math.random() * exitRooms.length)] : pickRoom();
     if (!room) continue;
     const pos = pickWalkable(room);
-    if (pos) spawned.push(makeBitMite(pos, id));
+    if (pos) spawned.push(makeEntity('bit_mite', pos, id));
   }
 
   const peripheral = rooms.filter(r => r.tags.geometric.has('peripheral') || r.tags.geometric.has('dead_end'));
@@ -76,14 +76,14 @@ function spawnEntities(state: GameState, cluster: Cluster) {
     const pool = peripheral.length > 0 ? peripheral : rooms;
     const room = pool[Math.floor(Math.random() * pool.length)];
     const pos = pickWalkable(room);
-    if (pos) spawned.push(makeLogicLeech(pos, id));
+    if (pos) spawned.push(makeEntity('logic_leech', pos, id));
   }
 
   for (let i = 0; i < numChronicler; i++) {
     const room = pickRoom();
     if (!room) continue;
     const pos = pickWalkable(room);
-    if (pos) spawned.push(makeChronicler(pos, id));
+    if (pos) spawned.push(makeEntity('chronicler', pos, id));
   }
 
   const safe = rooms.filter(r => r.roomType === 'normal');
@@ -91,7 +91,7 @@ function spawnEntities(state: GameState, cluster: Cluster) {
     const pool = safe.length > 0 ? safe : rooms;
     const room = pool[Math.floor(Math.random() * pool.length)];
     const pos = pickWalkable(room);
-    if (pos) spawned.push(makeSentry(pos, id));
+    if (pos) spawned.push(makeEntity('sentry', pos, id));
   }
 
   const ppKey = `${state.player.position.x},${state.player.position.y}`;
@@ -149,13 +149,14 @@ function createStateForCluster(seed: number, clusterId: number): GameState {
     animation: null,
     hazardFogMarks: new Map(),
     alertLevel: 0,
-    markedEntities: new Set(),
+    markedEntities: new Map(),
     rootPrivileges: [],
     killedEntities: [],
     finalClusterId: 5,
     collapseGlitchTiles: new Map(),
     selfPanelRevealed: true,
     smokeEffects: [],
+    markEffects: [],
     pendingSounds: [],
     firedTriggerIds: new Set(),
     corruptShotsFired: 0,

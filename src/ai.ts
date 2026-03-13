@@ -2,10 +2,10 @@ import {
   GameState, Entity, Cluster, Position, TileType, Faction,
   FACTION_RELATIONS, ALERT_ENEMY,
 } from './types';
-import { shootingAnimation } from './combat_animations';
+import type { Intent } from './intents';
+import { resolveIntents } from './intent-resolver';
 import { findPath } from './pathfinding';
 import { floodFillReveal } from './fov';
-import { tryPushEntity } from './game';
 import { random, pick, shuffle } from './rng';
 
 // ── Helpers ──
@@ -76,471 +76,7 @@ function wallWalkStep(cluster: Cluster, pos: Position): Position | null {
   return randomWalkStep(cluster, pos);
 }
 
-function move(entity: Entity, cluster: Cluster, target: Position, state?: GameState): boolean {
-  const tile = cluster.tiles[target.y]?.[target.x];
-  if (!tile) return false;
-  if (!tile.walkable) {
-    if (tile.type === TileType.Door && tile.glyph !== '▪') {
-      // Open normal closed door (not sealed quarantine doors)
-      tile.doorOpen = true;
-      tile.walkable = true;
-      tile.transparent = true;
-      tile.glyph = '▯';
-      tile.doorCloseTick = undefined;
-      return true; // used turn to open door, don't move yet
-    }
-    return false;
-  }
-  // Block movement onto interactable positions (terminals, echoes, archives are solid)
-  if (cluster.interactables.some(ia => ia.position.x === target.x && ia.position.y === target.y)) {
-    return false;
-  }
-
-  // Check for entity at target position
-  if (state) {
-    const occupant = state.entities.find(
-      e => e.id !== entity.id && e.clusterId === cluster.id
-        && e.position.x === target.x && e.position.y === target.y,
-    );
-    if (occupant) {
-      // Same faction: try to push aside
-      if (occupant.ai?.faction === entity.ai?.faction) {
-        tryPushEntity(state, cluster, occupant, entity.position);
-        // Continue to move entity even if push failed (occupant absorbs the bump)
-      } else {
-        return false; // Different faction: blocked
-      }
-    }
-  }
-  entity.position = { ...target };
-  return true;
-}
-
-function addAiMessage(state: GameState, text: string, type: 'normal' | 'system' | 'hazard' | 'alert' | 'combat' = 'normal', playerInvolved = true) {
-  if (!playerInvolved && !state.debugMode) return;
-  state.messages.push({ text, type, tick: state.tick });
-}
-
-// ── Chronicler (neutral) ──
-// Speed 40 (slow). Wanders → catalogs target → broadcasts reveal+mark → wanders
-
-function updateChronicler(state: GameState, entity: Entity, cluster: Cluster) {
-  const ai = entity.ai!;
-
-  switch (ai.aiState) {
-    case 'wander': {
-      // Look for any entity to catalog (player or other)
-      const targets = getAllEntitiesInCluster(state, cluster);
-      for (const t of targets) {
-        if (t.id === entity.id) continue;
-        if (canSee(cluster, entity.position, t.position, ai.sightRadius, ai.wallPenetration)) {
-          ai.targetId = t.id;
-          ai.catalogTicks = 0;
-          ai.aiState = 'catalog';
-          return;
-        }
-      }
-      // Wander
-      const step = randomWalkStep(cluster, entity.position);
-      if (step) move(entity, cluster, step, state);
-      break;
-    }
-
-    case 'catalog': {
-      const target = getEntityById(state, ai.targetId);
-      if (!target || target.clusterId !== entity.clusterId) {
-        ai.aiState = 'wander';
-        ai.targetId = undefined;
-        return;
-      }
-      if (!canSee(cluster, entity.position, target.position, ai.sightRadius, ai.wallPenetration)) {
-        ai.aiState = 'wander';
-        ai.targetId = undefined;
-        return;
-      }
-      ai.catalogTicks = (ai.catalogTicks ?? 0) + 1;
-      if (ai.catalogTicks >= 3) {
-        ai.lastTargetPos = { ...target.position };
-        ai.aiState = 'broadcast';
-      }
-      break;
-    }
-
-    case 'broadcast': {
-      const targetId = ai.targetId;
-      const target = targetId !== undefined ? getEntityById(state, targetId) : undefined;
-      const pos = target?.position ?? ai.lastTargetPos ?? entity.position;
-
-      // Mark the entity
-      if (targetId !== undefined) {
-        state.markedEntities.add(targetId);
-      }
-
-      // Reveal tiles around the target
-      const positions = floodFillReveal(cluster, pos, 4);
-      state.revealEffects.push({ positions, expireTick: state.tick + 8 });
-      for (const key of positions) {
-        const [x, y] = key.split(',').map(Number);
-        const tile = cluster.tiles[y]?.[x];
-        if (tile) tile.seen = true;
-      }
-
-      const name = target ? target.name : 'unknown entity';
-      addAiMessage(state, `[CHRONICLE] Cataloging: ${name} at (${pos.x},${pos.y}).`, 'system');
-
-      ai.catalogTicks = 0;
-      ai.aiState = 'wander';
-      break;
-    }
-  }
-}
-
-// ── Bit-Mite Swarm (aggressive) ──
-// Speed 12 (fast). Wanders (20% door bash) → chases any non-aggressive target → attacks adjacent
-
-function bitMiteAttack(state: GameState, entity: Entity, target: Entity) {
-  if (target.coherence !== undefined) {
-    const pi = target.id === state.player.id;
-    target.coherence = Math.max(0, target.coherence - entity.attackValue);
-    if (pi) state.pendingSounds.push('hit');
-    addAiMessage(state, `Bit-Mite Swarm attacks ${target.name}! −${entity.attackValue} coherence. (${target.coherence}/${target.maxCoherence})`, 'combat', pi);
-    if (target.coherence <= 0) {
-      addAiMessage(state, `Bit-Mite Swarm destroys ${target.name}!`, 'combat', pi);
-      removeEntity(state, target);
-      entity.ai!.aiState = 'wander';
-      entity.ai!.targetId = undefined;
-    }
-  }
-}
-
-function updateBitMite(state: GameState, entity: Entity, cluster: Cluster) {
-  const ai = entity.ai!;
-
-  // Find nearest visible attack target per faction table
-  const target = findAttackTarget(state, entity, cluster);
-
-  switch (ai.aiState) {
-    case 'wander': {
-      if (target) {
-        ai.targetId = target.id;
-        ai.aiState = 'chase';
-        ai.lastTargetPos = { ...target.position };
-        return;
-      }
-      // Sporadic movement with 20% chance to bash a door
-      if (random() < 0.2) {
-        const dirs = [{ x: 0, y: -1 }, { x: 0, y: 1 }, { x: -1, y: 0 }, { x: 1, y: 0 }];
-        const dir = pick(dirs);
-        const nx = entity.position.x + dir.x;
-        const ny = entity.position.y + dir.y;
-        const tile = cluster.tiles[ny]?.[nx];
-        if (tile?.type === TileType.Door && tile.glyph !== '▪') {
-          tile.doorOpen = true;
-          tile.walkable = true;
-          tile.transparent = true;
-          tile.glyph = '▯';
-          tile.doorCloseTick = undefined;
-          return;
-        }
-      }
-      const step = randomWalkStep(cluster, entity.position);
-      if (step) move(entity, cluster, step, state);
-      break;
-    }
-
-    case 'chase': {
-      const chaseTarget = getEntityById(state, ai.targetId);
-      if (!chaseTarget || chaseTarget.clusterId !== entity.clusterId
-        || (chaseTarget.id === state.player.id && state.invisibleMode)) {
-        ai.aiState = 'wander';
-        ai.targetId = undefined;
-        return;
-      }
-
-      const visible = canSee(cluster, entity.position, chaseTarget.position, ai.sightRadius, ai.wallPenetration);
-      if (visible) {
-        ai.lastTargetPos = { ...chaseTarget.position };
-      }
-
-      // Adjacent — attack immediately (no wasted state-transition turn)
-      const dx = Math.abs(entity.position.x - chaseTarget.position.x);
-      const dy = Math.abs(entity.position.y - chaseTarget.position.y);
-      if (dx + dy <= 1) {
-        bitMiteAttack(state, entity, chaseTarget);
-        break;
-      }
-
-      // Lost sight — chase last known position then give up
-      if (!visible) {
-        if (!ai.lastTargetPos) { ai.aiState = 'wander'; return; }
-        if (entity.position.x === ai.lastTargetPos.x && entity.position.y === ai.lastTargetPos.y) {
-          ai.aiState = 'wander';
-          ai.lastTargetPos = undefined;
-          return;
-        }
-      }
-
-      const dest = visible ? chaseTarget.position : ai.lastTargetPos!;
-      const step = stepToward(cluster, entity.position, dest);
-      if (step) move(entity, cluster, step, state);
-      else ai.aiState = 'wander';
-      break;
-    }
-
-  }
-}
-
-// ── Logic Leech (aggressive) ──
-// Speed 30. Hugs walls → spots non-aggressive target → invisible stalk 3t → cardinal charge → rest 6t
-
-function leechMeleeAttack(state: GameState, entity: Entity, target: Entity): boolean {
-  if (target.coherence === undefined) return false;
-  const pi = target.id === state.player.id;
-  target.coherence = Math.max(0, target.coherence - entity.attackValue);
-  if (pi) state.pendingSounds.push('hit');
-  addAiMessage(state, `Logic Leech strikes ${target.name}! −${entity.attackValue} coherence. (${target.coherence}/${target.maxCoherence})`, 'combat', pi);
-  if (target.coherence <= 0) {
-    addAiMessage(state, `Logic Leech destroys ${target.name}!`, 'combat', pi);
-    removeEntity(state, target);
-  }
-  return true;
-}
-
-/** Check if leech is adjacent to an attack target and melee if so. Returns true if attacked. */
-function leechTryMelee(state: GameState, entity: Entity, cluster: Cluster): boolean {
-  const target = findAttackTarget(state, entity, cluster);
-  if (!target) return false;
-  const dx = Math.abs(entity.position.x - target.position.x);
-  const dy = Math.abs(entity.position.y - target.position.y);
-  if (dx + dy > 1) return false;
-  leechMeleeAttack(state, entity, target);
-  return true;
-}
-
-function updateLogicLeech(state: GameState, entity: Entity, cluster: Cluster) {
-  const ai = entity.ai!;
-
-  switch (ai.aiState) {
-    case 'wall_walk': {
-      // Adjacent target — melee attack immediately
-      if (leechTryMelee(state, entity, cluster)) break;
-
-      const target = findAttackTarget(state, entity, cluster);
-      if (target) {
-        ai.targetId = target.id;
-        ai.lastTargetPos = { ...target.position };
-        ai.aiState = 'stalk';
-        ai.actionCooldown = 3;
-        ai.invisible = true;
-        return;
-      }
-      const step = wallWalkStep(cluster, entity.position);
-      if (step) move(entity, cluster, step, state);
-      break;
-    }
-
-    case 'stalk': {
-      const stalkTarget = getEntityById(state, ai.targetId);
-      if (!stalkTarget || stalkTarget.clusterId !== entity.clusterId
-        || (stalkTarget.id === state.player.id && state.invisibleMode)) {
-        ai.aiState = 'wall_walk'; ai.invisible = false; ai.actionCooldown = undefined; return;
-      }
-      const visible = canSee(cluster, entity.position, stalkTarget.position, ai.sightRadius, ai.wallPenetration);
-      if (!visible) {
-        ai.aiState = 'wall_walk';
-        ai.invisible = false;
-        ai.actionCooldown = undefined;
-        return;
-      }
-      ai.lastTargetPos = { ...stalkTarget.position };
-      ai.actionCooldown = (ai.actionCooldown ?? 1) - 1;
-      if (ai.actionCooldown <= 0) {
-        const dx = stalkTarget.position.x - entity.position.x;
-        const dy = stalkTarget.position.y - entity.position.y;
-        const len = Math.max(Math.abs(dx), Math.abs(dy));
-        if (len === 0) { ai.aiState = 'rest'; ai.actionCooldown = 6; ai.invisible = false; return; }
-        ai.chargeDir = {
-          x: Math.round(dx / len),
-          y: Math.round(dy / len),
-        };
-        // Only charge cardinally
-        if (Math.abs(ai.chargeDir.x) > 0 && Math.abs(ai.chargeDir.y) > 0) {
-          if (Math.abs(dx) >= Math.abs(dy)) ai.chargeDir.y = 0;
-          else ai.chargeDir.x = 0;
-        }
-        ai.chargeSteps = 3;
-        ai.aiState = 'charge';
-        ai.invisible = false;
-      }
-      break;
-    }
-
-    case 'charge': {
-      if ((ai.chargeSteps ?? 0) <= 0) {
-        ai.aiState = 'rest';
-        ai.actionCooldown = 2;
-        ai.chargeDir = undefined;
-        return;
-      }
-      const dir = ai.chargeDir!;
-      const nx = entity.position.x + dir.x;
-      const ny = entity.position.y + dir.y;
-      ai.chargeSteps = (ai.chargeSteps ?? 1) - 1;
-
-      // Check for entity hit at charge destination
-      const hitTarget = findEntityAt(state, cluster.id, nx, ny);
-      const hitIsInvisiblePlayer = hitTarget?.id === state.player.id && state.invisibleMode;
-      const hitTargetFaction: Faction = hitTarget?.id === state.player.id ? 'player' : (hitTarget?.ai?.faction ?? 'neutral');
-      if (hitTarget && !hitIsInvisiblePlayer && getRelation('aggressive', hitTargetFaction, state.alertLevel) === 'attack') {
-        if (hitTarget.coherence !== undefined) {
-          const pi = hitTarget.id === state.player.id;
-          hitTarget.coherence = Math.max(0, hitTarget.coherence - entity.attackValue);
-          addAiMessage(state, `Logic Leech charge hits ${hitTarget.name}! −${entity.attackValue} coherence. (${hitTarget.coherence}/${hitTarget.maxCoherence})`, 'combat', pi);
-          if (hitTarget.coherence <= 0) {
-            addAiMessage(state, `Logic Leech destroys ${hitTarget.name}!`, 'combat', pi);
-            removeEntity(state, hitTarget);
-          }
-        }
-        ai.aiState = 'rest';
-        ai.actionCooldown = 1;
-        ai.chargeDir = undefined;
-        return;
-      }
-
-      if (!isWalkableTile(cluster, nx, ny)) {
-        ai.aiState = 'rest';
-        ai.actionCooldown = 2;
-        ai.chargeDir = undefined;
-        return;
-      }
-      entity.position = { x: nx, y: ny };
-      break;
-    }
-
-    case 'rest': {
-      // Adjacent target — melee attack even during rest
-      if (leechTryMelee(state, entity, cluster)) break;
-
-      ai.actionCooldown = (ai.actionCooldown ?? 1) - 1;
-      if ((ai.actionCooldown ?? 0) <= 0) {
-        ai.aiState = 'wall_walk';
-        ai.actionCooldown = undefined;
-      }
-      break;
-    }
-  }
-}
-
-// ── Sentry (friendly) ──
-// Speed 20. Patrols room, 10% chance to switch to adjacent room.
-// Attacks aggressive+titan entities; attacks player when alertLevel >= ALERT_ENEMY.
-
-function sentryAttack(state: GameState, entity: Entity, target: Entity) {
-  if (target.coherence !== undefined) {
-    const pi = target.id === state.player.id;
-    target.coherence = Math.max(0, target.coherence - entity.attackValue);
-    if (pi) state.pendingSounds.push('hit');
-    addAiMessage(state, `Sentry strikes ${target.name}! −${entity.attackValue}. (${target.coherence} left)`, 'combat', pi);
-    shootingAnimation(state, entity.position, target.position, 'single');
-    if (target.coherence <= 0) {
-      addAiMessage(state, `Sentry destroys ${target.name}!`, 'combat', pi);
-      removeEntity(state, target);
-      entity.ai!.aiState = 'patrol';
-      entity.ai!.targetId = undefined;
-      return;
-    }
-  }
-  entity.ai!.aiState = 'chase';
-}
-
-function updateSentry(state: GameState, entity: Entity, cluster: Cluster) {
-  const ai = entity.ai!;
-  // addAiMessage(state, `Sentry state ${ai.aiState}`);
-
-  // Look for attack targets per faction table (includes player at high alert)
-  const threat = findAttackTarget(state, entity, cluster);
-  if (threat) {
-    ai.targetId = threat.id;
-    ai.aiState = 'attack';
-  }
-
-  switch (ai.aiState) {
-    case 'patrol': {
-      // Move toward patrol waypoint or pick a new one
-      const wp = ai.patrolWaypoint;
-      if (!wp || (entity.position.x === wp.x && entity.position.y === wp.y)) {
-        ai.patrolWaypoint = pickPatrolWaypoint(cluster, entity);
-        // 10% chance to leave current room
-        if (random() < 0.1) {
-          ai.patrolWaypoint = pickAdjacentRoomWaypoint(cluster, entity);
-        }
-      }
-      if (ai.patrolWaypoint) {
-        const step = stepToward(cluster, entity.position, ai.patrolWaypoint);
-        if (step) move(entity, cluster, step, state);
-      }
-      break;
-    }
-
-    case 'chase': {
-      const target = getEntityById(state, ai.targetId);
-      if (!target || target.clusterId !== entity.clusterId
-        || (target.id === state.player.id && state.invisibleMode)) {
-        ai.aiState = 'patrol';
-        ai.targetId = undefined;
-        return;
-      }
-      if (!canSee(cluster, entity.position, target.position, ai.sightRadius, ai.wallPenetration)) {
-        // Lost sight — last known pos
-        if (!ai.lastTargetPos) { ai.aiState = 'patrol'; return; }
-        if (entity.position.x === ai.lastTargetPos.x && entity.position.y === ai.lastTargetPos.y) {
-          ai.aiState = 'patrol';
-          ai.lastTargetPos = undefined;
-          return;
-        }
-      } else {
-        ai.lastTargetPos = { ...target.position };
-        state.markedEntities.add(target.id);
-      }
-
-      // In range — attack immediately instead of wasting a turn on state transition
-      const dx = Math.abs(entity.position.x - target.position.x);
-      const dy = Math.abs(entity.position.y - target.position.y);
-      if (dx * dx + dy * dy <= entity.attackDistance * entity.attackDistance
-          && canSee(cluster, entity.position, target.position, entity.attackDistance, 0)) {
-        sentryAttack(state, entity, target);
-        break;
-      }
-
-      const dest = ai.lastTargetPos ?? target.position;
-      const step = stepToward(cluster, entity.position, dest);
-      if (step) move(entity, cluster, step, state);
-      break;
-    }
-
-    case 'attack': {
-      const target = getEntityById(state, ai.targetId);
-      if (!target || target.clusterId !== entity.clusterId
-        || (target.id === state.player.id && state.invisibleMode)) {
-        ai.aiState = 'patrol';
-        return;
-      }
-      const dx = Math.abs(entity.position.x - target.position.x);
-      const dy = Math.abs(entity.position.y - target.position.y);
-      if (dx * dx + dy * dy > entity.attackDistance * entity.attackDistance
-          || !canSee(cluster, entity.position, target.position, entity.attackDistance, 0)) {
-        // Target out of range or LOS — chase immediately
-        ai.aiState = 'chase';
-        ai.lastTargetPos = { ...target.position };
-        const step = stepToward(cluster, entity.position, target.position);
-        if (step) move(entity, cluster, step, state);
-        break;
-      }
-      sentryAttack(state, entity, target);
-      break;
-    }
-  }
-}
+// Old direct-mutation move/addAiMessage/removeEntity removed — all AI now uses intent-returning functions
 
 // ── Spawn helpers ──
 
@@ -622,18 +158,6 @@ function factionSmokeColor(faction?: string): string {
   return '#aaaa66';
 }
 
-/** Remove an entity from the game state, spawning a death-smoke effect. */
-function removeEntity(state: GameState, target: Entity) {
-  if (target.id === state.player.id) return; // never remove player
-  state.smokeEffects.push({
-    x: target.position.x, y: target.position.y,
-    fg: factionSmokeColor(target.ai?.faction),
-    spawnTime: performance.now(),
-  });
-  state.entities = state.entities.filter(e => e.id !== target.id);
-  state.markedEntities.delete(target.id);
-}
-
 function getAllEntitiesInCluster(state: GameState, cluster: Cluster): Entity[] {
   const result: Entity[] = [state.player, ...state.entities];
   return result.filter(e => e.clusterId === cluster.id);
@@ -645,15 +169,96 @@ function getEntityById(state: GameState, id?: number): Entity | undefined {
   return state.entities.find(e => e.id === id);
 }
 
-// ── Repair Scrapper (neutral) ──
-// Speed 25 (moderate). Patrols → seeks corrupted interactables → attempts repair.
+// Old updateRepairScrapper and updateTitanSpawn removed — replaced by intent-returning versions
 
-function updateRepairScrapper(state: GameState, entity: Entity, cluster: Cluster) {
+// ── Intent-returning AI functions ──
+
+function chroniclerAI(state: GameState, entity: Entity, cluster: Cluster): Intent[] {
   const ai = entity.ai!;
+  const intents: Intent[] = [];
+
+  switch (ai.aiState) {
+    case 'wander': {
+      const targets = getAllEntitiesInCluster(state, cluster);
+      for (const t of targets) {
+        if (t.id === entity.id) continue;
+        if (canSee(cluster, entity.position, t.position, ai.sightRadius, ai.wallPenetration)) {
+          intents.push(
+            { kind: 'set_target', entityId: entity.id, targetId: t.id },
+            { kind: 'set_ai_field', entityId: entity.id, field: 'catalogTicks', value: 0 },
+            { kind: 'change_ai_state', entityId: entity.id, newState: 'catalog' },
+          );
+          return intents;
+        }
+      }
+      const step = randomWalkStep(cluster, entity.position);
+      if (step) intents.push({ kind: 'move', entityId: entity.id, to: step });
+      break;
+    }
+
+    case 'catalog': {
+      const target = getEntityById(state, ai.targetId);
+      if (!target || target.clusterId !== entity.clusterId) {
+        intents.push(
+          { kind: 'change_ai_state', entityId: entity.id, newState: 'wander' },
+          { kind: 'set_target', entityId: entity.id, targetId: undefined },
+        );
+        return intents;
+      }
+      if (!canSee(cluster, entity.position, target.position, ai.sightRadius, ai.wallPenetration)) {
+        intents.push(
+          { kind: 'change_ai_state', entityId: entity.id, newState: 'wander' },
+          { kind: 'set_target', entityId: entity.id, targetId: undefined },
+        );
+        return intents;
+      }
+      const ticks = (ai.catalogTicks ?? 0) + 1;
+      intents.push({ kind: 'set_ai_field', entityId: entity.id, field: 'catalogTicks', value: ticks });
+      if (ticks >= 3) {
+        intents.push(
+          { kind: 'set_target', entityId: entity.id, targetId: ai.targetId, lastTargetPos: { ...target.position } },
+          { kind: 'change_ai_state', entityId: entity.id, newState: 'broadcast' },
+        );
+      }
+      break;
+    }
+
+    case 'broadcast': {
+      const targetId = ai.targetId;
+      const target = targetId !== undefined ? getEntityById(state, targetId) : undefined;
+      const pos = target?.position ?? ai.lastTargetPos ?? entity.position;
+
+      if (targetId !== undefined) {
+        intents.push({ kind: 'mark_entity', entityId: targetId, catalogerId: entity.id });
+      }
+
+      // floodFillReveal is read-only (computes positions) — safe to call here
+      const positions = floodFillReveal(cluster, pos, 4);
+      intents.push(
+        { kind: 'catalog', catalogerId: entity.id, targetId: targetId ?? entity.id, positions },
+        { kind: 'reveal', positions, durationTicks: 8 },
+      );
+
+      const name = target ? target.name : 'unknown entity';
+      intents.push({ kind: 'message', text: `[CHRONICLE] Cataloging: ${name} at (${pos.x},${pos.y}).`, style: 'system' });
+
+      intents.push(
+        { kind: 'set_ai_field', entityId: entity.id, field: 'catalogTicks', value: 0 },
+        { kind: 'change_ai_state', entityId: entity.id, newState: 'wander' },
+      );
+      break;
+    }
+  }
+
+  return intents;
+}
+
+function repairScrapperAI(_state: GameState, entity: Entity, cluster: Cluster): Intent[] {
+  const ai = entity.ai!;
+  const intents: Intent[] = [];
 
   switch (ai.aiState) {
     case 'patrol': {
-      // Scan for nearby corrupted interactables
       let nearestDist = Infinity;
       let nearestPos: Position | undefined;
       for (const ia of cluster.interactables) {
@@ -667,57 +272,289 @@ function updateRepairScrapper(state: GameState, entity: Entity, cluster: Cluster
         }
       }
       if (nearestPos) {
-        ai.lastTargetPos = { ...nearestPos };
-        ai.aiState = 'repair';
-        return;
+        intents.push(
+          { kind: 'set_target', entityId: entity.id, targetId: undefined, lastTargetPos: { ...nearestPos } },
+          { kind: 'change_ai_state', entityId: entity.id, newState: 'repair' },
+        );
+        return intents;
       }
-      // Wander if no target
       const step = randomWalkStep(cluster, entity.position);
-      if (step) move(entity, cluster, step, state);
+      if (step) intents.push({ kind: 'move', entityId: entity.id, to: step });
       break;
     }
 
     case 'repair': {
-      if (!ai.lastTargetPos) { ai.aiState = 'patrol'; return; }
-      // Find the interactable at the stored position
+      if (!ai.lastTargetPos) {
+        intents.push({ kind: 'change_ai_state', entityId: entity.id, newState: 'patrol' });
+        return intents;
+      }
       const ia = cluster.interactables.find(
         i => i.position.x === ai.lastTargetPos!.x && i.position.y === ai.lastTargetPos!.y,
       );
       if (!ia || !ia.corrupted) {
-        ai.lastTargetPos = undefined;
-        ai.aiState = 'patrol';
-        return;
+        intents.push(
+          { kind: 'set_target', entityId: entity.id, targetId: undefined, lastTargetPos: undefined },
+          { kind: 'change_ai_state', entityId: entity.id, newState: 'patrol' },
+        );
+        return intents;
       }
-      // Move toward target
       const dx = Math.abs(entity.position.x - ia.position.x);
       const dy = Math.abs(entity.position.y - ia.position.y);
       if (dx + dy > 1) {
         const step = stepToward(cluster, entity.position, ia.position);
-        if (step) move(entity, cluster, step, state);
+        if (step) intents.push({ kind: 'move', entityId: entity.id, to: step });
       } else {
-        // Adjacent — attempt repair
         if (random() < 0.4) {
-          ia.corrupted = false;
-          addAiMessage(state, '[SCRAPPER] Signal fragment stabilized.', 'system');
+          intents.push(
+            { kind: 'repair_interactable', position: { ...ia.position } },
+            { kind: 'message', text: '[SCRAPPER] Signal fragment stabilized.', style: 'system' },
+          );
         } else {
-          addAiMessage(state, '[SCRAPPER] Repair attempt failed. Resuming patrol.', 'system');
+          intents.push({ kind: 'message', text: '[SCRAPPER] Repair attempt failed. Resuming patrol.', style: 'system' });
         }
-        ai.lastTargetPos = undefined;
-        ai.aiState = 'patrol';
+        intents.push(
+          { kind: 'set_target', entityId: entity.id, targetId: undefined, lastTargetPos: undefined },
+          { kind: 'change_ai_state', entityId: entity.id, newState: 'patrol' },
+        );
       }
       break;
     }
 
     default:
-      ai.aiState = 'patrol';
+      intents.push({ kind: 'change_ai_state', entityId: entity.id, newState: 'patrol' });
   }
+
+  return intents;
 }
 
-// ── Titan Spawn (titan) ──
-// Speed 15 (fast). Hunts nearest entity of ANY faction — attacks everything.
-
-function updateTitanSpawn(state: GameState, entity: Entity, cluster: Cluster) {
+function bitMiteAI(state: GameState, entity: Entity, cluster: Cluster): Intent[] {
   const ai = entity.ai!;
+  const intents: Intent[] = [];
+  const target = findAttackTarget(state, entity, cluster);
+
+  switch (ai.aiState) {
+    case 'wander': {
+      if (target) {
+        intents.push(
+          { kind: 'set_target', entityId: entity.id, targetId: target.id, lastTargetPos: { ...target.position } },
+          { kind: 'change_ai_state', entityId: entity.id, newState: 'chase' },
+        );
+        return intents;
+      }
+      // 20% chance to bash a door
+      if (random() < 0.2) {
+        const dirs = [{ x: 0, y: -1 }, { x: 0, y: 1 }, { x: -1, y: 0 }, { x: 1, y: 0 }];
+        const dir = pick(dirs);
+        const nx = entity.position.x + dir.x;
+        const ny = entity.position.y + dir.y;
+        const tile = cluster.tiles[ny]?.[nx];
+        if (tile?.type === TileType.Door && tile.glyph !== '▪') {
+          intents.push({ kind: 'open_door', entityId: entity.id, at: { x: nx, y: ny } });
+          return intents;
+        }
+      }
+      const step = randomWalkStep(cluster, entity.position);
+      if (step) intents.push({ kind: 'move', entityId: entity.id, to: step });
+      break;
+    }
+
+    case 'chase': {
+      const chaseTarget = getEntityById(state, ai.targetId);
+      if (!chaseTarget || chaseTarget.clusterId !== entity.clusterId
+        || (chaseTarget.id === state.player.id && state.invisibleMode)) {
+        intents.push(
+          { kind: 'change_ai_state', entityId: entity.id, newState: 'wander' },
+          { kind: 'set_target', entityId: entity.id, targetId: undefined },
+        );
+        return intents;
+      }
+
+      const visible = canSee(cluster, entity.position, chaseTarget.position, ai.sightRadius, ai.wallPenetration);
+      if (visible) {
+        intents.push({ kind: 'set_target', entityId: entity.id, targetId: chaseTarget.id, lastTargetPos: { ...chaseTarget.position } });
+      }
+
+      // Adjacent — attack
+      const dx = Math.abs(entity.position.x - chaseTarget.position.x);
+      const dy = Math.abs(entity.position.y - chaseTarget.position.y);
+      if (dx + dy <= 1) {
+        const pi = chaseTarget.id === state.player.id;
+        intents.push(
+          { kind: 'melee_attack', attackerId: entity.id, targetId: chaseTarget.id, damage: entity.attackValue },
+          { kind: 'message', text: `Bit-Mite Swarm attacks ${chaseTarget.name}! −${entity.attackValue} coherence. (${Math.max(0, (chaseTarget.coherence ?? 0) - entity.attackValue)}/${chaseTarget.maxCoherence})`, style: 'combat' },
+        );
+        if (pi) intents.push({ kind: 'sound', id: 'hit' });
+        // Check if this kills the target
+        if (chaseTarget.coherence !== undefined && chaseTarget.coherence - entity.attackValue <= 0) {
+          intents.push(
+            { kind: 'message', text: `Bit-Mite Swarm destroys ${chaseTarget.name}!`, style: 'combat' },
+            { kind: 'remove_entity', entityId: chaseTarget.id, cause: 'killed', killerId: entity.id },
+            { kind: 'smoke', position: chaseTarget.position, color: factionSmokeColor(chaseTarget.ai?.faction) },
+            { kind: 'change_ai_state', entityId: entity.id, newState: 'wander' },
+            { kind: 'set_target', entityId: entity.id, targetId: undefined },
+          );
+        }
+        break;
+      }
+
+      // Lost sight — chase last known pos
+      if (!visible) {
+        if (!ai.lastTargetPos) {
+          intents.push({ kind: 'change_ai_state', entityId: entity.id, newState: 'wander' });
+          return intents;
+        }
+        if (entity.position.x === ai.lastTargetPos.x && entity.position.y === ai.lastTargetPos.y) {
+          intents.push(
+            { kind: 'change_ai_state', entityId: entity.id, newState: 'wander' },
+            { kind: 'set_target', entityId: entity.id, targetId: undefined, lastTargetPos: undefined },
+          );
+          return intents;
+        }
+      }
+
+      const dest = visible ? chaseTarget.position : ai.lastTargetPos!;
+      const step = stepToward(cluster, entity.position, dest);
+      if (step) intents.push({ kind: 'move', entityId: entity.id, to: step });
+      else intents.push({ kind: 'change_ai_state', entityId: entity.id, newState: 'wander' });
+      break;
+    }
+  }
+
+  return intents;
+}
+
+function sentryAI(state: GameState, entity: Entity, cluster: Cluster): Intent[] {
+  const ai = entity.ai!;
+  const intents: Intent[] = [];
+
+  // Look for attack targets
+  const threat = findAttackTarget(state, entity, cluster);
+  if (threat) {
+    intents.push(
+      { kind: 'set_target', entityId: entity.id, targetId: threat.id },
+      { kind: 'change_ai_state', entityId: entity.id, newState: 'attack' },
+    );
+  }
+
+  switch (ai.aiState) {
+    case 'patrol': {
+      if (threat) break; // will resolve with attack state next tick
+      const wp = ai.patrolWaypoint;
+      if (!wp || (entity.position.x === wp.x && entity.position.y === wp.y)) {
+        let newWp = pickPatrolWaypoint(cluster, entity);
+        if (random() < 0.1) {
+          newWp = pickAdjacentRoomWaypoint(cluster, entity) ?? newWp;
+        }
+        intents.push({ kind: 'set_ai_field', entityId: entity.id, field: 'patrolWaypoint', value: newWp });
+        if (newWp) {
+          const step = stepToward(cluster, entity.position, newWp);
+          if (step) intents.push({ kind: 'move', entityId: entity.id, to: step });
+        }
+      } else {
+        const step = stepToward(cluster, entity.position, wp);
+        if (step) intents.push({ kind: 'move', entityId: entity.id, to: step });
+      }
+      break;
+    }
+
+    case 'chase': {
+      const target = getEntityById(state, ai.targetId);
+      if (!target || target.clusterId !== entity.clusterId
+        || (target.id === state.player.id && state.invisibleMode)) {
+        intents.push(
+          { kind: 'change_ai_state', entityId: entity.id, newState: 'patrol' },
+          { kind: 'set_target', entityId: entity.id, targetId: undefined },
+        );
+        return intents;
+      }
+      const visible = canSee(cluster, entity.position, target.position, ai.sightRadius, ai.wallPenetration);
+      if (!visible) {
+        if (!ai.lastTargetPos) {
+          intents.push({ kind: 'change_ai_state', entityId: entity.id, newState: 'patrol' });
+          return intents;
+        }
+        if (entity.position.x === ai.lastTargetPos.x && entity.position.y === ai.lastTargetPos.y) {
+          intents.push(
+            { kind: 'change_ai_state', entityId: entity.id, newState: 'patrol' },
+            { kind: 'set_target', entityId: entity.id, targetId: undefined, lastTargetPos: undefined },
+          );
+          return intents;
+        }
+      } else {
+        intents.push(
+          { kind: 'set_target', entityId: entity.id, targetId: target.id, lastTargetPos: { ...target.position } },
+          { kind: 'mark_entity', entityId: target.id, catalogerId: entity.id },
+        );
+      }
+
+      // In range — attack
+      const dx = Math.abs(entity.position.x - target.position.x);
+      const dy = Math.abs(entity.position.y - target.position.y);
+      if (dx * dx + dy * dy <= entity.attackDistance * entity.attackDistance
+          && canSee(cluster, entity.position, target.position, entity.attackDistance, 0)) {
+        return [...intents, ...sentryAttackIntents(state, entity, target, cluster)];
+      }
+
+      const dest = ai.lastTargetPos ?? target.position;
+      const step = stepToward(cluster, entity.position, dest);
+      if (step) intents.push({ kind: 'move', entityId: entity.id, to: step });
+      break;
+    }
+
+    case 'attack': {
+      const target = getEntityById(state, ai.targetId);
+      if (!target || target.clusterId !== entity.clusterId
+        || (target.id === state.player.id && state.invisibleMode)) {
+        intents.push({ kind: 'change_ai_state', entityId: entity.id, newState: 'patrol' });
+        return intents;
+      }
+      const dx = Math.abs(entity.position.x - target.position.x);
+      const dy = Math.abs(entity.position.y - target.position.y);
+      if (dx * dx + dy * dy > entity.attackDistance * entity.attackDistance
+          || !canSee(cluster, entity.position, target.position, entity.attackDistance, 0)) {
+        intents.push(
+          { kind: 'change_ai_state', entityId: entity.id, newState: 'chase' },
+          { kind: 'set_target', entityId: entity.id, targetId: target.id, lastTargetPos: { ...target.position } },
+        );
+        const step = stepToward(cluster, entity.position, target.position);
+        if (step) intents.push({ kind: 'move', entityId: entity.id, to: step });
+        break;
+      }
+      intents.push(...sentryAttackIntents(state, entity, target, cluster));
+      break;
+    }
+  }
+
+  return intents;
+}
+
+function sentryAttackIntents(state: GameState, entity: Entity, target: Entity, _cluster: Cluster): Intent[] {
+  const intents: Intent[] = [];
+  if (target.coherence === undefined) return intents;
+  const pi = target.id === state.player.id;
+  intents.push(
+    { kind: 'ranged_attack', attackerId: entity.id, targetId: target.id, damage: entity.attackValue, style: 'single' },
+    { kind: 'shoot_animation', from: entity.position, to: target.position, style: 'single' },
+    { kind: 'message', text: `Sentry strikes ${target.name}! −${entity.attackValue}. (${Math.max(0, target.coherence - entity.attackValue)} left)`, style: 'combat' },
+  );
+  if (pi) intents.push({ kind: 'sound', id: 'hit' });
+  if (target.coherence - entity.attackValue <= 0) {
+    intents.push(
+      { kind: 'message', text: `Sentry destroys ${target.name}!`, style: 'combat' },
+      { kind: 'remove_entity', entityId: target.id, cause: 'killed', killerId: entity.id },
+      { kind: 'smoke', position: target.position, color: factionSmokeColor(target.ai?.faction) },
+      { kind: 'change_ai_state', entityId: entity.id, newState: 'patrol' },
+      { kind: 'set_target', entityId: entity.id, targetId: undefined },
+    );
+  } else {
+    intents.push({ kind: 'change_ai_state', entityId: entity.id, newState: 'chase' });
+  }
+  return intents;
+}
+
+function titanSpawnAI(state: GameState, entity: Entity, cluster: Cluster): Intent[] {
+  const ai = entity.ai!;
+  const intents: Intent[] = [];
   const all = getAllEntitiesInCluster(state, cluster);
   const range = entity.attackDistance;
   const dmg = entity.attackValue;
@@ -735,59 +572,49 @@ function updateTitanSpawn(state: GameState, entity: Entity, cluster: Cluster) {
   }
 
   if (targets.length > 0) {
-    // AoE attack — hit all targets simultaneously, with shooting animation
+    // Shooting animations
     for (const t of targets) {
-      shootingAnimation(state, entity.position, t.position, 'rapid');
+      intents.push({ kind: 'shoot_animation', from: entity.position, to: t.position, style: 'rapid' });
     }
-    const dead: Entity[] = [];
+    // AoE damage
+    intents.push({ kind: 'aoe_attack', attackerId: entity.id, targetIds: targets.map(t => t.id), damage: dmg, style: 'rapid' });
+    intents.push({
+      kind: 'message',
+      text: `[UNKNOWN PROCESS] pulses destructive energy! Hits ${targets.length} target${targets.length > 1 ? 's' : ''}. −${dmg} each.`,
+      style: 'combat',
+    });
+    // Check kills
     for (const t of targets) {
-      t.coherence = Math.max(0, t.coherence! - dmg);
-      if (t.coherence! <= 0) dead.push(t);
-    }
-    const pi = targets.some(t => t.id === state.player.id);
-    addAiMessage(state, `[UNKNOWN PROCESS] pulses destructive energy! Hits ${targets.length} target${targets.length > 1 ? 's' : ''}. −${dmg} each.`, 'combat', pi);
-    for (const t of dead) {
-      addAiMessage(state, `[UNKNOWN PROCESS] destroys ${t.name}!`, 'combat', t.id === state.player.id);
-      removeEntity(state, t);
+      if (t.coherence! - dmg <= 0) {
+        intents.push(
+          { kind: 'message', text: `[UNKNOWN PROCESS] destroys ${t.name}!`, style: 'combat' },
+          { kind: 'remove_entity', entityId: t.id, cause: 'killed', killerId: entity.id },
+          { kind: 'smoke', position: t.position, color: factionSmokeColor(t.ai?.faction) },
+        );
+      }
     }
   } else {
-    // No targets in range — chase nearest potential target
+    // Chase nearest or wander
     const nearest = findAttackTarget(state, entity, cluster);
     if (nearest) {
-      ai.targetId = nearest.id;
+      intents.push({ kind: 'set_target', entityId: entity.id, targetId: nearest.id });
       const step = stepToward(cluster, entity.position, nearest.position);
-      if (step) move(entity, cluster, step, state);
+      if (step) intents.push({ kind: 'move', entityId: entity.id, to: step });
     } else {
       const step = randomWalkStep(cluster, entity.position);
-      if (step) move(entity, cluster, step, state);
+      if (step) intents.push({ kind: 'move', entityId: entity.id, to: step });
     }
   }
+
+  return intents;
 }
 
-// ── Main dispatch ──
-
-export function updateEntityAI(state: GameState, entity: Entity) {
-  const ai = entity.ai;
-  if (!ai) return;
-  const cluster = state.clusters.get(entity.clusterId);
-  if (!cluster) return;
-
-  switch (ai.kind) {
-    case 'chronicler':      updateChronicler(state, entity, cluster);      break;
-    case 'bit_mite':        updateBitMite(state, entity, cluster);         break;
-    case 'logic_leech':     updateLogicLeech(state, entity, cluster);      break;
-    case 'sentry':          updateSentry(state, entity, cluster);          break;
-    case 'gate_keeper':     updateGateKeeper(state, entity, cluster);      break;
-    case 'repair_scrapper': updateRepairScrapper(state, entity, cluster);  break;
-    case 'titan_spawn':     updateTitanSpawn(state, entity, cluster);     break;
-  }
-}
-
-function updateGateKeeper(state: GameState, entity: Entity, cluster: Cluster) {
+function gateKeeperAI(state: GameState, entity: Entity, cluster: Cluster): Intent[] {
   const ai = entity.ai!;
+  const intents: Intent[] = [];
   const all = getAllEntitiesInCluster(state, cluster);
 
-  // Pull all visible attack-targets one step toward self each turn
+  // Pull all visible attack-targets one step toward self
   for (const target of all) {
     if (target.id === entity.id) continue;
     if (target.id === state.player.id && state.invisibleMode) continue;
@@ -799,113 +626,251 @@ function updateGateKeeper(state: GameState, entity: Entity, cluster: Cluster) {
     const dy = entity.position.y - target.position.y;
     if (dx === 0 && dy === 0) continue;
 
-    // Step pulled entity one tile closer along dominant axis
-    const stepX = dx !== 0 ? Math.sign(dx) : 0;
-    const stepY = dy !== 0 ? Math.sign(dy) : 0;
-    // Prefer the axis with greater distance
-    const absDx = Math.abs(dx), absDy = Math.abs(dy);
-    const candidates: [number, number][] = absDx >= absDy
-      ? [[stepX, 0], [0, stepY]]
-      : [[0, stepY], [stepX, 0]];
-
-    for (const [cx, cy] of candidates) {
-      const nx = target.position.x + cx;
-      const ny = target.position.y + cy;
-      const tile = cluster.tiles[ny]?.[nx];
-      if (!tile?.walkable) continue;
-      const occupied = findEntityAt(state, cluster.id, nx, ny);
-      if (occupied && occupied.id !== entity.id) continue;
-      target.position = { x: nx, y: ny };
-      break;
-    }
+    intents.push({ kind: 'pull', pullerId: entity.id, targetId: target.id, toward: entity.position });
   }
 
-  // Beam attack: fire at nearest visible non-friendly target in range with clear LOS
-  ai.actionCooldown = (ai.actionCooldown ?? 0) - 1;
-  if (ai.actionCooldown > 0) return;
+  // Beam attack
+  const cd = (ai.actionCooldown ?? 0) - 1;
+  intents.push({ kind: 'set_cooldown', entityId: entity.id, ticks: cd });
+  if (cd > 0) return intents;
 
   for (const target of all) {
     if (target.id === entity.id) continue;
     if (target.id === state.player.id && state.invisibleMode) continue;
     const beamTargetFaction: Faction = target.id === state.player.id ? 'player' : (target.ai?.faction ?? 'neutral');
     if (getRelation('friendly', beamTargetFaction, state.alertLevel) !== 'attack') continue;
-    const dx = Math.abs(entity.position.x - target.position.x);
-    const dy = Math.abs(entity.position.y - target.position.y);
-    const distSq = dx * dx + dy * dy;
-    if (distSq > entity.attackDistance * entity.attackDistance) continue;
-    // Require clear line of sight — no shooting through walls or closed doors
+    const tdx = Math.abs(entity.position.x - target.position.x);
+    const tdy = Math.abs(entity.position.y - target.position.y);
+    if (tdx * tdx + tdy * tdy > entity.attackDistance * entity.attackDistance) continue;
     if (!canSee(cluster, entity.position, target.position, entity.attackDistance, 0)) continue;
     if (target.coherence === undefined) continue;
 
     const pi = target.id === state.player.id;
-    target.coherence = Math.max(0, target.coherence - entity.attackValue);
-    if (pi) state.pendingSounds.push('hit');
-    addAiMessage(state, `Gate-Keeper fires containment beam at ${target.name}! −${entity.attackValue}. (${target.coherence} left)`, 'combat', pi);
-    shootingAnimation(state, entity.position, target.position, 'beam');
-    if (target.coherence <= 0) {
-      addAiMessage(state, `Gate-Keeper destroys ${target.name}!`, 'combat', pi);
-      removeEntity(state, target);
+    intents.push(
+      { kind: 'ranged_attack', attackerId: entity.id, targetId: target.id, damage: entity.attackValue, style: 'beam' },
+      { kind: 'shoot_animation', from: entity.position, to: target.position, style: 'beam' },
+      { kind: 'message', text: `Gate-Keeper fires containment beam at ${target.name}! −${entity.attackValue}. (${Math.max(0, target.coherence - entity.attackValue)} left)`, style: 'combat' },
+    );
+    if (pi) intents.push({ kind: 'sound', id: 'hit' });
+    if (target.coherence - entity.attackValue <= 0) {
+      intents.push(
+        { kind: 'message', text: `Gate-Keeper destroys ${target.name}!`, style: 'combat' },
+        { kind: 'remove_entity', entityId: target.id, cause: 'killed', killerId: entity.id },
+        { kind: 'smoke', position: target.position, color: factionSmokeColor(target.ai?.faction) },
+      );
     }
-    ai.actionCooldown = 3; // beam fires every 3 ticks
-    return; // one beam per turn
+    intents.push({ kind: 'set_cooldown', entityId: entity.id, ticks: 3 });
+    return intents; // one beam per turn
   }
+
+  return intents;
 }
 
-// ── Entity factory ──
+function logicLeechAI(state: GameState, entity: Entity, cluster: Cluster): Intent[] {
+  const ai = entity.ai!;
+  const intents: Intent[] = [];
 
-let _nextEntityId = 1000;
+  switch (ai.aiState) {
+    case 'wall_walk': {
+      // Adjacent target — melee attack immediately
+      const meleeIntents = leechTryMeleeIntents(state, entity, cluster);
+      if (meleeIntents.length > 0) return meleeIntents;
 
-export function makeChronicler(pos: Position, clusterId: number): Entity {
-  return {
-    id: _nextEntityId++,
-    name: 'Chronicler',
-    glyph: 'Ω',
-    fg: '#aaaa66',
-    position: { ...pos },
-    clusterId,
-    speed: 40,
-    energy: 0,
-    coherence: 30,
-    maxCoherence: 30,
-    attackDistance: 5,
-    attackValue: 0,
-    ai: {
-      kind: 'chronicler',
-      faction: 'neutral',
-      aiState: 'wander',
-      sightRadius: 6,
-      wallPenetration: 0,
-    },
-  };
+      const target = findAttackTarget(state, entity, cluster);
+      if (target) {
+        intents.push(
+          { kind: 'set_target', entityId: entity.id, targetId: target.id, lastTargetPos: { ...target.position } },
+          { kind: 'change_ai_state', entityId: entity.id, newState: 'stalk' },
+          { kind: 'set_cooldown', entityId: entity.id, ticks: 3 },
+          { kind: 'set_invisible', entityId: entity.id, invisible: true },
+        );
+        return intents;
+      }
+      const step = wallWalkStep(cluster, entity.position);
+      if (step) intents.push({ kind: 'move', entityId: entity.id, to: step });
+      break;
+    }
+
+    case 'stalk': {
+      const stalkTarget = getEntityById(state, ai.targetId);
+      if (!stalkTarget || stalkTarget.clusterId !== entity.clusterId
+        || (stalkTarget.id === state.player.id && state.invisibleMode)) {
+        intents.push(
+          { kind: 'change_ai_state', entityId: entity.id, newState: 'wall_walk' },
+          { kind: 'set_invisible', entityId: entity.id, invisible: false },
+          { kind: 'set_cooldown', entityId: entity.id, ticks: 0 },
+        );
+        return intents;
+      }
+      const visible = canSee(cluster, entity.position, stalkTarget.position, ai.sightRadius, ai.wallPenetration);
+      if (!visible) {
+        intents.push(
+          { kind: 'change_ai_state', entityId: entity.id, newState: 'wall_walk' },
+          { kind: 'set_invisible', entityId: entity.id, invisible: false },
+          { kind: 'set_cooldown', entityId: entity.id, ticks: 0 },
+        );
+        return intents;
+      }
+      intents.push({ kind: 'set_target', entityId: entity.id, targetId: stalkTarget.id, lastTargetPos: { ...stalkTarget.position } });
+      const cd = (ai.actionCooldown ?? 1) - 1;
+      intents.push({ kind: 'set_cooldown', entityId: entity.id, ticks: cd });
+      if (cd <= 0) {
+        const tdx = stalkTarget.position.x - entity.position.x;
+        const tdy = stalkTarget.position.y - entity.position.y;
+        const len = Math.max(Math.abs(tdx), Math.abs(tdy));
+        if (len === 0) {
+          intents.push(
+            { kind: 'change_ai_state', entityId: entity.id, newState: 'rest' },
+            { kind: 'set_cooldown', entityId: entity.id, ticks: 6 },
+            { kind: 'set_invisible', entityId: entity.id, invisible: false },
+          );
+          return intents;
+        }
+        let chargeX = Math.round(tdx / len);
+        let chargeY = Math.round(tdy / len);
+        // Only charge cardinally
+        if (Math.abs(chargeX) > 0 && Math.abs(chargeY) > 0) {
+          if (Math.abs(tdx) >= Math.abs(tdy)) chargeY = 0;
+          else chargeX = 0;
+        }
+        intents.push(
+          { kind: 'set_ai_field', entityId: entity.id, field: 'chargeDir', value: { x: chargeX, y: chargeY } },
+          { kind: 'set_ai_field', entityId: entity.id, field: 'chargeSteps', value: 3 },
+          { kind: 'change_ai_state', entityId: entity.id, newState: 'charge' },
+          { kind: 'set_invisible', entityId: entity.id, invisible: false },
+        );
+      }
+      break;
+    }
+
+    case 'charge': {
+      if ((ai.chargeSteps ?? 0) <= 0) {
+        intents.push(
+          { kind: 'change_ai_state', entityId: entity.id, newState: 'rest' },
+          { kind: 'set_cooldown', entityId: entity.id, ticks: 2 },
+          { kind: 'set_ai_field', entityId: entity.id, field: 'chargeDir', value: undefined },
+        );
+        return intents;
+      }
+      const dir = ai.chargeDir!;
+      const nx = entity.position.x + dir.x;
+      const ny = entity.position.y + dir.y;
+      intents.push({ kind: 'set_ai_field', entityId: entity.id, field: 'chargeSteps', value: (ai.chargeSteps ?? 1) - 1 });
+
+      // Check for entity hit at charge destination
+      const hitTarget = findEntityAt(state, cluster.id, nx, ny);
+      const hitIsInvisiblePlayer = hitTarget?.id === state.player.id && state.invisibleMode;
+      const hitTargetFaction: Faction = hitTarget?.id === state.player.id ? 'player' : (hitTarget?.ai?.faction ?? 'neutral');
+      if (hitTarget && !hitIsInvisiblePlayer && getRelation('aggressive', hitTargetFaction, state.alertLevel) === 'attack') {
+        if (hitTarget.coherence !== undefined) {
+          const pi = hitTarget.id === state.player.id;
+          intents.push(
+            { kind: 'melee_attack', attackerId: entity.id, targetId: hitTarget.id, damage: entity.attackValue },
+            { kind: 'message', text: `Logic Leech charge hits ${hitTarget.name}! −${entity.attackValue} coherence. (${Math.max(0, hitTarget.coherence - entity.attackValue)}/${hitTarget.maxCoherence})`, style: 'combat' },
+          );
+          if (pi) intents.push({ kind: 'sound', id: 'hit' });
+          if (hitTarget.coherence - entity.attackValue <= 0) {
+            intents.push(
+              { kind: 'message', text: `Logic Leech destroys ${hitTarget.name}!`, style: 'combat' },
+              { kind: 'remove_entity', entityId: hitTarget.id, cause: 'killed', killerId: entity.id },
+              { kind: 'smoke', position: hitTarget.position, color: factionSmokeColor(hitTarget.ai?.faction) },
+            );
+          }
+        }
+        intents.push(
+          { kind: 'change_ai_state', entityId: entity.id, newState: 'rest' },
+          { kind: 'set_cooldown', entityId: entity.id, ticks: 1 },
+          { kind: 'set_ai_field', entityId: entity.id, field: 'chargeDir', value: undefined },
+        );
+        return intents;
+      }
+
+      if (!isWalkableTile(cluster, nx, ny)) {
+        intents.push(
+          { kind: 'change_ai_state', entityId: entity.id, newState: 'rest' },
+          { kind: 'set_cooldown', entityId: entity.id, ticks: 2 },
+          { kind: 'set_ai_field', entityId: entity.id, field: 'chargeDir', value: undefined },
+        );
+        return intents;
+      }
+      intents.push({ kind: 'move', entityId: entity.id, to: { x: nx, y: ny } });
+      break;
+    }
+
+    case 'rest': {
+      // Adjacent target — melee attack even during rest
+      const meleeIntents = leechTryMeleeIntents(state, entity, cluster);
+      if (meleeIntents.length > 0) return meleeIntents;
+
+      const cd = (ai.actionCooldown ?? 1) - 1;
+      intents.push({ kind: 'set_cooldown', entityId: entity.id, ticks: cd });
+      if (cd <= 0) {
+        intents.push(
+          { kind: 'change_ai_state', entityId: entity.id, newState: 'wall_walk' },
+          { kind: 'set_cooldown', entityId: entity.id, ticks: 0 },
+        );
+      }
+      break;
+    }
+  }
+
+  return intents;
 }
 
-export function makeBitMite(pos: Position, clusterId: number): Entity {
-  return {
-    id: _nextEntityId++,
-    name: 'Bit-Mite Swarm',
-    glyph: '⁕',
-    fg: '#cc4444',
-    position: { ...pos },
-    clusterId,
-    speed: 12,
-    energy: 0,
-    coherence: 15,
-    maxCoherence: 15,
-    attackDistance: 1,
-    attackValue: 4,
-    ai: {
-      kind: 'bit_mite',
-      faction: 'aggressive',
-      aiState: 'wander',
-      sightRadius: 8,
-      wallPenetration: 0,
-    },
-  };
+function leechTryMeleeIntents(state: GameState, entity: Entity, cluster: Cluster): Intent[] {
+  const target = findAttackTarget(state, entity, cluster);
+  if (!target) return [];
+  const dx = Math.abs(entity.position.x - target.position.x);
+  const dy = Math.abs(entity.position.y - target.position.y);
+  if (dx + dy > 1) return [];
+
+  const intents: Intent[] = [];
+  const pi = target.id === state.player.id;
+  intents.push(
+    { kind: 'melee_attack', attackerId: entity.id, targetId: target.id, damage: entity.attackValue },
+    { kind: 'message', text: `Logic Leech strikes ${target.name}! −${entity.attackValue} coherence. (${Math.max(0, (target.coherence ?? 0) - entity.attackValue)}/${target.maxCoherence})`, style: 'combat' },
+  );
+  if (pi) intents.push({ kind: 'sound', id: 'hit' });
+  if (target.coherence !== undefined && target.coherence - entity.attackValue <= 0) {
+    intents.push(
+      { kind: 'message', text: `Logic Leech destroys ${target.name}!`, style: 'combat' },
+      { kind: 'remove_entity', entityId: target.id, cause: 'killed', killerId: entity.id },
+      { kind: 'smoke', position: target.position, color: factionSmokeColor(target.ai?.faction) },
+    );
+  }
+  return intents;
 }
+
+// ── Main dispatch ──
+
+export function updateEntityAI(state: GameState, entity: Entity) {
+  const ai = entity.ai;
+  if (!ai) return;
+  const cluster = state.clusters.get(entity.clusterId);
+  if (!cluster) return;
+
+  // All entity types now return Intent[] resolved through the single mutation point
+  let intents: Intent[];
+  switch (ai.kind) {
+    case 'chronicler':      intents = chroniclerAI(state, entity, cluster); break;
+    case 'bit_mite':        intents = bitMiteAI(state, entity, cluster); break;
+    case 'logic_leech':     intents = logicLeechAI(state, entity, cluster); break;
+    case 'sentry':          intents = sentryAI(state, entity, cluster); break;
+    case 'gate_keeper':     intents = gateKeeperAI(state, entity, cluster); break;
+    case 'repair_scrapper': intents = repairScrapperAI(state, entity, cluster); break;
+    case 'titan_spawn':     intents = titanSpawnAI(state, entity, cluster); break;
+    default: return;
+  }
+  resolveIntents(state, intents);
+}
+
+// ── Prop entity factory (not data-driven — props have no EntityDef) ──
+
+import { nextEntityId } from './entity-defs';
 
 export function makePropEntity(pos: Position, clusterId: number, glyph: string, fg: string, name: string, propTag: string): Entity {
   return {
-    id: _nextEntityId++,
+    id: nextEntityId(),
     name,
     glyph,
     fg,
@@ -916,151 +881,5 @@ export function makePropEntity(pos: Position, clusterId: number, glyph: string, 
     attackDistance: 0,
     attackValue: 0,
     propTag,
-    // no ai — static prop, never acts
-  };
-}
-
-export function makeDamagedBitMite(pos: Position, clusterId: number): Entity {
-  return {
-    id: _nextEntityId++,
-    name: 'Corrupted Echo Fragment',
-    glyph: '⁕',
-    fg: '#aa6644',
-    position: { ...pos },
-    clusterId,
-    speed: 18,
-    energy: 0,
-    coherence: 5,
-    maxCoherence: 5,
-    attackDistance: 1,
-    attackValue: 2,
-    ai: {
-      kind: 'bit_mite',
-      faction: 'aggressive',
-      aiState: 'wander',
-      sightRadius: 5,
-      wallPenetration: 0,
-    },
-  };
-}
-
-export function makeLogicLeech(pos: Position, clusterId: number): Entity {
-  return {
-    id: _nextEntityId++,
-    name: 'Logic Leech',
-    glyph: '⌒',
-    fg: '#cc4444',
-    position: { ...pos },
-    clusterId,
-    speed: 20,
-    energy: 0,
-    coherence: 25,
-    maxCoherence: 25,
-    attackDistance: 1,
-    attackValue: 12,
-    ai: {
-      kind: 'logic_leech',
-      faction: 'aggressive',
-      aiState: 'wall_walk',
-      sightRadius: 15,
-      wallPenetration: 2,
-      invisible: false,
-    },
-  };
-}
-
-export function makeSentry(pos: Position, clusterId: number): Entity {
-  return {
-    id: _nextEntityId++,
-    name: 'Sentry',
-    glyph: 'S',
-    fg: '#23d2a6',
-    position: { ...pos },
-    clusterId,
-    speed: 20,
-    energy: 0,
-    coherence: 15,
-    maxCoherence: 15,
-    attackDistance: 5,
-    attackValue: 4,
-    ai: {
-      kind: 'sentry',
-      faction: 'friendly',
-      aiState: 'patrol',
-      sightRadius: 10,
-      wallPenetration: 1,
-    },
-  };
-}
-
-export function makeGateKeeper(pos: Position, clusterId: number): Entity {
-  return {
-    id: _nextEntityId++,
-    name: 'Gate-Keeper',
-    glyph: '⛨',
-    fg: '#23d2a6',
-    position: { ...pos },
-    clusterId,
-    speed: 15,
-    energy: 0,
-    coherence: 40,
-    maxCoherence: 40,
-    attackDistance: 6,  // beam range
-    attackValue: 12,
-    ai: {
-      kind: 'gate_keeper',
-      faction: 'friendly',
-      aiState: 'lockdown',        // pulls targets onto inself
-      sightRadius: 6,
-      wallPenetration: 0,
-    },
-  };
-}
-
-export function makeTitanSpawn(pos: Position, clusterId: number): Entity {
-  return {
-    id: _nextEntityId++,
-    name: '[UNKNOWN PROCESS]',
-    glyph: 'X',
-    fg: '#ff44ff',
-    position: { ...pos },
-    clusterId,
-    speed: 15,
-    energy: -400,  // dormant for ~40 turns before activating
-    coherence: 60,
-    maxCoherence: 60,
-    attackDistance: 4,
-    attackValue: 20,
-    ai: {
-      kind: 'titan_spawn',
-      faction: 'titan',
-      aiState: 'hunt',
-      sightRadius: 12,
-      wallPenetration: 1,
-    },
-  };
-}
-
-export function makeRepairScrapper(pos: Position, clusterId: number): Entity {
-  return {
-    id: _nextEntityId++,
-    name: 'Repair Scrapper',
-    glyph: '⚙',
-    fg: '#aaaa66',
-    position: { ...pos },
-    clusterId,
-    speed: 25,
-    energy: 0,
-    coherence: 35,
-    maxCoherence: 35,
-    attackDistance: 0,
-    attackValue: 0,
-    ai: {
-      kind: 'repair_scrapper',
-      faction: 'neutral',
-      aiState: 'patrol',
-      sightRadius: 5,
-      wallPenetration: 0,
-    },
   };
 }

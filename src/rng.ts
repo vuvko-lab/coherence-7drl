@@ -43,6 +43,16 @@ export function shuffle<T>(arr: T[]): T[] {
   return arr;
 }
 
+/** Save the current RNG state (for determinism checks). */
+export function saveRngState(): number {
+  return _state;
+}
+
+/** Restore a previously saved RNG state. */
+export function restoreRngState(s: number) {
+  _state = s;
+}
+
 /** Generate a seed from current time + small random component */
 export function generateSeed(): number {
   return (Date.now() ^ (Math.random() * 0x7FFFFFFF)) >>> 0;

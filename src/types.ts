@@ -30,6 +30,7 @@ export interface Tile {
   integrity?: number; // wall=3, door=2; corruption degrades to 0 → floor
   doorOpen?: boolean; // true = open, undefined/false = closed
   doorCloseTick?: number; // tick when door was last vacated (for auto-close)
+  sealed?: boolean; // quarantine-sealed door — closeDoor() preserves glyph/state
   terminalId?: string; // set when TileType.Terminal
 }
 
@@ -201,6 +202,7 @@ export interface TerminalDef {
   isFinalTerminal?: boolean;    // cluster-N narrative terminal requiring root parts
   lockModeUntilTick?: number;   // if > tick, terminal is temporarily locked after hack
   hackCount?: number;           // number of successful hacks (final terminal escalation)
+  hazardOverrides?: { label: string; hazardRoomId: number }[];  // deactivation buttons shown in terminal overlay
 }
 
 // ── Interactables ──
@@ -270,6 +272,7 @@ export interface RevealEffect {
 }
 
 export const SMOKE_DURATION_MS = 480; // total smoke animation time in ms (3 phases × 160ms)
+export const MARK_DURATION_MS = 480;  // chronicler mark animation time in ms (3 phases × 160ms)
 
 /** Ordered root privilege names granted by collecting root fragments */
 export const ROOT_PRIVILEGES = ['ROOT READ', 'ROOT WRITE', 'ROOT EXEC', 'ROOT ID', 'ROOT PASS'] as const;
@@ -316,6 +319,14 @@ export interface SmokeEffect {
   y: number;
   fg: string;        // faction-based color
   spawnTime: number; // performance.now() when spawned; expires after SMOKE_DURATION_MS
+}
+
+export interface MarkEffect {
+  targetId: number;  // entity being marked (follow its position)
+  x: number;         // snapshot position (updated each frame to track entity)
+  y: number;
+  fg: string;        // animation color
+  spawnTime: number; // performance.now() when spawned; 0 = unstamped
 }
 
 export interface ShootingEffect {
@@ -439,6 +450,8 @@ export interface Entity {
   modules?: PlayerModule[];
   ai?: EntityAI;
   propTag?: string; // identifies static prop entities (e.g. 'spacesuit', 'sleever_device')
+  _lastDamagedBy?: number;   // id of entity/player that last dealt damage
+  _pendingRemoval?: boolean; // marked for deferred removal after entity loop
 }
 
 // ── Game State ──
@@ -465,7 +478,7 @@ export interface GameState {
   showAlertOverlay: boolean;
   showEnemyVision: boolean;
   alertFill?: Map<string, number>;
-  alertThreats?: { x: number; y: number; desc: string }[];
+  alertThreats?: { x: number; y: number; desc: string; source: 'hazard' | 'entity' }[];
   openTerminal?: { terminalId: string; clusterId: number };
   openInteractable?: { id: string; clusterId: number };
   revealEffects: RevealEffect[];
@@ -473,10 +486,10 @@ export interface GameState {
   animation: AnimationState | null;
   hazardFogMarks: Map<string, HazardOverlayType>;
   alertLevel: number;  // 0–300+ antivirus threat level: 0–99 friendly, 100–199 suspicious, 200+ enemy
-  markedEntities: Set<number>;  // entity ids marked by Chronicler/White-Hat
+  markedEntities: Map<number, number>;  // marked entity id → chronicler id that marked it
   // Narrative & progression
   rootPrivileges: string[];            // named privileges collected (ROOT READ, WRITE, EXEC, ID, PASS)
-  killedEntities: { name: string; kind: EntityKind }[];  // for victory stats
+  killedEntities: { name: string; kind: EntityKind; byPlayer: boolean }[];  // for victory stats
   finalClusterId: number;              // cluster ID where victory condition is checked (default 5)
   gameOver?: boolean;                  // true when player exits the final cluster or dies
   playerDead?: boolean;                // true when player coherence reaches 0
@@ -484,6 +497,7 @@ export interface GameState {
   collapseGlitchTiles: Map<string, { glyph: string; fg: string; expireTick: number }>;
   selfPanelRevealed: boolean;         // false until player interacts with tutorial echo (or skips cluster 0)
   smokeEffects: SmokeEffect[];        // transient death/dissolution smoke particles
+  markEffects: MarkEffect[];          // transient chronicler marking animations
   pendingGlitch?: string;             // set by game logic; consumed by main.ts to fire glitch effects
   pendingSounds: string[];            // sound IDs queued by game logic; consumed by main.ts
   narrativeChoice?: 'restore' | 'jump'; // final-room choice; shapes victory epilogue

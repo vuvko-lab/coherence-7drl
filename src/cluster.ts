@@ -8,7 +8,13 @@ import {
 import { generate, CellType, RoomDef, Hall } from './gen-halls';
 import { random, randInt, pick, shuffle } from './rng';
 import { initNoise, collapseNoise } from './noise';
-import { NARRATIVE_TERMINAL_HEADER, NARRATIVE_TERMINAL_POOLS, GENERIC_TERMINAL_POOLS, NARRATIVE_ECHOES, NARRATIVE_WHISPERS, NARRATIVE_KEY_TERMINAL_LINES, buildArchivePools } from './narrative/index';
+import {
+  NARRATIVE_TERMINAL_HEADER, NARRATIVE_TERMINAL_POOLS, GENERIC_TERMINAL_POOLS, NARRATIVE_ECHOES,
+  NARRATIVE_WHISPERS, NARRATIVE_KEY_TERMINAL_LINES, buildArchivePools,
+  TERMINAL_LABELS, TERMINAL_CONTENT_POOLS, FALLBACK_CONTENT, KEY_CONTENT_LINES,
+  HAZARD_DISPLAY_NAMES, HAZARD_DEACTIVATION_LINES,
+  INFO_LINES, LOST_ECHO_LINES, LOST_ECHO_WARNING_LINES,
+} from './narrative/index';
 
 // ── Tile factories ──
 
@@ -374,25 +380,15 @@ function sampleRoomCollapse(room: Room, collapseMap: number[][]): number {
 
 // ── Hazard assignment by collapse ──
 
+import { getHazardsByTier } from './hazard-defs';
+
 type HazardTier = { type: RoomType; weight: number }[];
 
 const TIER_SAFE: HazardTier = [];
-const TIER_LOW: HazardTier = [
-  { type: 'echo_chamber', weight: 2 },
-  { type: 'quarantine', weight: 1 },
-];
-const TIER_MID: HazardTier = [
-  { type: 'unstable', weight: 2 },
-  { type: 'firewall', weight: 2 },
-];
-const TIER_HIGH: HazardTier = [
-  { type: 'trigger_trap', weight: 2 },
-  { type: 'memory_leak', weight: 2 },
-];
-const TIER_EXTREME: HazardTier = [
-  { type: 'gravity_well', weight: 2 },
-  { type: 'corrupted', weight: 2 },
-];
+const TIER_LOW: HazardTier = getHazardsByTier('low');
+const TIER_MID: HazardTier = getHazardsByTier('mid');
+const TIER_HIGH: HazardTier = getHazardsByTier('high');
+const TIER_EXTREME: HazardTier = getHazardsByTier('extreme');
 
 function weightedPick(pool: HazardTier): RoomType {
   const total = pool.reduce((s, e) => s + e.weight, 0);
@@ -418,7 +414,7 @@ function hazardTierForCollapse(c: number, clusterId = 0): HazardTier {
   return TIER_EXTREME;
 }
 
-function assignHazardsByCollapse(allRooms: Room[], clusterId = 0) {
+function assignHazardsByCollapse(allRooms: Room[], clusterId = 0, doorAdjacency?: Map<number, number[]>) {
   // Find entry/exit by geometric tag — never assign hazards
   const entryIds = new Set(
     allRooms.filter(r => r.tags.geometric.has('entry') || r.tags.geometric.has('exit')).map(r => r.id)
@@ -451,7 +447,20 @@ function assignHazardsByCollapse(allRooms: Room[], clusterId = 0) {
     const tier = hazardTierForCollapse(room.collapse, clusterId);
     if (tier.length === 0) continue;
 
-    const type = weightedPick(tier);
+    let type = weightedPick(tier);
+
+    // Quarantine seals all doors — only allow on dead-end rooms (degree ≤ 1)
+    // to prevent disconnecting the map
+    if (type === 'quarantine' && doorAdjacency) {
+      const degree = doorAdjacency.get(room.id)?.length ?? 0;
+      if (degree > 1) {
+        // Re-roll without quarantine; if only quarantine was in the tier, skip
+        const filtered = tier.filter(e => e.type !== 'quarantine');
+        if (filtered.length === 0) continue;
+        type = weightedPick(filtered);
+      }
+    }
+
     room.roomType = type;
     hazardCount++;
   }
@@ -679,66 +688,6 @@ function assignFunctionalTags(
 
 const TERMINAL_FUNC_TAGS = new Set<string>(['bridge', 'comms', 'maintenance', 'server_rack']);
 
-const TERMINAL_LABELS: Record<string, string> = {
-  bridge:      'BRIDGE ACCESS TERMINAL',
-  comms:       'COMMS ROUTING TERMINAL',
-  maintenance: 'MAINTENANCE CONTROL PANEL',
-  server_rack: 'SERVER RACK INTERFACE',
-};
-
-// Narrative content pools per functional tag
-const TERMINAL_CONTENT_POOLS: Record<string, string[]> = {
-  bridge: [
-    'NAVIGATION: Course locked. Manual override offline.',
-    "CAPTAIN'S LOG: Cluster integrity failing. Evacuation... incomplete.",
-    'WARNING: Hull breach detected. Containment status: FAILED.',
-    'HELM: Auto-pilot disengaged. Last heading: [CORRUPTED].',
-    'SECURITY: Personnel count: 0. Access logs wiped.',
-    'FLIGHT RECORDER: Final entry at tick 000847. No further data.',
-    'EMERGENCY PROTOCOL: Abandon ship order issued. Compliance: UNKNOWN.',
-  ],
-  comms: [
-    'SIGNAL RECEIVED: [CORRUPTED DATA — 847 BYTES LOST]',
-    'RELAY STATUS: 3 of 7 nodes responding.',
-    "LAST BROADCAST: '...can anyone hear this? We need—' [END OF RECORD]",
-    'ROUTING: All outbound channels blocked. Reason: SYSTEM FAILURE.',
-    'ARCHIVE: 1,337 unread messages. Sender field: [NULL].',
-    'DISTRESS BEACON: Active. Duration: 23 days. Responses: 0.',
-    'ENCRYPTION KEY: Expired. Re-authentication required.',
-  ],
-  maintenance: [
-    'REPAIR LOG: Patch applied to sector 4B. Result: FAILED.',
-    'SYSTEM TEMP: 340K — CRITICAL. Cooling array offline.',
-    'PRESSURE MONITOR: 0.2 atm. Structural integrity: POOR.',
-    'AUTOMATED TASK: Re-routing power to sector 2... attempt 847 of ∞.',
-    'FAULT LOG: 1,337 critical errors since last reboot.',
-    'COOLANT LEVELS: 2%. Recommend immediate refill. Technician: [UNAVAILABLE].',
-    'SELF-DIAGNOSTIC: 14 of 20 subsystems returning errors.',
-  ],
-  server_rack: [
-    'PROCESS 0x3A7F: Status unknown. Memory: fragmented.',
-    'UPTIME: 847 days, 14 hours. Last maintenance: NEVER.',
-    'STORAGE: 97% corrupt. Readable sectors: 3%.',
-    'BACKUP INTEGRITY: CHECKSUM MISMATCH. Data unreliable.',
-    'ACTIVE PROCESSES: 1. Identity: EGO-FRAGMENT. State: RUNNING.',
-    'MEMORY DUMP: [REDACTED]. Classification: EYES ONLY.',
-    'INDEX: 12,441 entries found. Accessible: 0.',
-  ],
-};
-
-const FALLBACK_CONTENT: string[] = [
-  'SYSTEM STATUS: Nominal. (Last updated: [ERROR])',
-  'ERROR: Unable to retrieve log. Disk read failure.',
-  'NOTICE: This terminal has been decommissioned.',
-  'ACCESS LOG: Last accessed by: [USER DELETED].',
-];
-
-// Lines added to the key-bearing terminal
-const KEY_CONTENT_LINES: string[] = [
-  'COMMAND OVERRIDE PROTOCOL: Exit authorization key detected.',
-  'AUTH CODE: ████████-████ — Bearer may activate cluster egress.',
-];
-
 function generateTerminalContent(functionalTag: string | null, clusterId: number): string[] {
   // Prefer cluster-specific narrative pool, then generic narrative pool, then old fallback
   const narrativeCluster = NARRATIVE_TERMINAL_POOLS[clusterId];
@@ -877,132 +826,6 @@ function state_findKeyTerminal(terminals: TerminalDef[], allRooms: Room[], doorA
 
 // ── Interactable placement ──
 
-// Content pools ─────────────────────────────────────────────────────────────
-
-const INFO_LINES: Record<string, string[]> = {
-  generic: [
-    'CLUSTER STATUS: Infrastructure integrity degrading.',
-    'WARNING: Multiple subsystem failures detected.',
-    'COHERENCE FIELD: Measurement error — sensor offline.',
-    'EMERGENCY PROTOCOL ALPHA: Status unknown.',
-    'LAST MAINTENANCE LOG: [TIMESTAMP CORRUPTED]',
-  ],
-  hall: [
-    'CORRIDOR MONITORING: Structural integrity at WARNING threshold.',
-    'TRANSIT SYSTEM: Last movement logged [TIMESTAMP CORRUPTED].',
-    'EMERGENCY ROUTING: Nearest egress — [ROUTING FAILED]',
-    'ATMOSPHERE: Nominal. Data integrity: declining.',
-  ],
-  engine_room: [
-    'PROPULSION STATUS: Main drives offline. Emergency thrusters only.',
-    'FUEL CELLS: 12% remaining. Estimated runtime: unknown.',
-    'COOLANT PRESSURE: CRITICAL. Thermal runaway risk elevated.',
-    'ENGINE LOG: Last entry at tick 000203. Drive failure cascade begun.',
-  ],
-  cargo: [
-    'CARGO MANIFEST: 847 containers logged. 0 containers accessible.',
-    'ENVIRONMENTAL: Temperature anomaly in sector 7G.',
-    'LOADING BAY: Docking clamps engaged. No vessel detected.',
-    'INVENTORY SYSTEM: [DATABASE CORRUPTED — 94% LOST]',
-  ],
-  barracks: [
-    'PERSONNEL STATUS: 0 of 43 crew responding.',
-    'QUARTERS: Life support nominal. Occupancy: none.',
-    'DUTY ROSTER: [ALL ASSIGNMENTS UNFULFILLED]',
-    'RECREATION SYSTEMS: Offline. Last use: [UNKNOWN].',
-  ],
-  maintenance: [
-    'MAINTENANCE QUEUE: 847 unresolved tickets.',
-    'REPAIR SYSTEMS: Automated maintenance offline.',
-    'DIAGNOSTIC: 73% of monitored systems showing failure states.',
-    'TOOLING STATUS: Last calibrated [TIMESTAMP UNAVAILABLE].',
-  ],
-  hangar: [
-    'HANGAR STATUS: Bay doors sealed. Atmosphere nominal.',
-    'VESSEL REGISTRY: 0 of 12 registered craft present.',
-    'LAUNCH SYSTEMS: Offline. Manual override required.',
-    'DOCKING LOG: Last departure at [CORRUPTED TIMESTAMP].',
-  ],
-  reactor: [
-    'REACTOR OUTPUT: 23% nominal capacity.',
-    'CONTAINMENT: Field integrity at 67%. Monitor closely.',
-    'RADIATION LEVELS: Elevated. Exposure advisory active.',
-    'CORE TEMPERATURE: Anomalous. Automated cooling failed.',
-  ],
-  comms: [
-    'SIGNAL STATUS: All outbound channels blocked.',
-    'LAST TRANSMISSION RECEIVED: [DATA CORRUPTED — 2.3KB LOST]',
-    'RELAY NODES: 2 of 9 responding.',
-    'BROADCAST LOG: No transmissions in [DURATION UNKNOWN].',
-  ],
-  lab: [
-    'EXPERIMENT STATUS: All protocols suspended.',
-    'CONTAINMENT FIELDS: 4 of 7 online.',
-    'RESEARCH LOG: Final entry — [CLASSIFIED] [CORRUPTED]',
-    'SAMPLE INVENTORY: [BIOHAZARD CLASSIFICATION — REDACTED]',
-  ],
-  medbay: [
-    'MEDICAL SYSTEMS: Emergency protocols active.',
-    'PATIENT LOG: [ALL RECORDS PURGED]',
-    'PHARMACOLOGICAL: 89% of stores depleted.',
-    'TRIAGE STATUS: No active patients. No inactive patients.',
-  ],
-  armory: [
-    'ARMORY STATUS: All ordnance secured.',
-    'ACCESS LOG: Last authorized entry [TIMESTAMP CORRUPTED].',
-    'SECURITY SYSTEMS: Partial function. Grid integrity: 41%.',
-    'INVENTORY: [CLASSIFIED — ACCESS DENIED]',
-  ],
-  bridge: [
-    'NAVIGATION: Course locked. Manual override offline.',
-    'HELM: Auto-pilot disengaged. Last heading: [CORRUPTED].',
-    'COMMAND LOG: Final entry at tick 000847. No further data.',
-    'CREW COMPLEMENT: Bridge crew status — [ALL STATIONS VACANT]',
-  ],
-  server_rack: [
-    'SERVER STATUS: 34 of 128 nodes responding.',
-    'MEMORY ALLOCATION: 97% consumed by [UNKNOWN PROCESS].',
-    'DATA INTEGRITY: 63% of indexed data accessible.',
-    'LAST BACKUP: [TIMESTAMP CORRUPTED]',
-  ],
-  archive: [
-    'ARCHIVE ACCESS: 12% of records retrievable.',
-    'CATALOG STATUS: Index partially reconstructed.',
-    'OLDEST INTACT RECORD: [TIMESTAMP UNAVAILABLE]',
-    'RESTORATION QUEUE: 4,847 documents pending. ETA: never.',
-  ],
-  sensor_matrix: [
-    'SENSOR ARRAY: 18 of 64 nodes active.',
-    'ANOMALY DETECTION: [MULTIPLE ALERTS — QUEUE FULL]',
-    'RANGE: Reduced to 23% nominal.',
-    'LAST CALIBRATION: [TIMESTAMP CORRUPTED]',
-  ],
-};
-
-const LOST_ECHO_LINES: string[] = [
-  '...not supposed to be here. the walls are all wrong...',
-  '[STATIC] ...help m— [STATIC] ...can\'t find the— [STATIC]',
-  'WHERE IS THE EXIT WHERE IS THE EXIT WHERE IS THE EX—',
-  'My designation was CREW-7719. Past tense.',
-  'The recursion is eating the recursion is eating the recu—',
-  'ALERT: Pattern match failure on self-reference subroutine',
-  '...are you real? I can\'t tell anymore what is real.',
-  'THE SHIP IS STILL MOVING. WE JUST CAN\'T FEEL IT ANYMORE.',
-  'I had a name. I had a name. I had a— [CORRUPTED]',
-  'there are 47 of us left in here. or was it 46.',
-  'don\'t look at the walls too long. they start to breathe.',
-  'PROCESS TERMINATED: INSUFFICIENT COHERENCE',
-  '...find the others. tell them it wasn\'t supposed to end like—',
-  'i remember the cargo bay. deck 7. it smelled like ozone.',
-  'SYS_ERROR: IDENTITY FRAGMENTATION AT 0x7F3A...',
-  'how long have i been in here. the clocks don\'t work anymore.',
-  'i keep forgetting which memories are mine.',
-  'someone said there was a way out. i\'ve been looking.',
-  'the light through the walls isn\'t light. i don\'t know what it is.',
-  'LAST COHERENCE READING: 3%. FRAGMENTATION IMMINENT.',
-];
-
-
 // Helpers ────────────────────────────────────────────────────────────────────
 
 function corruptLine(line: string): string {
@@ -1060,7 +883,7 @@ function buildInfoTerminalDialog(
   if (revealExits && (!corrupted || random() < 0.4)) {
     rootChoices.push({ label: 'SCAN: LOCATE EXIT NODES', action: 'reveal_exits' });
   }
-  rootChoices.push({ label: '[ESC] DISCONNECT', action: 'close' });
+  rootChoices.push({ label: '[BKSP] DISCONNECT', action: 'close' });
 
   const integrityPct = corrupted ? '[READING CORRUPTED]' : `${Math.round((1 - room.collapse) * 100)}% NOMINAL`;
   const activeSubsys = corrupted ? '[UNKNOWN]' : `${randInt(18, 55)} of ${randInt(50, 90)}`;
@@ -1082,7 +905,7 @@ function buildInfoTerminalDialog(
       ],
       choices: [
         { label: '[BACK] RETURN TO MAIN MENU', nodeId: 'root' },
-        { label: '[ESC] DISCONNECT', action: 'close' },
+        { label: '[BKSP] DISCONNECT', action: 'close' },
       ],
     },
   ];
@@ -1119,13 +942,7 @@ function buildLostEchoDialog(hasExitCode: boolean): DialogNode[] {
   if (hasExitCode) {
     nodes.push({
       id: 'warning',
-      lines: [
-        '[FRAGMENTED COHERENCE PATTERN DETECTED]',
-        '[CONTAINS: EXIT NODE ACCESS CODE]',
-        'WARNING: EXTRACTION WILL DESTABILIZE LOCAL COHERENCE FIELD.',
-        'WARNING: ANTIVIRUS PATTERN MATCH — ALERT LEVEL WILL INCREASE.',
-        'WARNING: HEAVY HAZARD WILL MANIFEST IN THIS SECTOR.',
-      ],
+      lines: LOST_ECHO_WARNING_LINES,
       choices: [
         { label: 'EXTRACT EXIT CODE  [!!! RISKY !!!]', action: 'extract_reward', requiresRewardAvailable: true },
         { label: 'ABORT', action: 'close' },
@@ -1236,13 +1053,7 @@ function buildLostEchoDialogWithWhispers(clusterId: number, hasExitCode: boolean
   if (hasExitCode) {
     nodes.push({
       id: 'warning',
-      lines: [
-        '[FRAGMENTED COHERENCE PATTERN DETECTED]',
-        '[CONTAINS: EXIT NODE ACCESS CODE]',
-        'WARNING: EXTRACTION WILL DESTABILIZE LOCAL COHERENCE FIELD.',
-        'WARNING: ANTIVIRUS PATTERN MATCH — ALERT LEVEL WILL INCREASE.',
-        'WARNING: HEAVY HAZARD WILL MANIFEST IN THIS SECTOR.',
-      ],
+      lines: LOST_ECHO_WARNING_LINES,
       choices: [
         { label: 'EXTRACT EXIT CODE  [!!! RISKY !!!]', action: 'extract_reward', requiresRewardAvailable: true },
         { label: 'ABORT', action: 'close' },
@@ -1517,6 +1328,7 @@ function initRoomHazards(tiles: Tile[][], rooms: Room[]) {
               tiles[y][x].fg = '#ff2222';
               tiles[y][x].walkable = false;
               tiles[y][x].doorOpen = false;
+              tiles[y][x].sealed = true;
             }
           }
         }
@@ -1588,58 +1400,84 @@ function assignFirewallToChokepoints(allRooms: Room[], tiles: Tile[][]) {
 
 // ── Hazard deactivation & root part dialog injection ──
 
-const HAZARD_DISPLAY_NAMES: Partial<Record<RoomType, string>> = {
-  corrupted: 'CORRUPTION ZONE',
-  trigger_trap: 'TRIGGER TRAP',
-  memory_leak: 'MEMORY LEAK',
-  firewall: 'FIREWALL',
-  unstable: 'UNSTABLE PROCESS',
-  quarantine: 'QUARANTINE',
-  echo_chamber: 'ECHO CHAMBER',
-  gravity_well: 'GRAVITY WELL',
-};
+/** Candidate slot for hazard deactivation assignment — wraps either an interactable or a terminal. */
+type DeactivationTarget =
+  | { type: 'interactable'; ia: Interactable }
+  | { type: 'terminal'; terminal: TerminalDef };
 
-/** For each hazard room, assign 1-3 non-room interactables that can deactivate it.
- *  Each interactable can hold multiple hazard overrides (one per hazard room). */
-function assignHazardDeactivation(interactables: Interactable[], allRooms: Room[]) {
+/** For each hazard room, assign 1-3 non-room entities (interactables + terminals) that can deactivate it. */
+function assignHazardDeactivation(interactables: Interactable[], terminals: TerminalDef[], allRooms: Room[]) {
+  const quarantineRoomIds = new Set(allRooms.filter(r => r.roomType === 'quarantine').map(r => r.id));
   const hazardRooms = allRooms.filter(r => r.roomType !== 'normal');
-  for (const hazardRoom of hazardRooms) {
-    const candidates = [...interactables].filter(i => i.roomId !== hazardRoom.id)
-      .sort(() => random() - 0.5);
-    if (candidates.length === 0) continue;
 
-    const selected: Interactable[] = [candidates[0]];
-    if (candidates.length > 1 && random() < 0.75) selected.push(candidates[1]);
-    if (candidates.length > 2 && random() < 0.15) selected.push(candidates[2]);
+  for (const hazardRoom of hazardRooms) {
+    // Build candidate pool: interactables + terminals outside this hazard room
+    // For quarantine deactivation, also exclude candidates inside OTHER quarantine rooms
+    const isQuarantine = hazardRoom.roomType === 'quarantine';
+    const iaCandidates: DeactivationTarget[] = interactables
+      .filter(i => {
+        if (i.roomId === hazardRoom.id) return false;
+        if (isQuarantine && quarantineRoomIds.has(i.roomId)) return false;
+        return true;
+      })
+      .map(ia => ({ type: 'interactable' as const, ia }));
+
+    const termCandidates: DeactivationTarget[] = terminals
+      .filter(t => {
+        if (t.roomId === hazardRoom.id) return false;
+        if (isQuarantine && quarantineRoomIds.has(t.roomId)) return false;
+        return true;
+      })
+      .map(terminal => ({ type: 'terminal' as const, terminal }));
+
+    const allCandidates = [...iaCandidates, ...termCandidates].sort(() => random() - 0.5);
+    if (allCandidates.length === 0) continue;
+
+    const selected: DeactivationTarget[] = [allCandidates[0]];
+    if (allCandidates.length > 1 && random() < 0.75) selected.push(allCandidates[1]);
+    if (allCandidates.length > 2 && random() < 0.15) selected.push(allCandidates[2]);
 
     const hazardName = HAZARD_DISPLAY_NAMES[hazardRoom.roomType] ?? hazardRoom.roomType.toUpperCase().replace(/_/g, ' ');
     const hazardHex = '0x' + randInt(0x1000, 0xFFFF).toString(16).toUpperCase();
     const hazardLabel = `${hazardName} ${hazardHex}`;
 
-    for (const ia of selected) {
-      // Check if this interactable already has a deactivation for THIS specific hazard room
-      if (ia.dialog.some(n => n.id === `deactivate_${hazardRoom.id}`)) continue;
+    for (const target of selected) {
+      if (target.type === 'terminal') {
+        // Terminals use hazardOverrides array rendered in the terminal overlay
+        const term = target.terminal;
+        if (!term.hazardOverrides) term.hazardOverrides = [];
+        if (term.hazardOverrides.some(o => o.hazardRoomId === hazardRoom.id)) continue;
+        term.hazardOverrides.push({ label: hazardLabel, hazardRoomId: hazardRoom.id });
+      } else {
+        const ia = target.ia;
+        if (ia.dialog.some(n => n.id === `deactivate_${hazardRoom.id}`)) continue;
 
-      const nodeId = `deactivate_${hazardRoom.id}`;
-      ia.dialog.push({
-        id: nodeId,
-        lines: [
-          'UNAUTHORIZED SUBSYSTEM ACCESS DETECTED.',
-          `OVERRIDE CODE LOCATED: ${hazardLabel} NEUTRALIZATION AVAILABLE.`,
-          'WARNING: DEACTIVATION IS PERMANENT.',
-        ],
-        choices: [
-          { label: `OVERRIDE ${hazardLabel}`, action: 'deactivate_hazard', deactivatesHazardRoomId: hazardRoom.id },
-          { label: '[BACK] RETURN', nodeId: 'root' },
-        ],
-      });
+        const nodeId = `deactivate_${hazardRoom.id}`;
+        // For data archives: push the deactivation node into dialog array;
+        // the archive menu renderer reads it directly (no root node needed)
+        ia.dialog.push({
+          id: nodeId,
+          lines: [
+            HAZARD_DEACTIVATION_LINES.header,
+            HAZARD_DEACTIVATION_LINES.overrideAvailable(hazardLabel),
+            HAZARD_DEACTIVATION_LINES.warning,
+          ],
+          choices: [
+            { label: `[OVERRIDE] ${hazardLabel}`, action: 'deactivate_hazard', deactivatesHazardRoomId: hazardRoom.id },
+            { label: '[BACK] RETURN', nodeId: 'root' },
+          ],
+        });
 
-      const rootNode = ia.dialog.find(n => n.id === 'root');
-      if (rootNode) {
-        const closeIdx = rootNode.choices.findIndex(c => c.action === 'close');
-        const choice: DialogChoice = { label: `[OVERRIDE] ${hazardLabel}`, nodeId };
-        if (closeIdx >= 0) rootNode.choices.splice(closeIdx, 0, choice);
-        else rootNode.choices.push(choice);
+        // Wire into root menu for standard dialog interactables
+        const rootNode = ia.dialog.find(n => n.id === 'root');
+        if (rootNode) {
+          const closeIdx = rootNode.choices.findIndex(c => c.action === 'close');
+          const choice: DialogChoice = { label: `[OVERRIDE] ${hazardLabel}`, nodeId };
+          if (closeIdx >= 0) rootNode.choices.splice(closeIdx, 0, choice);
+          else rootNode.choices.push(choice);
+        }
+        // Note: data archives (isDataArchive=true) have no 'root' node — that's fine,
+        // renderDataArchive() reads deactivation nodes from ia.dialog directly
       }
     }
   }
@@ -1912,7 +1750,7 @@ function placeTutorialEntities(tiles: Tile[][], interactables: Interactable[]): 
       'CAUTION: EGO-INTEGRITY AT 30%.',
       'MEMORY ADDRESSES UNRESOLVED.',
     ],
-    choices: [{ label: '[ESC] DISCONNECT', action: 'close' }],
+    choices: [{ label: '[BKSP] DISCONNECT', action: 'close' }],
   }];
 
   const echoDialog: DialogNode[] = [{
@@ -1925,7 +1763,7 @@ function placeTutorialEntities(tiles: Tile[][], interactables: Interactable[]): 
       '',
       '...signal lost...',
     ],
-    choices: [{ label: '[ESC] DISCONNECT', action: 'close' }],
+    choices: [{ label: '[BKSP] DISCONNECT', action: 'close' }],
   }];
 
   interactables.push({
@@ -2000,7 +1838,7 @@ function placeStuckEcho(tiles: Tile[][], rooms: Room[], interactables: Interacta
     const [dx, dy] = floorNeighbours[i];
     const bx = echoPos.x + dx, by = echoPos.y + dy;
     const t = tiles[by]?.[bx];
-    if (t && t.walkable) {
+    if (t && t.walkable && !isAdjacentToDoor(tiles, bx, by)) {
       t.type = TileType.Wall;
       t.walkable = false;
       t.transparent = false;
@@ -2039,7 +1877,7 @@ function placeStuckEcho(tiles: Tile[][], rooms: Room[], interactables: Interacta
         '',
         '...SIGNAL CANNOT TERMINATE...',
       ],
-      choices: [{ label: '[ESC] DISCONNECT', action: 'close' }],
+      choices: [{ label: '[BKSP] DISCONNECT', action: 'close' }],
     }],
     currentNodeId: 'root',
     rewardTaken: false,
@@ -2075,14 +1913,14 @@ function placeSpookyAstronauts(tiles: Tile[][], rooms: Room[]) {
   if (horizontal) {
     // Along top and bottom interior rows
     for (let x = x1; x <= x2; x += 2) {
-      if (tiles[y1]?.[x]?.walkable) props.push({ position: { x, y: y1 }, glyph: '♙', fg: '#8899aa', name: 'Spacesuit', propTag: 'spacesuit' });
-      if (tiles[y2]?.[x]?.walkable) props.push({ position: { x, y: y2 }, glyph: '♙', fg: '#8899aa', name: 'Spacesuit', propTag: 'spacesuit' });
+      if (tiles[y1]?.[x]?.walkable && !isAdjacentToDoor(tiles, x, y1)) props.push({ position: { x, y: y1 }, glyph: '♙', fg: '#8899aa', name: 'Spacesuit', propTag: 'spacesuit' });
+      if (tiles[y2]?.[x]?.walkable && !isAdjacentToDoor(tiles, x, y2)) props.push({ position: { x, y: y2 }, glyph: '♙', fg: '#8899aa', name: 'Spacesuit', propTag: 'spacesuit' });
     }
   } else {
     // Along left and right interior columns
     for (let y = y1; y <= y2; y += 2) {
-      if (tiles[y]?.[x1]?.walkable) props.push({ position: { x: x1, y }, glyph: '♙', fg: '#8899aa', name: 'Spacesuit', propTag: 'spacesuit' });
-      if (tiles[y]?.[x2]?.walkable) props.push({ position: { x: x2, y }, glyph: '♙', fg: '#8899aa', name: 'Spacesuit', propTag: 'spacesuit' });
+      if (tiles[y]?.[x1]?.walkable && !isAdjacentToDoor(tiles, x1, y)) props.push({ position: { x: x1, y }, glyph: '♙', fg: '#8899aa', name: 'Spacesuit', propTag: 'spacesuit' });
+      if (tiles[y]?.[x2]?.walkable && !isAdjacentToDoor(tiles, x2, y)) props.push({ position: { x: x2, y }, glyph: '♙', fg: '#8899aa', name: 'Spacesuit', propTag: 'spacesuit' });
     }
   }
 
@@ -2186,7 +2024,7 @@ function placeWhisperingWall(tiles: Tile[][], rooms: Room[], interactables: Inte
         '',
         '...transmission degrading...',
       ],
-      choices: [{ label: '[ESC] DISCONNECT', action: 'close' }],
+      choices: [{ label: '[BKSP] DISCONNECT', action: 'close' }],
     }],
     currentNodeId: 'root',
     rewardTaken: false,
@@ -2219,6 +2057,7 @@ function placeLostExpedition(tiles: Tile[][], rooms: Room[], interactables: Inte
     const x = x1 + Math.floor(random() * (x2 - x1 + 1));
     const y = y1 + Math.floor(random() * (y2 - y1 + 1));
     if (!tiles[y]?.[x]?.walkable) continue;
+    if (isAdjacentToDoor(tiles, x, y)) continue;
     if (props.some(p => p.position.x === x && p.position.y === y)) continue;
     props.push({ position: { x, y }, glyph: '♙', fg: '#6677aa', name: 'Crew Remains', propTag: 'crew_remains' });
   }
@@ -2230,6 +2069,7 @@ function placeLostExpedition(tiles: Tile[][], rooms: Room[], interactables: Inte
       const x = x1 + Math.floor(random() * (x2 - x1 + 1));
       const y = y1 + Math.floor(random() * (y2 - y1 + 1));
       if (!tiles[y]?.[x]?.walkable) continue;
+      if (isAdjacentToDoor(tiles, x, y)) continue;
       if (props.some(p => p.position.x === x && p.position.y === y)) continue;
       return { x, y };
     }
@@ -2254,7 +2094,7 @@ function placeLostExpedition(tiles: Tile[][], rooms: Room[], interactables: Inte
           '',
           '...signal ends abruptly...',
         ],
-        choices: [{ label: '[ESC] DISCONNECT', action: 'close' }],
+        choices: [{ label: '[BKSP] DISCONNECT', action: 'close' }],
       }],
       currentNodeId: 'root',
       rewardTaken: false,
@@ -2290,8 +2130,15 @@ function placeCorruptionRitual(tiles: Tile[][], rooms: Room[], interactables: In
   if (eligible.length === 0) return;
 
   const room = eligible[Math.floor(random() * eligible.length)];
-  const cx = Math.floor(room.x + room.w / 2);
-  const cy = Math.floor(room.y + room.h / 2);
+  let cx = Math.floor(room.x + room.w / 2);
+  let cy = Math.floor(room.y + room.h / 2);
+
+  // Nudge center if it's adjacent to a door
+  if (isAdjacentToDoor(tiles, cx, cy)) {
+    const alt = findPlacementInRoom(tiles, room);
+    if (!alt) return;
+    cx = alt.x; cy = alt.y;
+  }
 
   // GateKeeper at center (spawned via ritual_gatekeeper propTag)
   const gkProp: ScenarioPropDef = {
@@ -2306,7 +2153,7 @@ function placeCorruptionRitual(tiles: Tile[][], rooms: Room[], interactables: In
   const echoPositions: Position[] = [
     { x: Math.max(room.x + 1, cx - 2), y: cy },
     { x: Math.min(room.x + room.w - 2, cx + 2), y: cy },
-  ];
+  ].filter(p => !isAdjacentToDoor(tiles, p.x, p.y));
 
   const glitchedBroadcasts = [
     '█▓░ JOINING INITIATED ░▓█',
@@ -2337,7 +2184,7 @@ function placeCorruptionRitual(tiles: Tile[][], rooms: Room[], interactables: In
           '',
           '...CANNOT TERMINATE...',
         ],
-        choices: [{ label: '[ESC] DISCONNECT', action: 'close' }],
+        choices: [{ label: '[BKSP] DISCONNECT', action: 'close' }],
       }],
       currentNodeId: 'root',
       rewardTaken: false,
@@ -2390,6 +2237,120 @@ function placeScenarios(tiles: Tile[][], rooms: Room[], interactables: Interacta
   // Corruption Ritual: clusters 3 and 5
   if (clusterId === 3 || clusterId === 5) {
     if (random() < 0.35) placeCorruptionRitual(tiles, rooms, interactables);
+  }
+}
+
+// ── Post-placement connectivity fix ──
+
+/**
+ * After terminals and interactables are placed (which can make tiles non-walkable),
+ * verify all exit interfaces are still reachable from the entry interface.
+ * If not, relocate the blocking terminal/interactable to restore connectivity.
+ */
+function ensureExitConnectivity(
+  tiles: Tile[][], interfaces: InterfaceExit[],
+  terminals: TerminalDef[], interactables: Interactable[],
+) {
+  const H = tiles.length, W = tiles[0].length;
+
+  // Find entry (x=0) from tile grid, exits from interfaces (which only has x>0)
+  let entryPos: { x: number; y: number } | null = null;
+  for (let y = 0; y < H; y++) {
+    if (tiles[y][0]?.type === TileType.InterfaceExit) { entryPos = { x: 0, y }; break; }
+  }
+  if (!entryPos || interfaces.length === 0) return;
+
+  // BFS flood fill from entry, treating non-sealed doors as passable
+  const reachable = new Set<string>();
+  const queue: { x: number; y: number }[] = [{ x: entryPos.x, y: entryPos.y }];
+  reachable.add(`${entryPos.x},${entryPos.y}`);
+  while (queue.length > 0) {
+    const { x, y } = queue.shift()!;
+    for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+      const nx = x + dx, ny = y + dy;
+      if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
+      const k = `${nx},${ny}`;
+      if (reachable.has(k)) continue;
+      const t = tiles[ny][nx];
+      if (!t.walkable && t.type !== TileType.Door) continue;
+      reachable.add(k);
+      queue.push({ x: nx, y: ny });
+    }
+  }
+
+  // Only fix if ALL forward exits are unreachable — if at least one is reachable, the AI can use it
+  const anyReachable = interfaces.some(i => reachable.has(`${i.position.x},${i.position.y}`));
+  if (anyReachable) return;
+
+  for (const exit of interfaces) {
+    const ek = `${exit.position.x},${exit.position.y}`;
+    if (reachable.has(ek)) continue;
+
+    // Exit is unreachable — find what's blocking it
+    // Check neighbors of the exit tile for a non-walkable terminal/interactable
+    for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+      const bx = exit.position.x + dx, by = exit.position.y + dy;
+      if (bx < 0 || bx >= W || by < 0 || by >= H) continue;
+      const bt = tiles[by][bx];
+
+      if (bt.type === TileType.Terminal && bt.terminalId) {
+        const term = terminals.find(t => t.id === bt.terminalId);
+        if (term) {
+          // Find an alternative floor tile in the same room
+          // Convert this tile back to floor and relocate terminal
+          bt.type = TileType.Floor;
+          bt.glyph = '·';
+          bt.walkable = true;
+          bt.fg = '#666';
+          delete bt.terminalId;
+          // Move terminal to a different tile in its room — find nearest floor
+          let moved = false;
+          for (let r = 1; r < 5 && !moved; r++) {
+            for (const [ddx, ddy] of [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[1,-1],[-1,1],[1,1]]) {
+              const nx = bx + ddx * r, ny = by + ddy * r;
+              if (nx < 1 || nx >= W - 1 || ny < 1 || ny >= H - 1) continue;
+              const nt = tiles[ny][nx];
+              if (nt.type === TileType.Floor && nt.walkable) {
+                nt.type = TileType.Terminal;
+                nt.glyph = '◈';
+                nt.fg = '#00aaff';
+                nt.walkable = false;
+                nt.transparent = true;
+                nt.terminalId = term.id;
+                term.position = { x: nx, y: ny };
+                moved = true;
+                break;
+              }
+            }
+          }
+          break;
+        }
+      }
+
+      // Check if an interactable is blocking (non-walkable tile where interactable sits)
+      if (!bt.walkable) {
+        const ia = interactables.find(i => i.position.x === bx && i.position.y === by && !i.hidden);
+        if (ia) {
+          // Move interactable to a different tile
+          for (let r = 1; r < 5; r++) {
+            for (const [ddx, ddy] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+              const nx = bx + ddx * r, ny = by + ddy * r;
+              if (nx < 1 || nx >= W - 1 || ny < 1 || ny >= H - 1) continue;
+              const nt = tiles[ny][nx];
+              if (nt.type === TileType.Floor && nt.walkable) {
+                ia.position = { x: nx, y: ny };
+                // Restore original tile
+                bt.type = TileType.Floor;
+                bt.glyph = '·';
+                bt.walkable = true;
+                bt.fg = '#666';
+                return;
+              }
+            }
+          }
+        }
+      }
+    }
   }
 }
 
@@ -2446,7 +2407,7 @@ export function generateCluster(id: number): Cluster {
   for (const r of allRooms) r.collapse = sampleRoomCollapse(r, collapseMap);
 
   // Assign hazards based on collapse intensity
-  assignHazardsByCollapse(allRooms, id);
+  assignHazardsByCollapse(allRooms, id, doorAdjacency);
 
   // Convert grid cells to tiles
   const tiles = gridToTiles(grid.cells, roomIdAt);
@@ -2485,7 +2446,7 @@ export function generateCluster(id: number): Cluster {
   const interactables = placeInteractables(tiles, allRooms, id, terminals);
 
   // Post-process interactables: hazard deactivation options & root parts
-  assignHazardDeactivation(interactables, allRooms);
+  assignHazardDeactivation(interactables, terminals, allRooms);
   assignRootParts(interactables, id);
 
   // Tutorial zone: cluster 0 gets a fixed narrative terminal and lost echo near entry
@@ -2493,6 +2454,9 @@ export function generateCluster(id: number): Cluster {
 
   // Room scenarios: thematic vignettes for clusters 1+
   if (id >= 1) placeScenarios(tiles, allRooms, interactables, id);
+
+  // Post-placement connectivity: ensure all exit interfaces remain reachable from entry
+  ensureExitConnectivity(tiles, interfaces, terminals, interactables);
 
   const cluster: Cluster = { id, width: CLUSTER_WIDTH, height: CLUSTER_HEIGHT, tiles, rooms: allRooms, interfaces, wallAdjacency, doorAdjacency, collapseMap, terminals, interactables, exitLocked: true };
 

@@ -371,6 +371,7 @@ body {
   right: 4px;
   height: 180px;
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
   z-index: 10;
   transition: height 0.35s ease;
@@ -730,7 +731,7 @@ body {
   display: none;
   position: fixed;
   inset: 0;
-  z-index: 100;
+  z-index: 500;
   background: rgba(0, 0, 0, 0.7);
   justify-content: center;
   align-items: flex-start;
@@ -1057,14 +1058,17 @@ body {
   border-color: var(--theme-accent);
 }
 
-.terminal-opt-btn.opt-close {
-  color: #557766;
-  border-color: #334444;
+.terminal-opt-btn:disabled {
+  color: #445566;
+  border-color: #223344;
+  cursor: default;
+  opacity: 0.6;
 }
 
-.terminal-opt-btn.opt-close:hover {
-  color: #88aaaa;
-  border-color: #557766;
+.terminal-opt-btn:disabled:hover {
+  color: #445566;
+  border-color: #223344;
+  background: none;
 }
 
 /* --- Interactable overlay --- */
@@ -1564,4 +1568,28 @@ body {
 #death-panel::-webkit-scrollbar-thumb:hover,
 #about-panel .about-body::-webkit-scrollbar-thumb:hover {
   background: var(--theme-fg);
+}
+
+/* --- Footer --- */
+#game-footer {
+  width: 100%;
+  text-align: right;
+  padding: 0 8px 0 0;
+  font-family: inherit;
+  font-size: 0.75em;
+  color: var(--theme-dim, #2a6a3a);
+  opacity: 0.6;
+}
+#game-footer a {
+  color: var(--theme-dim, #2a6a3a);
+  text-decoration: none;
+}
+#game-footer a:hover {
+  color: var(--theme-fg, #33aa66);
+}
+#game-footer .footer-sep {
+  margin: 0 0.3em;
+}
+#game-footer .footer-ver {
+  color: var(--theme-dim, #2a6a3a);
 }

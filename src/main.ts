@@ -1,8 +1,9 @@
-import { createGame, processAction, handleMapClick, stepAutoPath, addMessage, exportSave, exportDebugLog, loadSave, adminRegenCluster, adminTeleportToCluster, grantExitAccess, activateTerminal, executeInteractableAction, getEntityAt, CORRUPT_M_RANGE, hackFinalTerminal, makeDamagedBitMite, activateCloak } from './game';
+import { createGame, processAction, handleMapClick, stepAutoPath, addMessage, exportSave, exportDebugLog, loadSave, adminRegenCluster, adminTeleportToCluster, grantExitAccess, activateTerminal, executeInteractableAction, deactivateHazardRoom, getEntityAt, CORRUPT_M_RANGE, hackFinalTerminal, activateCloak } from './game';
+import { makeEntity } from './entity-defs';
 import { setDamageParams, getDamageParams, setGenSizeOverride, clearGenSizeOverride, getGenSizeOverride, clusterScaleForId } from './cluster';
 import { Renderer, renderSelfPanel, renderLogs, renderOverviewPanel, renderMapStatusBar } from './renderer';
 import { InputHandler } from './input';
-import { PlayerAction, Position, TileType, SMOKE_DURATION_MS } from './types';
+import { PlayerAction, Position, TileType, SMOKE_DURATION_MS, MARK_DURATION_MS } from './types';
 import { generateSeed } from './rng';
 import { GLITCH_EFFECTS, initGlitch, glitchShake, glitchChromatic, glitchBarSweep, glitchStaticBurst, glitchHorizontalTear, glitchDataBleed } from './glitch';
 import { VICTORY_EPILOGUES } from './narrative/index';
@@ -10,6 +11,7 @@ import { FINAL_TERMINAL_CONFIRM } from './narrative/final-terminal';
 import { hasLOS } from './fov';
 import { canSee } from './ai';
 import { soundManager } from './audio';
+import { handleOverlayKey, mapClickAction } from './dialog-input';
 
 // ── Bootstrap ──
 
@@ -19,6 +21,11 @@ function parseSeedFromURL(): number | undefined {
   const match = hash.match(/seed=(\d+)/);
   return match ? Number(match[1]) : undefined;
 }
+
+// Inject build version into DOM
+const _bv = typeof __BUILD_VERSION__ !== 'undefined' ? __BUILD_VERSION__ : 'dev';
+document.getElementById('build-version')?.replaceChildren(_bv);
+document.getElementById('about-version')?.replaceChildren(_bv);
 
 let state = createGame(parseSeedFromURL());
 const renderer = new Renderer('map-grid-wrap');
@@ -156,20 +163,49 @@ function runSmokeLoop() {
   const now = performance.now();
   let needsRender = false;
 
+  // Stamp any unstamped smoke effects from game logic (spawnTime === 0)
+  for (const s of state.smokeEffects) {
+    if (s.spawnTime === 0) s.spawnTime = now;
+  }
+
   // Expire smoke effects
   const before = state.smokeEffects.length;
   state.smokeEffects = state.smokeEffects.filter(s => now - s.spawnTime < SMOKE_DURATION_MS);
   if (state.smokeEffects.length !== before) needsRender = true;
   if (state.smokeEffects.length > 0) needsRender = true;
 
-  // Check echo fades
+  // Stamp and expire mark effects (converging-square animation, 480ms)
+  for (const m of state.markEffects) {
+    if (m.spawnTime === 0) m.spawnTime = now;
+    // Track entity position each frame
+    const target = state.entities.find(e => e.id === m.targetId);
+    if (target) { m.x = target.position.x; m.y = target.position.y; }
+  }
+  const markBefore = state.markEffects.length;
+  state.markEffects = state.markEffects.filter(m => now - m.spawnTime < MARK_DURATION_MS);
+  if (state.markEffects.length !== markBefore) needsRender = true;
+  if (state.markEffects.length > 0) needsRender = true;
+
+  // Stamp any unstamped echo fade delays from game logic (echoFadeAtTime < 0 = delay in ms)
   const cluster = state.clusters.get(state.currentClusterId);
+  if (cluster) {
+    for (const item of cluster.interactables) {
+      if (item.echoFadeAtTime != null && item.echoFadeAtTime < 0) {
+        item.echoFadeAtTime = now + Math.abs(item.echoFadeAtTime);
+      }
+    }
+  }
+
+  // Check echo fades
   if (cluster) {
     for (let i = cluster.interactables.length - 1; i >= 0; i--) {
       const item = cluster.interactables[i];
-      if (item.echoFadeAtTime != null && now >= item.echoFadeAtTime) {
+      if (item.echoFadeAtTime != null && item.echoFadeAtTime > 0 && now >= item.echoFadeAtTime) {
         state.smokeEffects.push({ x: item.position.x, y: item.position.y, fg: '#aaaa66', spawnTime: now });
-        const bm = makeDamagedBitMite(item.position, cluster.id);
+        const bm = makeEntity('bit_mite', item.position, cluster.id, {
+          speed: 18, coherence: 5, maxCoherence: 5, attackValue: 2,
+          name: 'Corrupted Echo Fragment', fg: '#aa6644',
+        });
         state.entities.push(bm);
         addMessage(state, '...echo fragment destabilised.', 'system');
         cluster.interactables.splice(i, 1);
@@ -182,7 +218,7 @@ function runSmokeLoop() {
 
   // Keep looping while there are active effects or pending fades
   const hasPendingEcho = cluster?.interactables.some(i => i.echoFadeAtTime != null) ?? false;
-  if (state.smokeEffects.length > 0 || hasPendingEcho) {
+  if (state.smokeEffects.length > 0 || state.markEffects.length > 0 || hasPendingEcho) {
     smokeLoopId = requestAnimationFrame(runSmokeLoop);
   }
 }
@@ -657,11 +693,39 @@ function openTerminalOverlay() {
     terminalOptions.appendChild(hackBtn);
   }
 
+  // Hazard override buttons (assigned by assignHazardDeactivation)
+  if (terminal.hazardOverrides) {
+    for (const override of terminal.hazardOverrides) {
+      const hazardRoom = cluster.rooms.find(r => r.id === override.hazardRoomId);
+      const alreadyDone = hazardRoom?.roomType === 'normal';
+      const btn = document.createElement('button');
+      if (alreadyDone) {
+        btn.className = 'terminal-opt-btn';
+        btn.textContent = `> [OVERRIDE] ${override.label} [OVERRIDDEN]`;
+        btn.disabled = true;
+      } else {
+        btn.className = 'terminal-opt-btn opt-warn';
+        btn.textContent = `> [OVERRIDE] ${override.label}`;
+        btn.addEventListener('click', () => {
+          deactivateHazardRoom(state, cluster, override.hazardRoomId);
+          closeTerminalOverlay();
+          glitchBarSweep().then(() => renderAll());
+        });
+      }
+      terminalOptions.appendChild(btn);
+    }
+  }
+
   const closeBtn = document.createElement('button');
-  closeBtn.className = 'terminal-opt-btn opt-close';
-  closeBtn.textContent = '> [ESC] disconnect';
+  closeBtn.className = 'terminal-opt-btn';
+  closeBtn.textContent = '> [BKSP] disconnect';
   closeBtn.addEventListener('click', closeTerminalOverlay);
   terminalOptions.appendChild(closeBtn);
+
+  // Prefix terminal options with number keys
+  terminalOptions.querySelectorAll<HTMLButtonElement>('.terminal-opt-btn').forEach((btn, i) => {
+    btn.textContent = `${i + 1}${btn.textContent}`;
+  });
 
   revealLines(terminalOptions.querySelectorAll('.terminal-opt-btn'), contentEls.length * 40 + 20);
   terminalOverlay.classList.add('open');
@@ -678,8 +742,8 @@ function showFinalTerminalConfirmation(choice: 'restore' | 'jump') {
 
   terminalOptions.innerHTML = '';
   const closeBtn = document.createElement('button');
-  closeBtn.className = 'terminal-opt-btn opt-close';
-  closeBtn.textContent = '> [ESC] disconnect';
+  closeBtn.className = 'terminal-opt-btn';
+  closeBtn.textContent = '1> [BKSP] disconnect';
   closeBtn.addEventListener('click', closeTerminalOverlay);
   terminalOptions.appendChild(closeBtn);
 
@@ -771,11 +835,14 @@ function renderDataArchive(item: import('./types').Interactable) {
     exitBtn.className = 'ia-choice-btn';
     exitBtn.textContent = '> [CLEAR] PURGE ARCHIVE';
     exitBtn.addEventListener('click', () => {
-      item.echoFadeAtTime = performance.now() + 800;
+      item.echoFadeAtTime = -800; // negative = delay, stamped by smoke loop
       closeInteractableOverlay();
       renderAll();
     });
     iaChoices.appendChild(exitBtn);
+    iaChoices.querySelectorAll<HTMLButtonElement>('.ia-choice-btn').forEach((btn, i) => {
+      btn.textContent = `${i + 1}${btn.textContent}`;
+    });
     revealLines(iaContent.querySelectorAll('.ia-line'));
     revealLines(iaChoices.querySelectorAll('.ia-choice-btn'), 4 * 40 + 20);
     interactableOverlay.classList.add('open');
@@ -815,9 +882,35 @@ function renderDataArchive(item: import('./types').Interactable) {
       });
       iaChoices.appendChild(btn);
     }
+    // Inject hazard override buttons from dialog nodes (assigned by assignHazardDeactivation)
+    const cluster = state.clusters.get(state.openInteractable!.clusterId);
+    if (cluster) {
+      for (const node of item.dialog) {
+        if (!node.id.startsWith('deactivate_')) continue;
+        const deactChoice = node.choices.find(c => c.action === 'deactivate_hazard');
+        if (!deactChoice?.deactivatesHazardRoomId) continue;
+        const hazardRoom = cluster.rooms.find(r => r.id === deactChoice.deactivatesHazardRoomId);
+        const alreadyDone = hazardRoom?.roomType === 'normal';
+        const btn = document.createElement('button');
+        btn.className = 'ia-choice-btn';
+        if (alreadyDone) {
+          btn.textContent = `> ${deactChoice.label} [OVERRIDDEN]`;
+          btn.disabled = true;
+        } else {
+          btn.textContent = `> ${glitchText(deactChoice.label, decay * 0.3)}`;
+          btn.addEventListener('click', () => {
+            executeInteractableAction(state, item.id, state.openInteractable!.clusterId, 'deactivate_hazard', deactChoice);
+            closeInteractableOverlay();
+            glitchBarSweep().then(() => renderAll());
+          });
+        }
+        iaChoices.appendChild(btn);
+      }
+    }
+
     const exitBtn = document.createElement('button');
     exitBtn.className = 'ia-choice-btn';
-    exitBtn.textContent = '> [ESC] DISCONNECT';
+    exitBtn.textContent = '> [BKSP] DISCONNECT';
     exitBtn.addEventListener('click', () => { closeInteractableOverlay(); renderAll(); });
     iaChoices.appendChild(exitBtn);
 
@@ -843,6 +936,11 @@ function renderDataArchive(item: import('./types').Interactable) {
     });
     iaChoices.appendChild(backBtn);
   }
+
+  // Prefix archive choices with number keys
+  iaChoices.querySelectorAll<HTMLButtonElement>('.ia-choice-btn').forEach((btn, i) => {
+    btn.textContent = `${i + 1}${btn.textContent}`;
+  });
 
   revealLines(iaContent.querySelectorAll('.ia-line'));
   revealLines(iaChoices.querySelectorAll('.ia-choice-btn'),
@@ -889,10 +987,13 @@ function openInteractableOverlay() {
   revealLines(iaContent.querySelectorAll('.ia-line'));
 
   iaChoices.innerHTML = '';
+  let iaChoiceNum = 0;
   for (const choice of node.choices) {
     if (choice.requiresRewardAvailable && item.rewardTaken) continue;
     if (choice.requiresExitLocked && !cluster.exitLocked) continue;
-    if (choice.requiresRootPartAvailable && item.rootPartTaken) continue;
+
+    // Root part already taken: show disabled instead of hiding
+    const isRootPartTaken = choice.requiresRootPartAvailable && item.rootPartTaken;
 
     // Check if this choice targets a hazard that's already been overridden
     const isDeactivatedHazard = (() => {
@@ -916,36 +1017,38 @@ function openInteractableOverlay() {
       return false;
     })();
 
+    iaChoiceNum++;
     const btn = document.createElement('button');
     btn.className = 'ia-choice-btn';
-    if (isDeactivatedHazard) {
-      btn.textContent = `> ${choice.label} [OVERRIDDEN]`;
+    if (isDeactivatedHazard || isRootPartTaken) {
+      const suffix = isRootPartTaken ? '[ACQUIRED]' : '[OVERRIDDEN]';
+      btn.textContent = `${iaChoiceNum}> ${choice.label} ${suffix}`;
       btn.disabled = true;
     } else {
-      btn.textContent = `> ${choice.label}`;
-    }
-    btn.addEventListener('click', () => {
-      if (choice.nodeId) {
-        item.currentNodeId = choice.nodeId;
-        openInteractableOverlay();
-      } else if (choice.action) {
-        const useGlitch = choice.action === 'reveal_terminals' || choice.action === 'reveal_exits' || choice.action === 'deactivate_hazard';
-        const shouldClose = executeInteractableAction(
-          state, item.id, openInteractable.clusterId, choice.action, choice,
-        );
-        if (shouldClose) {
-          closeInteractableOverlay();
-          if (useGlitch) {
-            glitchBarSweep().then(() => renderAll());
+      btn.textContent = `${iaChoiceNum}> ${choice.label}`;
+      btn.addEventListener('click', () => {
+        if (choice.nodeId) {
+          item.currentNodeId = choice.nodeId;
+          openInteractableOverlay();
+        } else if (choice.action) {
+          const useGlitch = choice.action === 'reveal_terminals' || choice.action === 'reveal_exits' || choice.action === 'deactivate_hazard';
+          const shouldClose = executeInteractableAction(
+            state, item.id, openInteractable.clusterId, choice.action, choice,
+          );
+          if (shouldClose) {
+            closeInteractableOverlay();
+            if (useGlitch) {
+              glitchBarSweep().then(() => renderAll());
+            } else {
+              renderAll();
+            }
           } else {
+            openInteractableOverlay(); // re-render updated node
             renderAll();
           }
-        } else {
-          openInteractableOverlay(); // re-render updated node
-          renderAll();
         }
-      }
-    });
+      });
+    }
     iaChoices.appendChild(btn);
   }
 
@@ -1209,10 +1312,11 @@ victoryRestartBtn.addEventListener('click', () => {
 
 function showVictoryOverlay() {
   const coherencePct = Math.round(((state.player.coherence ?? 0) / (state.player.maxCoherence ?? 100)) * 100);
-  const killCount = state.killedEntities.length;
+  const playerKills = state.killedEntities.filter(k => k.byPlayer);
+  const playerKillCount = playerKills.length;
 
   const killCounts: Record<string, number> = {};
-  for (const k of state.killedEntities) {
+  for (const k of playerKills) {
     killCounts[k.kind] = (killCounts[k.kind] ?? 0) + 1;
   }
 
@@ -1228,9 +1332,9 @@ function showVictoryOverlay() {
     `<div>Coherence: ${coherencePct}%</div>` +
     `<div>Turns: ${state.tick}</div>` +
     `<div>Privileges bound: ${state.rootPrivileges.length > 0 ? state.rootPrivileges.join(' · ') : 'none'}</div>` +
-    `<div>Entities destroyed: ${killCount}</div>`;
+    `<div>Entities destroyed: ${playerKillCount}</div>`;
 
-  victoryKills.innerHTML = killCount > 0
+  victoryKills.innerHTML = playerKillCount > 0
     ? Object.entries(killCounts).map(([k, n]) => `<div>&gt; ${k}: ${n}</div>`).join('')
     : '<div>&gt; none destroyed</div>';
 
@@ -1238,9 +1342,8 @@ function showVictoryOverlay() {
   const allAchievements = [
     { name: 'SILENT PROTOCOL', desc: 'Finish the game without loading an identity.', unlocked: !state.selfPanelRevealed },
     { name: 'CLEAN SIGNAL', desc: 'Finish the game without firing corrupt.m once.', unlocked: state.corruptShotsFired === 0 },
-    { name: 'ZERO FOOTPRINT', desc: 'Finish the game without destroying any entity.', unlocked: state.killedEntities.length === 0 },
+    { name: 'ZERO FOOTPRINT', desc: 'Finish the game without destroying any entity.', unlocked: state.killedEntities.filter(k => k.byPlayer).length === 0 },
     { name: 'PLAINTEXT', desc: 'Finish the game without activating cloak.m.', unlocked: state.cloakActivations === 0 },
-    { name: 'GHOST IN THE MESH', desc: 'Finish the game without reading any terminal.', unlocked: state.terminalsRead === 0 },
   ];
 
   const achievementEl = document.getElementById('victory-achievement')!;
@@ -1289,10 +1392,11 @@ deathRestartBtn.addEventListener('click', () => {
 });
 
 function showDeathOverlay() {
-  const killCount = state.killedEntities.length;
+  const playerKills = state.killedEntities.filter(k => k.byPlayer);
+  const playerKillCount = playerKills.length;
 
   const killCounts: Record<string, number> = {};
-  for (const k of state.killedEntities) {
+  for (const k of playerKills) {
     killCounts[k.kind] = (killCounts[k.kind] ?? 0) + 1;
   }
 
@@ -1307,9 +1411,9 @@ function showDeathOverlay() {
     `<div>Coherence: 0%</div>` +
     `<div>Turns: ${state.tick}</div>` +
     `<div>Cluster reached: ${state.currentClusterId + 1}</div>` +
-    `<div>Entities destroyed: ${killCount}</div>`;
+    `<div>Entities destroyed: ${playerKillCount}</div>`;
 
-  deathKills.innerHTML = killCount > 0
+  deathKills.innerHTML = playerKillCount > 0
     ? Object.entries(killCounts).map(([k, n]) => `<div>&gt; ${k}: ${n}</div>`).join('')
     : '<div>&gt; none destroyed</div>';
 
@@ -1439,6 +1543,7 @@ function renderAll() {
     enemyVisionColor,
     collapseGlitchTiles: state.collapseGlitchTiles,
     smokeEffects: state.smokeEffects,
+    markEffects: state.markEffects,
     invisibleMode: state.invisibleMode,
     alertThreats: state.alertThreats,
   });
@@ -1668,18 +1773,21 @@ function onMapClick(pos: Position) {
     if (tryShootAt(pos)) return;
   }
 
-  // Check if clicking adjacent tile — single step
-  const dx = Math.abs(pos.x - state.player.position.x);
-  const dy = Math.abs(pos.y - state.player.position.y);
+  const clickAction = mapClickAction(pos.x, pos.y, {
+    playerX: state.player.position.x,
+    playerY: state.player.position.y,
+  });
 
-  if (dx + dy === 1) {
-    const dir = pos.x > state.player.position.x ? 'right'
-      : pos.x < state.player.position.x ? 'left'
-      : pos.y > state.player.position.y ? 'down'
-      : 'up';
+  if (clickAction?.kind === 'wait') {
+    processAction(state, { kind: 'wait' });
+    renderAll();
+    return;
+  }
+
+  if (clickAction?.kind === 'move') {
     state.autoPath = [];
     renderer.setPathHighlight([]);
-    processAction(state, { kind: 'move', dir });
+    processAction(state, { kind: 'move', dir: clickAction.dir });
     renderAll();
     return;
   }
@@ -2125,32 +2233,35 @@ panelEl.addEventListener('mouseout', (e) => {
 });
 
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') {
-    if (aimMode) {
-      exitAim();
-      renderAll();
-      e.stopPropagation();
-      return;
+  const overlayState: import('./dialog-input').OverlayState = {
+    aimMode,
+    interactableOpen: interactableOverlay.classList.contains('open'),
+    terminalOpen: terminalOverlay.classList.contains('open'),
+    aboutOpen: aboutOverlay.classList.contains('open'),
+    settingsOpen: settingsOverlay.classList.contains('open'),
+    interactableChoiceCount: iaChoices.querySelectorAll<HTMLButtonElement>('.ia-choice-btn').length,
+    terminalChoiceCount: terminalOptions.querySelectorAll<HTMLButtonElement>('.terminal-opt-btn').length,
+  };
+
+  const action = handleOverlayKey(e.key, overlayState);
+  if (!action) return;
+
+  e.stopPropagation();
+  switch (action.kind) {
+    case 'exit_aim': exitAim(); renderAll(); break;
+    case 'close_interactable': closeInteractableOverlay(); renderAll(); break;
+    case 'close_terminal': closeTerminalOverlay(); break;
+    case 'close_about': aboutOverlay.classList.remove('open'); break;
+    case 'close_settings': settingsOverlay.classList.remove('open'); break;
+    case 'select_interactable_choice': {
+      const btn = iaChoices.querySelectorAll<HTMLButtonElement>('.ia-choice-btn')[action.index];
+      if (btn && !btn.disabled) btn.click();
+      break;
     }
-    if (interactableOverlay.classList.contains('open')) {
-      closeInteractableOverlay();
-      renderAll();
-      e.stopPropagation();
-      return;
-    }
-    if (terminalOverlay.classList.contains('open')) {
-      closeTerminalOverlay();
-      e.stopPropagation();
-      return;
-    }
-    if (aboutOverlay.classList.contains('open')) {
-      aboutOverlay.classList.remove('open');
-      e.stopPropagation();
-      return;
-    }
-    if (settingsOverlay.classList.contains('open')) {
-      settingsOverlay.classList.remove('open');
-      e.stopPropagation();
+    case 'select_terminal_choice': {
+      const btn = terminalOptions.querySelectorAll<HTMLButtonElement>('.terminal-opt-btn')[action.index];
+      if (btn && !btn.disabled) btn.click();
+      break;
     }
   }
 });

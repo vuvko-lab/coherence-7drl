@@ -5,19 +5,19 @@
  * Extracts metrics to catch balance problems before playtesting.
  *
  * Usage:
- *   npx tsx src/sim-test.ts               # early cluster, seeds 1-50
- *   npx tsx src/sim-test.ts --seeds 200   # stress test
- *   npx tsx src/sim-test.ts --ticks 150   # longer simulation
+ *   npx tsx src/tests/sim-test.ts               # early cluster, seeds 1-50
+ *   npx tsx src/tests/sim-test.ts --seeds 200   # stress test
+ *   npx tsx src/tests/sim-test.ts --ticks 150   # longer simulation
  */
 
 import { writeFileSync, mkdirSync } from 'fs';
-import { createGame, processAction, sampleEntitySpawn, adminTeleportToCluster } from './game';
-import { findPath } from './pathfinding';
-import { generateCluster } from './cluster';
-import { seed as seedRng } from './rng';
-import { tileHazardDamage } from './hazards';
-import { Cluster, Position, TileType, HazardOverlayType, RoomType, RoomScenario, Faction } from './types';
-import type { GameState } from './types';
+import { createGame, processAction, sampleEntitySpawn, adminTeleportToCluster } from '../game';
+import { findPath } from '../pathfinding';
+import { generateCluster } from '../cluster';
+import { seed as seedRng } from '../rng';
+import { tileHazardDamage } from '../hazards';
+import { Cluster, Position, TileType, HazardOverlayType, RoomType, RoomScenario, Faction } from '../types';
+import type { GameState, Entity } from '../types';
 
 // ── Constants ──
 
@@ -73,6 +73,9 @@ interface SimSnapshot {
   factionCounts: Record<Faction, number>;
   // Room emptiness: % of rooms with no entity for 10+ consecutive ticks (after tick 20)
   emptyRoomPct: number;
+  // Alert module: does alert.m detect nearby hostile entities?
+  alertDetectsEntities: boolean;  // true if alertThreats contains at least one entity-source threat
+  alertEntityCount: number;       // number of entity-source threats in alertThreats
 }
 
 interface SeedResult {
@@ -81,7 +84,11 @@ interface SeedResult {
   genTimeMs: number;
   deterministic: boolean;
   quarantineWithoutSwitch: number;  // quarantine rooms with no deactivation interactable
+  quarantineUnreachableSwitch: number; // quarantine rooms where switch exists but is unreachable
+  quarantineDiagnostics: string[];  // detailed diagnostics for quarantine issues
   totalQuarantine: number;          // total quarantine rooms
+  entityBlockedRooms: number;       // rooms made unreachable by entity placement at tick 0
+  entityBlockedDiagnostics: string[]; // details of which entities block which rooms
 }
 
 // ── BFS reachability ──
@@ -127,6 +134,43 @@ function bfsReachMulti(cluster: Cluster, sources: Position[]): Set<string> {
       if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
       const nk = `${nx},${ny}`;
       if (visited.has(nk)) continue;
+      const tile = cluster.tiles[ny][nx];
+      if (!tile.walkable && tile.type !== TileType.Door) continue;
+      visited.add(nk);
+      queue.push({ x: nx, y: ny });
+    }
+  }
+  return visited;
+}
+
+/** Check if a position is adjacent to a door tile. */
+function isDoorAdjacent(cluster: Cluster, pos: Position): boolean {
+  for (const [dx, dy] of [[0,-1],[0,1],[-1,0],[1,0]]) {
+    const tile = cluster.tiles[pos.y + dy]?.[pos.x + dx];
+    if (tile?.type === TileType.Door) return true;
+  }
+  return false;
+}
+
+/** BFS reachability treating entity-occupied tiles as impassable. */
+function bfsReachBlocked(cluster: Cluster, from: Position, blocked: Set<string>): Set<string> {
+  const w = cluster.width;
+  const h = cluster.height;
+  const visited = new Set<string>();
+  const key = (p: Position) => `${p.x},${p.y}`;
+  const startKey = key(from);
+  if (blocked.has(startKey)) return visited; // entry itself is blocked
+  visited.add(startKey);
+  const queue: Position[] = [from];
+
+  while (queue.length > 0) {
+    const cur = queue.shift()!;
+    for (const [dx, dy] of [[0,-1],[0,1],[-1,0],[1,0]]) {
+      const nx = cur.x + dx;
+      const ny = cur.y + dy;
+      if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+      const nk = `${nx},${ny}`;
+      if (visited.has(nk) || blocked.has(nk)) continue;
       const tile = cluster.tiles[ny][nx];
       if (!tile.walkable && tile.type !== TileType.Door) continue;
       visited.add(nk);
@@ -394,6 +438,11 @@ function snapshotCluster(
     emptyRoomPct = nonHallRooms.length > 0 ? (emptyCount / nonHallRooms.length) * 100 : 0;
   }
 
+  // Alert module entity detection
+  const entityThreats = (state.alertThreats ?? []).filter(t => t.source === 'entity');
+  const alertDetectsEntities = entityThreats.length > 0;
+  const alertEntityCount = entityThreats.length;
+
   return {
     tick: state.tick,
     exitReachable,
@@ -414,12 +463,14 @@ function snapshotCluster(
     totalTiles,
     factionCounts,
     emptyRoomPct,
+    alertDetectsEntities,
+    alertEntityCount,
   };
 }
 
 // ── Simulation ──
 
-function simulateCluster(seed: number, ticks: number, clusterId: number): { snapshots: SimSnapshot[]; genTimeMs: number; quarantineWithoutSwitch: number; totalQuarantine: number } {
+function simulateCluster(seed: number, ticks: number, clusterId: number): { snapshots: SimSnapshot[]; genTimeMs: number; quarantineWithoutSwitch: number; quarantineUnreachableSwitch: number; quarantineDiagnostics: string[]; totalQuarantine: number; entityBlockedRooms: number; entityBlockedDiagnostics: string[] } {
   const t0 = performance.now();
   const state = createGame(seed);
 
@@ -437,7 +488,7 @@ function simulateCluster(seed: number, ticks: number, clusterId: number): { snap
   const genTimeMs = performance.now() - t0;
 
   if (!state.clusters.has(clusterId)) {
-    return { snapshots: [], genTimeMs, quarantineWithoutSwitch: 0, totalQuarantine: 0 };
+    return { snapshots: [], genTimeMs, quarantineWithoutSwitch: 0, quarantineUnreachableSwitch: 0, quarantineDiagnostics: [], totalQuarantine: 0, entityBlockedRooms: 0, entityBlockedDiagnostics: [] };
   }
 
   const cluster = state.clusters.get(clusterId)!;
@@ -469,18 +520,167 @@ function simulateCluster(seed: number, ticks: number, clusterId: number): { snap
     }
   }
 
-  // Check quarantine rooms have deactivation switches
+  // Check quarantine rooms have reachable deactivation switches
   const quarantineRooms = cluster.rooms.filter(r => r.roomType === 'quarantine');
   const totalQuarantine = quarantineRooms.length;
   let quarantineWithoutSwitch = 0;
+  let quarantineUnreachableSwitch = 0;
+  const quarantineDiagnostics: string[] = [];
+
+  // BFS from entry, respecting sealed doors (quarantine doors are not walkable)
+  const reachable = bfsReach(cluster, entryPos);
+  const quarantineRoomIds = new Set(quarantineRooms.map(r => r.id));
+
   for (const qRoom of quarantineRooms) {
-    const hasSwitch = cluster.interactables.some(ia =>
+    // Find all interactables that can deactivate this quarantine room
+    const switches = cluster.interactables.filter(ia =>
       ia.dialog.some(n => n.choices.some(c => c.deactivatesHazardRoomId === qRoom.id))
     );
-    if (!hasSwitch) quarantineWithoutSwitch++;
+    // Also check terminals with hazardOverrides
+    const termSwitches = cluster.terminals.filter(t =>
+      t.hazardOverrides?.some(o => o.hazardRoomId === qRoom.id)
+    );
+    const totalSwitches = switches.length + termSwitches.length;
+
+    if (totalSwitches === 0) {
+      quarantineWithoutSwitch++;
+      const hasKey = cluster.terminals.some(t => t.hasKey && t.roomId === qRoom.id);
+      quarantineDiagnostics.push(
+        `  [NO SWITCH] seed=${seed} cluster=${clusterId} quarantine room ${qRoom.id} (${qRoom.w}x${qRoom.h})` +
+        `${hasKey ? ' [HAS KEY TERMINAL]' : ''} — no deactivation assigned`
+      );
+      continue;
+    }
+
+    // Check if any switch (interactable or terminal) is reachable from entry
+    let anyReachable = false;
+    let anyUsableSwitch = false;
+    const switchDetails: string[] = [];
+
+    for (const sw of switches) {
+      const posKey = `${sw.position.x},${sw.position.y}`;
+      const isReachableTile = reachable.has(posKey);
+      const swRoom = cluster.rooms.find(r => r.id === sw.roomId);
+      const inQuarantine = swRoom ? quarantineRoomIds.has(swRoom.id) : false;
+      const reachableStatus = isReachableTile ? 'REACHABLE' : 'UNREACHABLE';
+      switchDetails.push(
+        `    ia-switch ${sw.id} (${sw.kind}) in room ${sw.roomId} ` +
+        `[${swRoom?.roomType ?? '?'}] @ (${sw.position.x},${sw.position.y}) → ${reachableStatus}` +
+        `${inQuarantine ? ' [INSIDE QUARANTINE]' : ''}` +
+        `${sw.isDataArchive ? ' [DATA ARCHIVE]' : ''}`
+      );
+      if (isReachableTile) anyReachable = true;
+
+      // Check usability: data archives render deactivation from ia.dialog directly;
+      // standard interactables need a root menu link
+      if (isReachableTile) {
+        if (sw.isDataArchive) {
+          anyUsableSwitch = true;
+        } else {
+          const rootNode = sw.dialog.find(n => n.id === 'root');
+          if (rootNode?.choices.some(c => c.nodeId === `deactivate_${qRoom.id}`)) {
+            anyUsableSwitch = true;
+          } else {
+            switchDetails.push(`    ⚠ ia-switch ${sw.id} — deactivate node exists but NOT linked from root menu`);
+          }
+        }
+      }
+    }
+
+    for (const ts of termSwitches) {
+      const posKey = `${ts.position.x},${ts.position.y}`;
+      // Terminal tile is not walkable, check adjacent tiles for reachability
+      const adjReachable = [[0,-1],[0,1],[-1,0],[1,0]].some(([dx,dy]) =>
+        reachable.has(`${ts.position.x+dx},${ts.position.y+dy}`)
+      );
+      const tsRoom = cluster.rooms.find(r => r.id === ts.roomId);
+      const inQuarantine = tsRoom ? quarantineRoomIds.has(tsRoom.id) : false;
+      switchDetails.push(
+        `    term-switch ${ts.id} in room ${ts.roomId} ` +
+        `[${tsRoom?.roomType ?? '?'}] @ (${ts.position.x},${ts.position.y}) → ${adjReachable ? 'REACHABLE' : 'UNREACHABLE'}` +
+        `${inQuarantine ? ' [INSIDE QUARANTINE]' : ''}`
+      );
+      if (adjReachable) { anyReachable = true; anyUsableSwitch = true; }
+    }
+
+    if (!anyReachable) {
+      quarantineUnreachableSwitch++;
+      const hasKey = cluster.terminals.some(t => t.hasKey && t.roomId === qRoom.id);
+      quarantineDiagnostics.push(
+        `  [UNREACHABLE] seed=${seed} cluster=${clusterId} quarantine room ${qRoom.id}` +
+        `${hasKey ? ' [HAS KEY TERMINAL]' : ''} — ${totalSwitches} switch(es) exist but none reachable:`,
+        ...switchDetails
+      );
+    } else if (!anyUsableSwitch) {
+      quarantineUnreachableSwitch++;  // effectively unreachable — no usable dialog path
+      const hasKey = cluster.terminals.some(t => t.hasKey && t.roomId === qRoom.id);
+      quarantineDiagnostics.push(
+        `  [NO USABLE SWITCH] seed=${seed} cluster=${clusterId} quarantine room ${qRoom.id}` +
+        `${hasKey ? ' [HAS KEY TERMINAL]' : ''} — ${totalSwitches} switch(es) assigned but ALL lack root menu link (e.g. archive echoes):`,
+        ...switchDetails.filter(l => l.includes('⚠'))
+      );
+    } else {
+      // Still report if there are usability warnings
+      const warnings = switchDetails.filter(l => l.includes('⚠'));
+      if (warnings.length > 0) {
+        const hasKey = cluster.terminals.some(t => t.hasKey && t.roomId === qRoom.id);
+        quarantineDiagnostics.push(
+          `  [WARNING] seed=${seed} cluster=${clusterId} quarantine room ${qRoom.id}` +
+          `${hasKey ? ' [HAS KEY TERMINAL]' : ''} — some switches have issues (but at least one is usable):`,
+          ...warnings
+        );
+      }
+    }
   }
 
-  return { snapshots, genTimeMs, quarantineWithoutSwitch, totalQuarantine };
+  // Check entity-blocked doorways: only prop entities (no AI, static) truly block movement.
+  // Hostile entities can be killed, friendly/neutral AI entities can be moved aside.
+  const entityPositions = new Set<string>();
+  for (const e of state.entities) {
+    if (e.clusterId !== clusterId) continue;
+    // Props: no ai field, no coherence — they can't be attacked, pushed, or removed
+    const isProp = !e.ai && e.coherence === undefined;
+    if (isProp) {
+      entityPositions.add(`${e.position.x},${e.position.y}`);
+    }
+  }
+
+  let entityBlockedRooms = 0;
+  const entityBlockedDiagnostics: string[] = [];
+
+  if (entityPositions.size > 0) {
+    const reachableWithEntities = bfsReachBlocked(cluster, entryPos, entityPositions);
+    const reachableWithout = bfsReach(cluster, entryPos);
+
+    // Find rooms that are reachable without entities but NOT with entities
+    for (const room of cluster.rooms) {
+      let reachableWithout_ = false;
+      let reachableWith_ = false;
+      for (let y = room.y; y < room.y + room.h; y++) {
+        for (let x = room.x; x < room.x + room.w; x++) {
+          const k = `${x},${y}`;
+          if (reachableWithout.has(k)) reachableWithout_ = true;
+          if (reachableWithEntities.has(k)) reachableWith_ = true;
+        }
+      }
+      if (reachableWithout_ && !reachableWith_) {
+        entityBlockedRooms++;
+        // Find which prop entity(s) are blocking access
+        const blockingEntities = state.entities.filter(e => {
+          if (e.clusterId !== clusterId) return false;
+          const isProp = !e.ai && e.coherence === undefined;
+          if (!isProp) return false;
+          return entityPositions.has(`${e.position.x},${e.position.y}`);
+        });
+        const entNames = blockingEntities.map(e => `${e.name}@(${e.position.x},${e.position.y})`).join(', ');
+        entityBlockedDiagnostics.push(
+          `  [ENTITY BLOCKED] seed=${seed} cluster=${clusterId} room ${room.id} (${room.roomType}) — blocked by: ${entNames || 'entity on chokepoint'}`
+        );
+      }
+    }
+  }
+
+  return { snapshots, genTimeMs, quarantineWithoutSwitch, quarantineUnreachableSwitch, quarantineDiagnostics, totalQuarantine, entityBlockedRooms, entityBlockedDiagnostics };
 }
 
 // ── Determinism check ──
@@ -773,9 +973,9 @@ async function main() {
     const origLog2 = console.log;
     console.log = () => {};  // suppress cluster-gen logs during simulation runs
     for (const seed of seeds) {
-      const { snapshots, genTimeMs, quarantineWithoutSwitch, totalQuarantine } = simulateCluster(seed, TOTAL_TICKS, cid);
+      const { snapshots, genTimeMs, quarantineWithoutSwitch, quarantineUnreachableSwitch, quarantineDiagnostics, totalQuarantine, entityBlockedRooms, entityBlockedDiagnostics } = simulateCluster(seed, TOTAL_TICKS, cid);
       const deterministic = checkDeterminism(seed);
-      cidResults.push({ seed, snapshots, genTimeMs, deterministic, quarantineWithoutSwitch, totalQuarantine });
+      cidResults.push({ seed, snapshots, genTimeMs, deterministic, quarantineWithoutSwitch, quarantineUnreachableSwitch, quarantineDiagnostics, totalQuarantine, entityBlockedRooms, entityBlockedDiagnostics });
     }
     console.log = origLog2;
     allClusterResults.set(cid, cidResults);
@@ -980,11 +1180,57 @@ async function main() {
   const avgEmptyPct = mean(finalEmptyPcts);
   printMetric(`Avg empty rooms (no entity 10+ ticks) @${TOTAL_TICKS}`, `${avgEmptyPct.toFixed(1)}%`, true, 'low');
 
+  // Alert module entity detection check: on seeds with hostile entities nearby,
+  // alert.m should detect them as entity-source threats
+  const seedsWithEntitiesAt50 = validResults.filter(r => {
+    const snap = getSnap(r, 50);
+    return snap && (snap.factionCounts.aggressive > 0 || snap.factionCounts.titan > 0);
+  });
+  const seedsWithEntityAlerts = seedsWithEntitiesAt50.filter(r => {
+    const snap = getSnap(r, 50);
+    return snap?.alertDetectsEntities;
+  });
+  const alertEntityPct = seedsWithEntitiesAt50.length > 0
+    ? seedsWithEntityAlerts.length / seedsWithEntitiesAt50.length : 1;
+  console.log('\nAlert module:');
+  printMetric(
+    'alert.m detects hostile entities @50',
+    `${seedsWithEntityAlerts.length}/${seedsWithEntitiesAt50.length} seeds with hostiles`,
+    alertEntityPct >= 0.30, 'high',
+  );
+
   // Quarantine deactivation check
   const totalQRooms = validResults.reduce((s, r) => s + r.totalQuarantine, 0);
   const missingQSwitches = validResults.reduce((s, r) => s + r.quarantineWithoutSwitch, 0);
+  const unreachableQSwitches = validResults.reduce((s, r) => s + r.quarantineUnreachableSwitch, 0);
+  const allQDiagnostics = validResults.flatMap(r => r.quarantineDiagnostics);
   console.log('\nHazard integrity:');
   printMetric('Quarantine rooms without deactivation switch', `${missingQSwitches}/${totalQRooms}`, missingQSwitches === 0, 'high');
+  printMetric('Quarantine rooms with unreachable switch', `${unreachableQSwitches}/${totalQRooms}`, unreachableQSwitches === 0, 'high');
+  if (allQDiagnostics.length > 0) {
+    console.log('\n  Quarantine diagnostics:');
+    for (const line of allQDiagnostics) console.log(line);
+  }
+
+  // Entity-blocked doorways check (across ALL clusters, not just CLUSTER_ID)
+  let totalEntityBlockedSeeds = 0;
+  let totalEntityBlockedRooms = 0;
+  const allEntityBlockedDiagnostics: string[] = [];
+  let totalSeedsChecked = 0;
+  for (const [, cidResults] of allClusterResults) {
+    const valid = cidResults.filter(r => r.snapshots.length > 0);
+    totalSeedsChecked += valid.length;
+    totalEntityBlockedSeeds += valid.filter(r => r.entityBlockedRooms > 0).length;
+    totalEntityBlockedRooms += valid.reduce((s, r) => s + r.entityBlockedRooms, 0);
+    allEntityBlockedDiagnostics.push(...valid.flatMap(r => r.entityBlockedDiagnostics));
+  }
+  console.log('\nEntity placement:');
+  printMetric('Seeds with entity-blocked rooms @0 (all clusters)', `${totalEntityBlockedSeeds}/${totalSeedsChecked} seed-clusters`, totalEntityBlockedSeeds === 0, 'high');
+  printMetric('Total entity-blocked rooms @0 (all clusters)', `${totalEntityBlockedRooms}`, totalEntityBlockedRooms === 0, 'high');
+  if (allEntityBlockedDiagnostics.length > 0) {
+    console.log('\n  Entity-blocked room diagnostics:');
+    for (const line of allEntityBlockedDiagnostics) console.log(line);
+  }
 
   console.log('\nSeed variance:');
   printMetric('CV path damage @50', cvDamage.toFixed(3), cvDamage <= 0.4, 'medium');

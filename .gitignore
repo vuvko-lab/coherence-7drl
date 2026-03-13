@@ -19,3 +19,4 @@ dist/
 maps/
 extra/
 sim-plots/
+sim-results.json

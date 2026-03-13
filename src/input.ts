@@ -124,6 +124,13 @@ export class InputHandler {
       return;
     }
 
+    // Debug / admin panel toggle
+    if (e.key === '`') {
+      e.preventDefault();
+      this.onAction({ kind: 'debug_toggle' });
+      return;
+    }
+
   };
 
   handleMapClick(pos: Position) {

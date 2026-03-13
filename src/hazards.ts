@@ -1,11 +1,13 @@
 import {
-  GameState, Cluster, Room, Position, TileType,
+  GameState, Cluster, Room, Position, TileType, Faction,
   CorruptionStage, CLUSTER_WIDTH, CLUSTER_HEIGHT, COLORS,
-  HazardOverlayType, ALERT_SUSPICIOUS,
+  ALERT_SUSPICIOUS, ALERT_ENEMY, FACTION_RELATIONS,
 } from './types';
+import type { Intent } from './intents';
 import { addMessage } from './game';
 import { random, randInt, shuffle } from './rng';
-import { makeSentry, makeBitMite, makeGateKeeper } from './ai';
+import { makeEntity } from './entity-defs';
+import { resolveIntents } from './intent-resolver';
 
 function roomInterior(room: Room): { x1: number; y1: number; x2: number; y2: number } {
   return { x1: room.x + 1, y1: room.y + 1, x2: room.x + room.w - 2, y2: room.y + room.h - 2 };
@@ -20,13 +22,6 @@ function playerRoom(state: GameState, cluster: Cluster): Room | undefined {
   return cluster.rooms.find(r => posInRoom(state.player.position, r));
 }
 
-/** Mark a room as containing a hazard overlay type (for tiles that spread across room boundaries) */
-function markTileHazardInRoom(cluster: Cluster, x: number, y: number, type: HazardOverlayType) {
-  const roomId = cluster.tiles[y]?.[x]?.roomId;
-  if (roomId == null || roomId < 0) return;
-  const room = cluster.rooms.find(r => r.id === roomId);
-  if (room) room.containedHazards.add(type);
-}
 
 /** BFS distance between two rooms via adjacency graph. Returns -1 if unreachable. */
 function roomDistance(adj: Map<number, number[]>, fromId: number, toId: number): number {
@@ -46,23 +41,6 @@ function roomDistance(adj: Map<number, number[]>, fromId: number, toId: number):
   return -1;
 }
 
-function damageCoherence(state: GameState, amount: number) {
-  if (state.godMode) return;
-  if (state.player.coherence == null) return;
-  state.player.coherence = Math.max(0, state.player.coherence - amount);
-  state.pendingSounds.push('hit');
-}
-
-/** Convert a wall or door tile to floor (breach) */
-function breachTile(cluster: Cluster, x: number, y: number) {
-  const tile = cluster.tiles[y]?.[x];
-  if (!tile) return;
-  tile.type = TileType.Floor;
-  tile.glyph = '·';
-  tile.fg = COLORS.floorFg;
-  tile.walkable = true;
-  tile.transparent = true;
-}
 
 function tileIntegrity(cluster: Cluster, x: number, y: number): number {
   const tile = cluster.tiles[y]?.[x];
@@ -86,27 +64,28 @@ function corruptionOverlayStage(stage: CorruptionStage): number {
   return CORRUPTION_STAGES.indexOf(stage);
 }
 
-function updateCorruption(state: GameState, cluster: Cluster, room: Room) {
+function updateCorruption(state: GameState, cluster: Cluster, room: Room): Intent[] {
   const hz = room.hazardState!;
-  if (!hz.corruptionTiles) return;
+  if (!hz.corruptionTiles) return [];
 
   const spreadInterval = randInt(20, 30);
-  if (state.tick - (hz.lastSpreadTick ?? 0) < spreadInterval) return;
-  hz.lastSpreadTick = state.tick;
+  if (state.tick - (hz.lastSpreadTick ?? 0) < spreadInterval) return [];
 
+  const intents: Intent[] = [
+    { kind: 'set_hazard_field', roomId: room.id, field: 'lastSpreadTick', value: state.tick },
+  ];
+
+  // Work on a copy of corruptionTiles so we can build the new map
+  const updatedTiles = new Map(hz.corruptionTiles);
   const newEntries: [string, CorruptionStage][] = [];
 
   for (const [key, stage] of hz.corruptionTiles.entries()) {
     // Progress existing tiles
     const next = nextCorruptionStage(stage);
     if (next) {
-      hz.corruptionTiles.set(key, next);
+      updatedTiles.set(key, next);
       const [cx, cy] = key.split(',').map(Number);
-      cluster.tiles[cy][cx].hazardOverlay = {
-        type: 'corruption',
-        stage: corruptionOverlayStage(next),
-      };
-      // All corruption stages remain walkable — damage handled by applyTileHazardToPlayer
+      intents.push({ kind: 'damage_tile', position: { x: cx, y: cy }, hazardType: 'corruption', stage: corruptionOverlayStage(next) });
     }
 
     // Spread to adjacent tile (floor, wall, or door)
@@ -118,28 +97,30 @@ function updateCorruption(state: GameState, cluster: Cluster, room: Room) {
       const ny = cy + dy;
       const nkey = `${nx},${ny}`;
       if (nx < 0 || nx >= CLUSTER_WIDTH || ny < 0 || ny >= CLUSTER_HEIGHT) continue;
-      if (hz.corruptionTiles.has(nkey)) continue;
+      if (updatedTiles.has(nkey)) continue;
 
       const target = cluster.tiles[ny][nx];
       if (target.type === TileType.Floor) {
         newEntries.push([nkey, 'degrading']);
+        updatedTiles.set(nkey, 'degrading'); // guard against duplicate spread
         break;
       } else if (target.type === TileType.Wall || target.type === TileType.Door) {
-        // Probabilistic degradation: walls resist more than doors
         const degradeChance = target.type === TileType.Wall ? 0.25 : 0.50;
         // Always show corruption overlay (visual cracking)
-        target.hazardOverlay = { type: 'corruption', stage: 0 };
-        markTileHazardInRoom(cluster, nx, ny, 'corruption');
+        intents.push(
+          { kind: 'damage_tile', position: { x: nx, y: ny }, hazardType: 'corruption', stage: 0 },
+          { kind: 'mark_tile_hazard', position: { x: nx, y: ny }, hazardType: 'corruption' },
+        );
 
         if (random() < degradeChance) {
           const integrity = tileIntegrity(cluster, nx, ny);
           const newIntegrity = integrity - 1;
           if (newIntegrity <= 0) {
-            // Breach the tile — convert to corrupted floor
-            breachTile(cluster, nx, ny);
+            intents.push({ kind: 'breach_tile', position: { x: nx, y: ny } });
             newEntries.push([nkey, 'degrading']);
+            updatedTiles.set(nkey, 'degrading'); // guard against duplicate spread
           } else {
-            target.integrity = newIntegrity;
+            intents.push({ kind: 'set_tile_props', position: { x: nx, y: ny }, props: { integrity: newIntegrity } });
           }
         }
         break;
@@ -148,14 +129,15 @@ function updateCorruption(state: GameState, cluster: Cluster, room: Room) {
   }
 
   for (const [key, stage] of newEntries) {
-    hz.corruptionTiles.set(key, stage);
+    updatedTiles.set(key, stage);
     const [cx, cy] = key.split(',').map(Number);
-    cluster.tiles[cy][cx].hazardOverlay = {
-      type: 'corruption',
-      stage: corruptionOverlayStage(stage),
-    };
-    markTileHazardInRoom(cluster, cx, cy, 'corruption');
+    intents.push(
+      { kind: 'damage_tile', position: { x: cx, y: cy }, hazardType: 'corruption', stage: corruptionOverlayStage(stage) },
+      { kind: 'mark_tile_hazard', position: { x: cx, y: cy }, hazardType: 'corruption' },
+    );
   }
+
+  intents.push({ kind: 'set_hazard_field', roomId: room.id, field: 'corruptionTiles', value: updatedTiles });
 
   // Sound propagation
   if (newEntries.length > 0) {
@@ -163,49 +145,54 @@ function updateCorruption(state: GameState, cluster: Cluster, room: Room) {
     if (pRoom) {
       const dist = roomDistance(cluster.doorAdjacency, pRoom.id, room.id);
       if (dist === 0) {
-        addMessage(state, 'Data structures crack and fragment around you.', 'important');
+        intents.push({ kind: 'message', text: 'Data structures crack and fragment around you.', style: 'important' });
       } else if (dist === 1) {
-        addMessage(state, 'You hear cracking through the walls.', 'normal');
+        intents.push({ kind: 'message', text: 'You hear cracking through the walls.' });
       } else if (dist === 2) {
-        addMessage(state, 'A faint crackling echoes from somewhere.', 'normal');
+        intents.push({ kind: 'message', text: 'A faint crackling echoes from somewhere.' });
       }
     }
   }
 
   if (state.debugMode) {
-    addMessage(state, `[DBG] Corruption room ${room.id}: ${hz.corruptionTiles.size} tiles, +${newEntries.length} new`, 'debug');
+    intents.push({ kind: 'message', text: `[DBG] Corruption room ${room.id}: ${updatedTiles.size} tiles, +${newEntries.length} new`, style: 'system' });
   }
+
+  return intents;
 }
 
 // ── Trigger Trap ──
 
-function updateTriggerTrap(state: GameState, cluster: Cluster, room: Room) {
+function updateTriggerTrap(state: GameState, cluster: Cluster, room: Room): Intent[] {
   const hz = room.hazardState!;
-  if (hz.detonated || !hz.activated) return;
+  if (hz.detonated || !hz.activated) return [];
 
-  hz.ticksRemaining = (hz.ticksRemaining ?? 0) - 1;
+  const newTicksRemaining = (hz.ticksRemaining ?? 0) - 1;
+  const intents: Intent[] = [
+    { kind: 'set_hazard_field', roomId: room.id, field: 'ticksRemaining', value: newTicksRemaining },
+  ];
 
   // Sound at 5 ticks remaining
-  if (hz.ticksRemaining === 5) {
+  if (newTicksRemaining === 5) {
     const pRoom = playerRoom(state, cluster);
     if (pRoom) {
       const dist = roomDistance(cluster.doorAdjacency, pRoom.id, room.id);
       if (dist <= 1) {
-        addMessage(state, `Rapid ticking from ${dist === 0 ? 'this room' : 'nearby'}!`, 'hazard');
+        intents.push({ kind: 'message', text: `Rapid ticking from ${dist === 0 ? 'this room' : 'nearby'}!`, style: 'hazard' });
       }
     }
   }
 
   // Detonation
-  if (hz.ticksRemaining! <= 0) {
-    hz.detonated = true;
+  if (newTicksRemaining <= 0) {
+    intents.push({ kind: 'set_hazard_field', roomId: room.id, field: 'detonated', value: true });
     const { x1, y1, x2, y2 } = roomInterior(room);
 
     // Scorch all floor tiles
     for (let y = y1; y <= y2; y++) {
       for (let x = x1; x <= x2; x++) {
         if (cluster.tiles[y][x].type === TileType.Floor) {
-          cluster.tiles[y][x].hazardOverlay = { type: 'scorch' };
+          intents.push({ kind: 'damage_tile', position: { x, y }, hazardType: 'scorch' });
         }
       }
     }
@@ -215,9 +202,11 @@ function updateTriggerTrap(state: GameState, cluster: Cluster, room: Room) {
       for (let x = room.x; x < room.x + room.w; x++) {
         if (x < 0 || x >= CLUSTER_WIDTH || y < 0 || y >= CLUSTER_HEIGHT) continue;
         if (cluster.tiles[y][x].type === TileType.Door) {
-          breachTile(cluster, x, y);
-          cluster.tiles[y][x].hazardOverlay = { type: 'scorch' };
-          markTileHazardInRoom(cluster, x, y, 'scorch');
+          intents.push(
+            { kind: 'breach_tile', position: { x, y } },
+            { kind: 'damage_tile', position: { x, y }, hazardType: 'scorch' },
+            { kind: 'mark_tile_hazard', position: { x, y }, hazardType: 'scorch' },
+          );
         }
       }
     }
@@ -227,21 +216,27 @@ function updateTriggerTrap(state: GameState, cluster: Cluster, room: Room) {
     if (pRoom) {
       const dist = roomDistance(cluster.doorAdjacency, pRoom.id, room.id);
       if (dist === 0) {
-        addMessage(state, 'DETONATION! The data-bomb tears through the room!', 'hazard');
-        state.pendingSounds.push('explosion');
-        damageCoherence(state, randInt(40, 60));
+        intents.push(
+          { kind: 'message', text: 'DETONATION! The data-bomb tears through the room!', style: 'hazard' },
+          { kind: 'sound', id: 'explosion' },
+          { kind: 'damage_player', amount: randInt(40, 60), source: 'trigger_trap' },
+        );
       } else if (dist === 1) {
-        addMessage(state, 'An explosion shakes the walls!', 'hazard');
-        damageCoherence(state, randInt(15, 25));
+        intents.push(
+          { kind: 'message', text: 'An explosion shakes the walls!', style: 'hazard' },
+          { kind: 'damage_player', amount: randInt(15, 25), source: 'trigger_trap' },
+        );
       } else if (dist <= 3) {
-        addMessage(state, 'A distant explosion rumbles through the structure.', 'normal');
+        intents.push({ kind: 'message', text: 'A distant explosion rumbles through the structure.' });
       }
     }
   }
 
   if (state.debugMode) {
-    addMessage(state, `[DBG] Trap room ${room.id}: ${hz.detonated ? 'DETONATED' : `ticks=${hz.ticksRemaining}`}`, 'debug');
+    intents.push({ kind: 'message', text: `[DBG] Trap room ${room.id}: ${newTicksRemaining <= 0 ? 'DETONATED' : `ticks=${newTicksRemaining}`}`, style: 'system' });
   }
+
+  return intents;
 }
 
 function onPlayerEnterTriggerTrap(_state: GameState, room: Room) {
@@ -252,26 +247,27 @@ function onPlayerEnterTriggerTrap(_state: GameState, room: Room) {
 
 // ── Memory Leak ──
 
-function updateMemoryLeak(state: GameState, cluster: Cluster, room: Room) {
+function updateMemoryLeak(state: GameState, cluster: Cluster, room: Room): Intent[] {
   const hz = room.hazardState!;
-  const floodLevel = hz.floodLevel ?? 0;
+  let effectiveFloodLevel = hz.floodLevel ?? 0;
   const innerH = room.h - 2;
   const maxFlood = Math.max(0, innerH - 4);
+  const intents: Intent[] = [];
 
-  // Rise every 6 ticks
-  if (state.tick % 6 === 0 && floodLevel < maxFlood) {
-    hz.floodLevel = floodLevel + 1;
+  // Rise every 6 ticks — resolve immediately so door pressure sees updated state
+  if (state.tick % 6 === 0 && effectiveFloodLevel < maxFlood) {
+    effectiveFloodLevel += 1;
+    const riseIntents: Intent[] = [
+      { kind: 'set_hazard_field', roomId: room.id, field: 'floodLevel', value: effectiveFloodLevel },
+    ];
 
     const { x1, y1, x2, y2 } = roomInterior(room);
-    for (let row = 0; row < hz.floodLevel; row++) {
+    for (let row = 0; row < effectiveFloodLevel; row++) {
       const fy = y2 - row;
       if (fy < y1) break;
       for (let x = x1; x <= x2; x++) {
         if (cluster.tiles[fy][x].type === TileType.Floor) {
-          cluster.tiles[fy][x].hazardOverlay = {
-            type: 'flood',
-            stage: row >= 2 ? 1 : 0,
-          };
+          riseIntents.push({ kind: 'damage_tile', position: { x, y: fy }, hazardType: 'flood', stage: row >= 2 ? 1 : 0 });
         }
       }
     }
@@ -280,24 +276,25 @@ function updateMemoryLeak(state: GameState, cluster: Cluster, room: Room) {
     if (pRoom) {
       const dist = roomDistance(cluster.doorAdjacency, pRoom.id, room.id);
       if (dist === 0) {
-        addMessage(state, 'Data floods rise around your feet.', 'hazard');
-      } else if (dist === 1 && hz.floodLevel === 1) {
-        addMessage(state, 'You hear liquid data gurgling through the walls.', 'normal');
+        riseIntents.push({ kind: 'message', text: 'Data floods rise around your feet.', style: 'hazard' });
+      } else if (dist === 1 && effectiveFloodLevel === 1) {
+        riseIntents.push({ kind: 'message', text: 'You hear liquid data gurgling through the walls.' });
       }
     }
+
+    // Resolve rise intents immediately so door pressure sees flood overlays
+    resolveIntents(state, riseIntents);
   }
 
   // Flood pressure on doors — 30% chance per tick to breach
-  if ((hz.floodLevel ?? 0) > 0) {
+  if (effectiveFloodLevel > 0) {
     const { x1, y1, x2, y2 } = roomInterior(room);
 
-    // Check door tiles on room boundary
     for (let y = room.y; y < room.y + room.h; y++) {
       for (let x = room.x; x < room.x + room.w; x++) {
         if (x < 0 || x >= CLUSTER_WIDTH || y < 0 || y >= CLUSTER_HEIGHT) continue;
         if (cluster.tiles[y][x].type !== TileType.Door) continue;
 
-        // Is this door adjacent to a flooded tile?
         const dirs = [[-1, 0], [1, 0], [0, -1], [0, 1]];
         const adjacentToFlood = dirs.some(([dx, dy]) => {
           const ax = x + dx, ay = y + dy;
@@ -306,18 +303,22 @@ function updateMemoryLeak(state: GameState, cluster: Cluster, room: Room) {
         });
 
         if (adjacentToFlood && random() < 0.30) {
-          breachTile(cluster, x, y);
-          cluster.tiles[y][x].hazardOverlay = { type: 'flood', stage: 0 };
-          markTileHazardInRoom(cluster, x, y, 'flood');
-          addMessage(state, 'A door bursts open under flood pressure!', 'hazard');
+          intents.push(
+            { kind: 'breach_tile', position: { x, y } },
+            { kind: 'damage_tile', position: { x, y }, hazardType: 'flood', stage: 0 },
+            { kind: 'mark_tile_hazard', position: { x, y }, hazardType: 'flood' },
+            { kind: 'message', text: 'A door bursts open under flood pressure!', style: 'hazard' },
+          );
         }
       }
     }
   }
 
   if (state.debugMode) {
-    addMessage(state, `[DBG] Leak room ${room.id}: flood=${hz.floodLevel ?? 0}/${maxFlood}`, 'debug');
+    intents.push({ kind: 'message', text: `[DBG] Leak room ${room.id}: flood=${effectiveFloodLevel}/${maxFlood}`, style: 'system' });
   }
+
+  return intents;
 }
 
 // ── Firewall Checkpoint ──
@@ -330,38 +331,25 @@ const FW_ENTER_MSG: Record<string, string> = {
   spiral:   'A spiral scan traces through the room.',
 };
 
-function clearBeamOverlays(cluster: Cluster, x1: number, y1: number, x2: number, y2: number) {
-  for (let y = y1; y <= y2; y++) {
-    for (let x = x1; x <= x2; x++) {
-      if (cluster.tiles[y][x].hazardOverlay?.type === 'beam') {
-        cluster.tiles[y][x].hazardOverlay = undefined;
-      }
-    }
-  }
-}
 
-function markBeam(cluster: Cluster, cells: { x: number; y: number }[]) {
-  for (const { x, y } of cells) {
-    if (cluster.tiles[y]?.[x]?.type === TileType.Floor) {
-      cluster.tiles[y][x].hazardOverlay = { type: 'beam' };
-    }
-  }
-}
-
-function updateFirewall(state: GameState, cluster: Cluster, room: Room) {
+function updateFirewall(state: GameState, cluster: Cluster, room: Room): Intent[] {
   const hz = room.hazardState!;
   const { x1, y1, x2, y2 } = roomInterior(room);
   const pattern = hz.firewallPattern ?? 'pingpong';
+  const intents: Intent[] = [];
 
   // Each pattern controls its own tick gating
   const active: { x: number; y: number }[] = [];
 
+  // Clone beams for mutation-via-intent
+  const beams = hz.beams ? hz.beams.map((b: any) => ({ ...b })) : [];
+  let newStep = hz.firewallStep ?? 0;
+
   switch (pattern) {
-    // ── Pingpong: 1-2 beams bouncing on their axis ──
     case 'pingpong':
     case 'cross': {
       if (state.tick % 2 !== 0) break;
-      for (const beam of (hz.beams ?? [])) {
+      for (const beam of beams) {
         beam.position += beam.direction;
         if (beam.position >= beam.max) { beam.position = beam.max; beam.direction = -1; }
         if (beam.position <= beam.min) { beam.position = beam.min; beam.direction =  1; }
@@ -371,17 +359,17 @@ function updateFirewall(state: GameState, cluster: Cluster, room: Room) {
           for (let y = y1; y <= y2; y++) active.push({ x: beam.position, y });
         }
       }
+      intents.push({ kind: 'set_hazard_field', roomId: room.id, field: 'beams', value: beams });
       break;
     }
 
-    // ── Wipe: a single scan line sweeps the room, then a brief gap ──
     case 'wipe': {
       if (state.tick % 2 !== 0) break;
       const axis = hz.firewallAxis ?? 'horizontal';
       const size  = axis === 'horizontal' ? (y2 - y1 + 1) : (x2 - x1 + 1);
-      const cycle = size + 4; // 4-tick gap at end
+      const cycle = size + 4;
       const step  = hz.firewallStep ?? 0;
-      hz.firewallStep = (step + 1) % cycle;
+      newStep = (step + 1) % cycle;
 
       if (step < size) {
         if (axis === 'horizontal') {
@@ -390,18 +378,17 @@ function updateFirewall(state: GameState, cluster: Cluster, room: Room) {
           for (let y = y1; y <= y2; y++) active.push({ x: x1 + step, y });
         }
       }
-      // step >= size → gap, nothing active
+      intents.push({ kind: 'set_hazard_field', roomId: room.id, field: 'firewallStep', value: newStep });
       break;
     }
 
-    // ── Inward: concentric rectangular frames shrink to center and back ──
     case 'inward': {
       if (state.tick % 3 !== 0) break;
       const maxInset = Math.floor(Math.min(x2 - x1, y2 - y1) / 2);
       const cycle  = Math.max(1, maxInset * 2);
       const pos    = (hz.firewallStep ?? 0) % cycle;
       const inset  = pos <= maxInset ? pos : cycle - pos;
-      hz.firewallStep = ((hz.firewallStep ?? 0) + 1) % cycle;
+      newStep = ((hz.firewallStep ?? 0) + 1) % cycle;
 
       const rx1 = x1 + inset, ry1 = y1 + inset;
       const rx2 = x2 - inset, ry2 = y2 - inset;
@@ -409,10 +396,10 @@ function updateFirewall(state: GameState, cluster: Cluster, room: Room) {
         for (let x = rx1; x <= rx2; x++) { active.push({ x, y: ry1 }); if (ry2 > ry1) active.push({ x, y: ry2 }); }
         for (let y = ry1 + 1; y < ry2; y++) { active.push({ x: rx1, y }); if (rx2 > rx1) active.push({ x: rx2, y }); }
       }
+      intents.push({ kind: 'set_hazard_field', roomId: room.id, field: 'firewallStep', value: newStep });
       break;
     }
 
-    // ── Spiral: a band of cells sweeps a clockwise spiral through the room ──
     case 'spiral': {
       if (state.tick % 2 !== 0) break;
       const path = hz.firewallPath;
@@ -420,22 +407,28 @@ function updateFirewall(state: GameState, cluster: Cluster, room: Room) {
       const step = hz.firewallStep ?? 0;
       const band = Math.max(3, Math.floor(path.length / 6));
       for (let i = 0; i < band; i++) active.push(path[(step + i) % path.length]);
-      hz.firewallStep = (step + 1) % path.length;
+      newStep = (step + 1) % path.length;
+      intents.push({ kind: 'set_hazard_field', roomId: room.id, field: 'firewallStep', value: newStep });
       break;
     }
   }
 
-  clearBeamOverlays(cluster, x1, y1, x2, y2);
-  markBeam(cluster, active);
+  // Clear old beam overlays and mark new ones
+  intents.push({ kind: 'clear_overlays', region: { x1, y1, x2, y2 }, overlayType: 'beam' });
+  for (const cell of active) {
+    if (cluster.tiles[cell.y]?.[cell.x]?.type === TileType.Floor) {
+      intents.push({ kind: 'damage_tile', position: cell, hazardType: 'beam' });
+    }
+  }
 
   // Charge accumulation: beam detects aggressive entity OR player with alert >= suspicious
-  hz.firewallCharge ??= 0;
-  hz.firewallMaxCharge ??= 3;
+  const currentCharge = hz.firewallCharge ?? 0;
+  const maxCharge = hz.firewallMaxCharge ?? 3;
   const beamSet = new Set(active.map(c => `${c.x},${c.y}`));
   let detected = false;
   if (!state.invisibleMode && posInRoom(state.player.position, room)) {
     if (beamSet.has(`${state.player.position.x},${state.player.position.y}`)) {
-      addMessage(state, '[FIREWALL SCAN]: Crew ego detected. Identity: [ERROR]', 'alert');
+      intents.push({ kind: 'message', text: '[FIREWALL SCAN]: Crew ego detected. Identity: [ERROR]', style: 'alert' });
       if (state.alertLevel >= ALERT_SUSPICIOUS) detected = true;
     }
   }
@@ -445,35 +438,49 @@ function updateFirewall(state: GameState, cluster: Cluster, room: Room) {
     if (beamSet.has(`${e.position.x},${e.position.y}`)) { detected = true; break; }
   }
   if (detected) {
-    hz.firewallCharge++;
-    addMessage(state, `Firewall scanner charge: ${hz.firewallCharge}/${hz.firewallMaxCharge}`, 'alert');
-    if (hz.firewallCharge >= hz.firewallMaxCharge) {
-      hz.firewallCharge = 0;
-      hz.firewallLastSpawnTick = state.tick;
-      spawnEntityInRoom(state, cluster, room, 'sentry');
-      addMessage(state, 'FIREWALL: Defensive sentry deployed.', 'alert');
+    const newCharge = currentCharge + 1;
+    intents.push(
+      { kind: 'set_hazard_field', roomId: room.id, field: 'firewallCharge', value: newCharge },
+      { kind: 'message', text: `Firewall scanner charge: ${newCharge}/${maxCharge}`, style: 'alert' },
+    );
+    if (newCharge >= maxCharge) {
+      intents.push(
+        { kind: 'set_hazard_field', roomId: room.id, field: 'firewallCharge', value: 0 },
+        { kind: 'set_hazard_field', roomId: room.id, field: 'firewallLastSpawnTick', value: state.tick },
+      );
+      // Spawn sentry in room (respect entity cap)
+      const entityCap = 15 + cluster.id * 5;
+      const currentCount = state.entities.filter(e => e.clusterId === cluster.id).length;
+      const spawnPos = currentCount < entityCap ? findSpawnPosInRoom(state, cluster, room) : undefined;
+      if (spawnPos) {
+        intents.push(
+          { kind: 'spawn_entity', entityKind: 'sentry', position: spawnPos, clusterId: cluster.id, overrides: { id: _nextSpawnId++ } },
+          { kind: 'message', text: 'FIREWALL: Defensive sentry deployed.', style: 'alert' },
+        );
+      }
     }
   }
 
   if (state.debugMode) {
-    addMessage(state, `[DBG] Firewall (${pattern}) room ${room.id}: step=${hz.firewallStep} active=${active.length}`, 'debug');
+    intents.push({ kind: 'message', text: `[DBG] Firewall (${pattern}) room ${room.id}: step=${newStep} active=${active.length}`, style: 'system' });
   }
+
+  return intents;
 }
 
 // ── Unstable Process ──
 
-function updateUnstable(state: GameState, cluster: Cluster, room: Room) {
+function updateUnstable(state: GameState, cluster: Cluster, room: Room): Intent[] {
   const hz = room.hazardState!;
-  if (hz.coreDestroyed) return;
+  if (hz.coreDestroyed) return [];
 
   const { x1, y1, x2, y2 } = roomInterior(room);
+  const intents: Intent[] = [];
 
   // Clear previous sparks
   if (hz.sparkedTiles) {
     for (const sp of hz.sparkedTiles) {
-      if (cluster.tiles[sp.y][sp.x].hazardOverlay?.type === 'spark') {
-        cluster.tiles[sp.y][sp.x].hazardOverlay = undefined;
-      }
+      intents.push({ kind: 'clear_tile_overlay', position: { x: sp.x, y: sp.y }, overlayType: 'spark' });
     }
   }
 
@@ -485,25 +492,31 @@ function updateUnstable(state: GameState, cluster: Cluster, room: Room) {
     if (hz.corePos && sx === hz.corePos.x && sy === hz.corePos.y) continue;
     if (cluster.tiles[sy][sx].type !== TileType.Floor) continue;
     sparks.push({ x: sx, y: sy });
-    cluster.tiles[sy][sx].hazardOverlay = { type: 'spark' };
+    intents.push({ kind: 'damage_tile', position: { x: sx, y: sy }, hazardType: 'spark' });
   }
-  hz.sparkedTiles = sparks;
+  intents.push({ kind: 'set_hazard_field', roomId: room.id, field: 'sparkedTiles', value: sparks });
 
   const pp = state.player.position;
   if (!state.invisibleMode && sparks.some(s => s.x === pp.x && s.y === pp.y)) {
-    addMessage(state, 'Electric discharge surges through you!', 'hazard');
-    damageCoherence(state, randInt(5, 10));
+    intents.push(
+      { kind: 'message', text: 'Electric discharge surges through you!', style: 'hazard' },
+      { kind: 'damage_player', amount: randInt(5, 10), source: 'unstable' },
+      { kind: 'sound', id: 'hit' },
+    );
   }
+
+  return intents;
 }
 
 // ── Trigger Trap visual pulsing ──
 
-function updateTriggerTrapVisuals(cluster: Cluster, room: Room, tick: number) {
+function updateTriggerTrapVisuals(cluster: Cluster, room: Room, tick: number): Intent[] {
   const hz = room.hazardState!;
-  if (!hz.activated || hz.detonated) return;
+  if (!hz.activated || hz.detonated) return [];
 
   const remaining = hz.ticksRemaining ?? 0;
   const { x1, y1, x2, y2 } = roomInterior(room);
+  const intents: Intent[] = [];
 
   let pulseRate: number;
   if (remaining > 10) pulseRate = 8;
@@ -512,77 +525,76 @@ function updateTriggerTrapVisuals(cluster: Cluster, room: Room, tick: number) {
 
   const pulseOn = (tick % pulseRate) < (pulseRate / 2);
 
-  for (let y = y1; y <= y2; y++) {
-    for (let x = x1; x <= x2; x++) {
-      if (cluster.tiles[y][x].type === TileType.Floor && !cluster.tiles[y][x].hazardOverlay) {
-        if (pulseOn) {
-          cluster.tiles[y][x].hazardOverlay = { type: 'scorch', stage: remaining <= 5 ? 2 : 1 };
+  if (pulseOn) {
+    for (let y = y1; y <= y2; y++) {
+      for (let x = x1; x <= x2; x++) {
+        if (cluster.tiles[y][x].type === TileType.Floor && !cluster.tiles[y][x].hazardOverlay) {
+          intents.push({ kind: 'damage_tile', position: { x, y }, hazardType: 'scorch', stage: remaining <= 5 ? 2 : 1 });
+        }
+      }
+    }
+  } else {
+    for (let y = y1; y <= y2; y++) {
+      for (let x = x1; x <= x2; x++) {
+        const overlay = cluster.tiles[y][x].hazardOverlay;
+        if (overlay?.type === 'scorch' && (overlay.stage === 1 || overlay.stage === 2)) {
+          intents.push({ kind: 'clear_tile_overlay', position: { x, y }, overlayType: 'scorch' });
         }
       }
     }
   }
 
-  if (!pulseOn) {
-    for (let y = y1; y <= y2; y++) {
-      for (let x = x1; x <= x2; x++) {
-        if (cluster.tiles[y][x].hazardOverlay?.type === 'scorch' &&
-            (cluster.tiles[y][x].hazardOverlay?.stage === 1 || cluster.tiles[y][x].hazardOverlay?.stage === 2)) {
-          cluster.tiles[y][x].hazardOverlay = undefined;
-        }
-      }
-    }
-  }
+  return intents;
 }
 
 // ── Echo Chamber ──
 
 const ECHO_GLITCH_CHARS = ['░', '▒', '▓', '█', '┃', '⌇', '¦'];
 
-function updateEchoChamber(state: GameState, cluster: Cluster, room: Room) {
+function updateEchoChamber(state: GameState, cluster: Cluster, room: Room): Intent[] {
   const hz = room.hazardState!;
   const px = state.player.position.x;
   const py = state.player.position.y;
   const playerInRoom = px >= room.x && px < room.x + room.w &&
                        py >= room.y && py < room.y + room.h;
+  const intents: Intent[] = [];
 
   // Update echo trail — record player position if inside room
   if (!hz.echoTrail) hz.echoTrail = [];
   if (playerInRoom) {
-    // Only add if player moved to a new position
     const last = hz.echoTrail[0];
     if (!last || last.x !== px || last.y !== py) {
-      hz.echoTrail.unshift({ x: px, y: py });
-      if (hz.echoTrail.length > 4) hz.echoTrail.length = 4;
+      const newTrail = [{ x: px, y: py }, ...hz.echoTrail].slice(0, 4);
+      intents.push({ kind: 'set_hazard_field', roomId: room.id, field: 'echoTrail', value: newTrail });
     }
   }
 
   // Update wall glitches — restore expired, spawn new
   if (!hz.wallGlitches) hz.wallGlitches = [];
 
-  // Tick down existing glitches
-  for (let i = hz.wallGlitches.length - 1; i >= 0; i--) {
-    const wg = hz.wallGlitches[i];
-    wg.ticksLeft--;
-    if (wg.ticksLeft <= 0) {
+  const surviving: typeof hz.wallGlitches = [];
+  for (const wg of hz.wallGlitches) {
+    const newTicksLeft = wg.ticksLeft - 1;
+    if (newTicksLeft <= 0) {
       // Restore original wall glyph
       const tile = cluster.tiles[wg.y]?.[wg.x];
       if (tile && tile.type === TileType.Wall) {
-        tile.glyph = wg.origGlyph;
-        tile.fg = COLORS.wall;
+        intents.push({ kind: 'set_tile_props', position: { x: wg.x, y: wg.y }, props: { glyph: wg.origGlyph, fg: COLORS.wall } });
       }
-      hz.wallGlitches.splice(i, 1);
+    } else {
+      surviving.push({ ...wg, ticksLeft: newTicksLeft });
     }
   }
 
   // Spawn new wall glitches (1-2 per tick, ~40% chance each)
+  const newGlitches = [...surviving];
   if (random() < 0.4) {
     const { x1, y1, x2, y2 } = roomInterior(room);
-    // Pick a random wall tile on the room border
     const wallTiles: { x: number; y: number }[] = [];
-    const glitchKeys = new Set(hz.wallGlitches.map(g => `${g.x},${g.y}`));
+    const glitchKeys = new Set(newGlitches.map(g => `${g.x},${g.y}`));
     for (let y = room.y; y < room.y + room.h; y++) {
       for (let x = room.x; x < room.x + room.w; x++) {
-        if (x > x1 && x < x2 && y > y1 && y < y2) continue; // skip interior
+        if (x > x1 && x < x2 && y > y1 && y < y2) continue;
         const tile = cluster.tiles[y]?.[x];
         if (tile?.type === TileType.Wall && !glitchKeys.has(`${x},${y}`)) {
           wallTiles.push({ x, y });
@@ -595,27 +607,34 @@ function updateEchoChamber(state: GameState, cluster: Cluster, room: Room) {
         const idx = Math.floor(random() * wallTiles.length);
         const wt = wallTiles.splice(idx, 1)[0];
         const tile = cluster.tiles[wt.y][wt.x];
-        hz.wallGlitches.push({
+        const glyphChar = ECHO_GLITCH_CHARS[Math.floor(random() * ECHO_GLITCH_CHARS.length)];
+        newGlitches.push({
           x: wt.x, y: wt.y,
           origGlyph: tile.glyph,
           ticksLeft: randInt(1, 3),
         });
-        tile.glyph = ECHO_GLITCH_CHARS[Math.floor(random() * ECHO_GLITCH_CHARS.length)];
-        tile.fg = '#335544';
+        intents.push({ kind: 'set_tile_props', position: { x: wt.x, y: wt.y }, props: { glyph: glyphChar, fg: '#335544' } });
       }
     }
   }
+
+  intents.push({ kind: 'set_hazard_field', roomId: room.id, field: 'wallGlitches', value: newGlitches });
+
+  return intents;
 }
 
 // ── Gravity Well ──
 
-function updateGravityWell(state: GameState, cluster: Cluster, room: Room) {
+function updateGravityWell(state: GameState, cluster: Cluster, room: Room): Intent[] {
   const hz = room.hazardState!;
-  if (!hz.singularityPos) return;
+  if (!hz.singularityPos) return [];
 
   const interval = hz.pullInterval ?? 3;
-  if (state.tick - (hz.lastPullTick ?? 0) < interval) return;
-  hz.lastPullTick = state.tick;
+  if (state.tick - (hz.lastPullTick ?? 0) < interval) return [];
+
+  const intents: Intent[] = [
+    { kind: 'set_hazard_field', roomId: room.id, field: 'lastPullTick', value: state.tick },
+  ];
 
   // Pull player if in room (invisible mode: player doesn't exist on map)
   if (!state.invisibleMode && posInRoom(state.player.position, room)) {
@@ -640,18 +659,24 @@ function updateGravityWell(state: GameState, cluster: Cluster, room: Room) {
       const nx = pp.x + dx;
       const ny = pp.y + dy;
       if (cluster.tiles[ny]?.[nx]?.walkable) {
-        state.player.position.x = nx;
-        state.player.position.y = ny;
-        addMessage(state, 'The gravity well pulls you inward!', 'hazard');
+        intents.push(
+          { kind: 'move_player', to: { x: nx, y: ny } },
+          { kind: 'message', text: 'The gravity well pulls you inward!', style: 'hazard' },
+        );
       }
     }
 
     // Damage on singularity
     if (pp.x === sp.x && pp.y === sp.y) {
-      addMessage(state, 'The singularity tears at your coherence!', 'hazard');
-      damageCoherence(state, randInt(8, 15));
+      intents.push(
+        { kind: 'message', text: 'The singularity tears at your coherence!', style: 'hazard' },
+        { kind: 'damage_player', amount: randInt(8, 15), source: 'gravity_well' },
+        { kind: 'sound', id: 'hit' },
+      );
     }
   }
+
+  return intents;
 }
 
 // ── Entity spawning helpers ──
@@ -661,12 +686,8 @@ const GLITCH_WALL_CHARS = '╬╫╪▣▤▥▦▧▨▩';
 const GLITCH_COLORS = ['#cc4422', '#aa2244', '#cc6600', '#886622', '#aa4400'];
 let _nextSpawnId = 10000; // avoid collisions with game.ts entity IDs
 
-function spawnEntityInRoom(state: GameState, cluster: Cluster, room: Room, kind: 'sentry' | 'bit_mite' | 'gate_keeper') {
-  // Soft cap: don't flood the cluster beyond a depth-scaled limit
-  const entityCap = 15 + cluster.id * 5; // cluster 2→25, cluster 5→40
-  const currentCount = state.entities.filter(e => e.clusterId === cluster.id).length;
-  if (currentCount >= entityCap) return;
-
+/** Find a walkable, unoccupied position inside a room for spawning. */
+function findSpawnPosInRoom(state: GameState, cluster: Cluster, room: Room): Position | undefined {
   const { x1, y1, x2, y2 } = roomInterior(room);
   const candidates: { x: number; y: number }[] = [];
   for (let y = y1; y <= y2; y++) {
@@ -678,13 +699,19 @@ function spawnEntityInRoom(state: GameState, cluster: Cluster, room: Room, kind:
       if (!occupied && !hasEntity) candidates.push({ x, y });
     }
   }
-  if (candidates.length === 0) return;
-  const pos = candidates[Math.floor(random() * candidates.length)];
-  const entity = kind === 'sentry'
-    ? makeSentry(pos, cluster.id)
-    : kind === 'gate_keeper'
-      ? makeGateKeeper(pos, cluster.id)
-      : makeBitMite(pos, cluster.id);
+  if (candidates.length === 0) return undefined;
+  return candidates[Math.floor(random() * candidates.length)];
+}
+
+function spawnEntityInRoom(state: GameState, cluster: Cluster, room: Room, kind: 'sentry' | 'bit_mite' | 'gate_keeper') {
+  // Soft cap: don't flood the cluster beyond a depth-scaled limit
+  const entityCap = 15 + cluster.id * 5; // cluster 2→25, cluster 5→40
+  const currentCount = state.entities.filter(e => e.clusterId === cluster.id).length;
+  if (currentCount >= entityCap) return;
+
+  const pos = findSpawnPosInRoom(state, cluster, room);
+  if (!pos) return;
+  const entity = makeEntity(kind, pos, cluster.id);
   entity.id = _nextSpawnId++;
   state.entities.push(entity);
 }
@@ -900,7 +927,7 @@ function updateRoomScenarios(state: GameState, cluster: Cluster) {
           // Echoes dissolve into corrupted mite fragments
           for (const ia of cluster.interactables) {
             if (ia.roomId === room.id && ia.kind === 'lost_echo') {
-              ia.echoFadeAtTime = performance.now() + 300;
+              ia.echoFadeAtTime = -300; // negative = unstamped delay
             }
           }
           addMessage(state, 'The ritual echoes destabilize — fragments erupt!', 'hazard');
@@ -921,7 +948,7 @@ function updateRoomScenarios(state: GameState, cluster: Cluster) {
           // Destroy echoes
           for (const ia of cluster.interactables) {
             if (ia.roomId === room.id && ia.kind === 'lost_echo') {
-              ia.echoFadeAtTime = performance.now();
+              ia.echoFadeAtTime = -1; // negative = unstamped, immediate fade
             }
           }
           // Remove GateKeeper
@@ -929,7 +956,7 @@ function updateRoomScenarios(state: GameState, cluster: Cluster) {
             e => e.clusterId === cluster.id && e.ai?.kind === 'gate_keeper' && posInRoom(e.position, room),
           );
           if (gk) {
-            state.smokeEffects.push({ x: gk.position.x, y: gk.position.y, fg: '#23d2a6', spawnTime: performance.now() });
+            state.smokeEffects.push({ x: gk.position.x, y: gk.position.y, fg: '#23d2a6', spawnTime: 0 });
             state.entities = state.entities.filter(e => e.id !== gk.id);
             addMessage(state, 'The Gate-Keeper collapses. The ritual consumes itself.', 'hazard');
             state.pendingGlitch = 'tear';
@@ -954,29 +981,37 @@ export function updateHazards(state: GameState) {
   for (const room of cluster.rooms) {
     if (room.roomType === 'normal' || !room.hazardState) continue;
 
+    let intents: Intent[] = [];
+
     switch (room.roomType) {
       case 'corrupted':
-        updateCorruption(state, cluster, room);
+        intents = updateCorruption(state, cluster, room);
         break;
-      case 'trigger_trap':
-        updateTriggerTrap(state, cluster, room);
-        updateTriggerTrapVisuals(cluster, room, state.tick);
+      case 'trigger_trap': {
+        const trapIntents = updateTriggerTrap(state, cluster, room);
+        resolveIntents(state, trapIntents);
+        intents = updateTriggerTrapVisuals(cluster, room, state.tick);
         break;
+      }
       case 'memory_leak':
-        updateMemoryLeak(state, cluster, room);
+        intents = updateMemoryLeak(state, cluster, room);
         break;
       case 'firewall':
-        updateFirewall(state, cluster, room);
+        intents = updateFirewall(state, cluster, room);
         break;
       case 'unstable':
-        updateUnstable(state, cluster, room);
+        intents = updateUnstable(state, cluster, room);
         break;
       case 'echo_chamber':
-        updateEchoChamber(state, cluster, room);
+        intents = updateEchoChamber(state, cluster, room);
         break;
       case 'gravity_well':
-        updateGravityWell(state, cluster, room);
+        intents = updateGravityWell(state, cluster, room);
         break;
+    }
+
+    if (intents.length > 0) {
+      resolveIntents(state, intents);
     }
   }
 }
@@ -1015,7 +1050,7 @@ function tryFireMicroEvent(state: GameState, cluster: Cluster, room: Room) {
             tile.doorOpen = false;
             tile.walkable = false;
             tile.transparent = false;
-            tile.glyph = '+';
+            tile.glyph = tile.sealed ? '▪' : '+';
             addMessage(state, 'A door slams shut nearby.', 'system');
             return;
           }
@@ -1052,7 +1087,7 @@ function tryFireMicroEvent(state: GameState, cluster: Cluster, room: Room) {
         addMessage(state, `${target.name} destabilises and vanishes.`, 'system');
         state.smokeEffects.push({
           x: target.position.x, y: target.position.y,
-          fg: '#aaaa66', spawnTime: performance.now(),
+          fg: '#aaaa66', spawnTime: 0, // stamped by presentation layer
         });
       }
       break;
@@ -1190,7 +1225,10 @@ export function applyTileHazardToPlayer(state: GameState) {
 
   const { x, y } = state.player.position;
   const dmg = tileHazardDamage(cluster.tiles[y]?.[x]?.hazardOverlay);
-  if (dmg > 0) damageCoherence(state, dmg);
+  if (dmg > 0 && !state.godMode && state.player.coherence != null) {
+    state.player.coherence = Math.max(0, state.player.coherence - dmg);
+    state.pendingSounds.push('hit');
+  }
 }
 
 // ── Alert flood-fill ──
@@ -1231,7 +1269,7 @@ function isRoomDangerous(room: Room): boolean {
     case 'trigger_trap': return !hz.detonated;
     case 'corrupted': return !!(hz.corruptionTiles && hz.corruptionTiles.size > 0);
     case 'memory_leak': return (hz.floodLevel ?? 0) > 0;
-    case 'firewall': return !!hz.beams;
+    case 'firewall': return false; // danger detected via containedHazards when beam overlays are active
     case 'unstable': return !hz.coreDestroyed;
     case 'gravity_well': return true;
     case 'quarantine': return !!hz.locked;
@@ -1241,12 +1279,13 @@ function isRoomDangerous(room: Room): boolean {
 
 /** Dijkstra flood-fill from player position with weighted tile costs */
 function alertFloodFill(
+  state: GameState,
   cluster: Cluster,
   origin: Position,
   budget: number,
-): { filled: Map<string, number>; threats: { x: number; y: number; desc: string }[] } {
+): { filled: Map<string, number>; threats: { x: number; y: number; desc: string; source: 'hazard' | 'entity' }[] } {
   const filled = new Map<string, number>();
-  const threats: { x: number; y: number; desc: string }[] = [];
+  const threats: { x: number; y: number; desc: string; source: 'hazard' | 'entity' }[] = [];
   const key = (x: number, y: number) => `${x},${y}`;
 
   // Simple priority queue via sorted array (map is small: 50x30)
@@ -1323,8 +1362,30 @@ function alertFloodFill(
     }
 
     if (isThreat) {
-      threats.push({ x, y, desc: describeTileThreat(tile, room) });
+      threats.push({ x, y, desc: describeTileThreat(tile, room), source: 'hazard' });
     }
+  }
+
+  // Scan for hostile entities within the filled area
+  const hostileFactions = new Set<Faction>();
+  for (const rel of Object.entries(FACTION_RELATIONS.player ?? {})) {
+    if (rel[1] === 'attack') hostileFactions.add(rel[0] as Faction);
+  }
+  // Friendly faction becomes hostile at high alert
+  if (state.alertLevel >= ALERT_ENEMY) hostileFactions.add('friendly');
+
+  for (const entity of state.entities) {
+    if (entity.clusterId !== cluster.id) continue;
+    if (entity._pendingRemoval) continue;
+    const faction = entity.ai?.faction;
+    if (!faction || !hostileFactions.has(faction)) continue;
+    const ek = key(entity.position.x, entity.position.y);
+    if (!filled.has(ek)) continue;
+    threats.push({
+      x: entity.position.x, y: entity.position.y,
+      desc: `hostile: ${entity.name}`,
+      source: 'entity',
+    });
   }
 
   return { filled, threats };
@@ -1345,7 +1406,7 @@ export function updateAlertModule(state: GameState) {
   if (!alertMod.lastAlertTicks) alertMod.lastAlertTicks = new Map();
 
   const wasActive = alertMod.alertActive ?? false;
-  const { filled, threats } = alertFloodFill(cluster, state.player.position, ALERT_FILL_BUDGET);
+  const { filled, threats } = alertFloodFill(state, cluster, state.player.position, ALERT_FILL_BUDGET);
 
   // Store for debug overlay
   state.alertFill = filled;
@@ -1355,14 +1416,15 @@ export function updateAlertModule(state: GameState) {
   alertMod.alertActive = detected;
 
   // Post throttled alert messages — group by description
-  const threatsByDesc = new Map<string, { x: number; y: number; desc: string }>();
+  const threatsByDesc = new Map<string, { x: number; y: number; desc: string; source: 'hazard' | 'entity' }>();
   for (const t of threats) {
     if (!threatsByDesc.has(t.desc)) threatsByDesc.set(t.desc, t);
   }
-  for (const [desc, _t] of threatsByDesc) {
+  for (const [desc, t] of threatsByDesc) {
     const lastTick = alertMod.lastAlertTicks.get(desc) ?? -Infinity;
     if (state.tick - lastTick >= ALERT_THROTTLE_TICKS) {
-      addMessage(state, `alert.m ▲ ${desc}`, 'alert');
+      const style = t.source === 'entity' ? 'combat' as const : 'alert' as const;
+      addMessage(state, `alert.m ▲ ${desc}`, style);
       alertMod.lastAlertTicks.set(desc, state.tick);
     }
   }
