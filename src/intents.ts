@@ -12,6 +12,7 @@ export interface MoveIntent {
   kind: 'move';
   entityId: number;
   to: Position;
+  force?: boolean;  // skip walkability check (god mode noclip)
 }
 
 export interface OpenDoorIntent {

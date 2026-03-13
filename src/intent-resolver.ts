@@ -57,9 +57,9 @@ function resolveMove(state: GameState, intent: MoveIntent): void {
   if (!entity) return;
   const cluster = getCluster(state);
   const tile = getTile(cluster, intent.to);
-  if (!tile?.walkable) return;
-  // Don't move into occupied tiles (except player can overlap with self)
-  if (isOccupied(state, cluster, intent.to) && !(entity.id === state.player.id)) return;
+  if (!intent.force && !tile?.walkable) return;
+  // Don't move into occupied tiles (except player can overlap with self, or force/noclip)
+  if (!intent.force && isOccupied(state, cluster, intent.to) && !(entity.id === state.player.id)) return;
   entity.position = { x: intent.to.x, y: intent.to.y };
 }
 

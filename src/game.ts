@@ -579,7 +579,7 @@ function collectMoveIntents(state: GameState, dx: number, dy: number): { acted: 
   // God mode: walk through anything (noclip)
   if (state.godMode) {
     const intents: Intent[] = [
-      { kind: 'move', entityId: state.player.id, to: { x: nx, y: ny } },
+      { kind: 'move', entityId: state.player.id, to: { x: nx, y: ny }, force: true },
       { kind: 'sound', id: 'step' },
     ];
     if (targetTile.type === TileType.InterfaceExit) {
