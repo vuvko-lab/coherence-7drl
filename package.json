@@ -13,9 +13,11 @@
     "test:ai": "tsx src/tests/ai-player.ts",
     "gen-html": "tsx src/tests/gen-html.ts",
     "graph-stats": "tsx scripts/graph-stats.ts",
-    "test-glitch": "tsx scripts/test-glitch.ts"
+    "test-glitch": "tsx scripts/test-glitch.ts",
+    "deploy": "npm run build && wrangler pages deploy dist --project-name coherence"
   },
   "devDependencies": {
+    "wrangler": "^4.0.0",
     "@types/node": "^25.3.3",
     "tsx": "^4.21.0",
     "typescript": "^5.7.0",
