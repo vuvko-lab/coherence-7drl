@@ -38,3 +38,8 @@ Open `http://localhost:5173` in a browser.
 ## Seed reproduction
 
 Append `#seed=N` to the URL to load a specific map seed.
+
+## 7DRL Version
+
+The `main` branch contains significant changes in project structure and some fixed\added features to the 7drl variant.
+The jam submission can be found at the `7drl` branch.
