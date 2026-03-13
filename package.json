@@ -1,6 +1,6 @@
 {
   "name": "coherence-7drl",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -14,7 +14,7 @@
     "gen-html": "tsx src/tests/gen-html.ts",
     "graph-stats": "tsx scripts/graph-stats.ts",
     "test-glitch": "tsx scripts/test-glitch.ts",
-    "deploy": "npm run build && wrangler pages deploy dist --project-name coherence"
+    "deploy": "git diff --quiet && git diff --cached --quiet || (echo 'ERROR: uncommitted changes — commit first' && exit 1) && npm run build && wrangler pages deploy dist --project-name coherence"
   },
   "devDependencies": {
     "wrangler": "^4.0.0",

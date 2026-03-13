@@ -22,6 +22,11 @@ function parseSeedFromURL(): number | undefined {
   return match ? Number(match[1]) : undefined;
 }
 
+// Inject build version into DOM
+const _bv = typeof __BUILD_VERSION__ !== 'undefined' ? __BUILD_VERSION__ : 'dev';
+document.getElementById('build-version')?.replaceChildren(_bv);
+document.getElementById('about-version')?.replaceChildren(_bv);
+
 let state = createGame(parseSeedFromURL());
 const renderer = new Renderer('map-grid-wrap');
 initGlitch(renderer);
@@ -1339,7 +1344,6 @@ function showVictoryOverlay() {
     { name: 'CLEAN SIGNAL', desc: 'Finish the game without firing corrupt.m once.', unlocked: state.corruptShotsFired === 0 },
     { name: 'ZERO FOOTPRINT', desc: 'Finish the game without destroying any entity.', unlocked: state.killedEntities.filter(k => k.byPlayer).length === 0 },
     { name: 'PLAINTEXT', desc: 'Finish the game without activating cloak.m.', unlocked: state.cloakActivations === 0 },
-    { name: 'GHOST IN THE MESH', desc: 'Finish the game without reading any terminal.', unlocked: state.terminalsRead === 0 },
   ];
 
   const achievementEl = document.getElementById('victory-achievement')!;
