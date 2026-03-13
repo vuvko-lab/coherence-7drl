@@ -388,7 +388,7 @@ function bitMiteAI(state: GameState, entity: Entity, cluster: Cluster): Intent[]
         if (chaseTarget.coherence !== undefined && chaseTarget.coherence - entity.attackValue <= 0) {
           intents.push(
             { kind: 'message', text: `Bit-Mite Swarm destroys ${chaseTarget.name}!`, style: 'combat' },
-            { kind: 'remove_entity', entityId: chaseTarget.id, cause: 'killed' },
+            { kind: 'remove_entity', entityId: chaseTarget.id, cause: 'killed', killerId: entity.id },
             { kind: 'smoke', position: chaseTarget.position, color: factionSmokeColor(chaseTarget.ai?.faction) },
             { kind: 'change_ai_state', entityId: entity.id, newState: 'wander' },
             { kind: 'set_target', entityId: entity.id, targetId: undefined },
@@ -541,7 +541,7 @@ function sentryAttackIntents(state: GameState, entity: Entity, target: Entity, _
   if (target.coherence - entity.attackValue <= 0) {
     intents.push(
       { kind: 'message', text: `Sentry destroys ${target.name}!`, style: 'combat' },
-      { kind: 'remove_entity', entityId: target.id, cause: 'killed' },
+      { kind: 'remove_entity', entityId: target.id, cause: 'killed', killerId: entity.id },
       { kind: 'smoke', position: target.position, color: factionSmokeColor(target.ai?.faction) },
       { kind: 'change_ai_state', entityId: entity.id, newState: 'patrol' },
       { kind: 'set_target', entityId: entity.id, targetId: undefined },
@@ -588,7 +588,7 @@ function titanSpawnAI(state: GameState, entity: Entity, cluster: Cluster): Inten
       if (t.coherence! - dmg <= 0) {
         intents.push(
           { kind: 'message', text: `[UNKNOWN PROCESS] destroys ${t.name}!`, style: 'combat' },
-          { kind: 'remove_entity', entityId: t.id, cause: 'killed' },
+          { kind: 'remove_entity', entityId: t.id, cause: 'killed', killerId: entity.id },
           { kind: 'smoke', position: t.position, color: factionSmokeColor(t.ai?.faction) },
         );
       }
@@ -655,7 +655,7 @@ function gateKeeperAI(state: GameState, entity: Entity, cluster: Cluster): Inten
     if (target.coherence - entity.attackValue <= 0) {
       intents.push(
         { kind: 'message', text: `Gate-Keeper destroys ${target.name}!`, style: 'combat' },
-        { kind: 'remove_entity', entityId: target.id, cause: 'killed' },
+        { kind: 'remove_entity', entityId: target.id, cause: 'killed', killerId: entity.id },
         { kind: 'smoke', position: target.position, color: factionSmokeColor(target.ai?.faction) },
       );
     }
@@ -772,7 +772,7 @@ function logicLeechAI(state: GameState, entity: Entity, cluster: Cluster): Inten
           if (hitTarget.coherence - entity.attackValue <= 0) {
             intents.push(
               { kind: 'message', text: `Logic Leech destroys ${hitTarget.name}!`, style: 'combat' },
-              { kind: 'remove_entity', entityId: hitTarget.id, cause: 'killed' },
+              { kind: 'remove_entity', entityId: hitTarget.id, cause: 'killed', killerId: entity.id },
               { kind: 'smoke', position: hitTarget.position, color: factionSmokeColor(hitTarget.ai?.faction) },
             );
           }
@@ -834,7 +834,7 @@ function leechTryMeleeIntents(state: GameState, entity: Entity, cluster: Cluster
   if (target.coherence !== undefined && target.coherence - entity.attackValue <= 0) {
     intents.push(
       { kind: 'message', text: `Logic Leech destroys ${target.name}!`, style: 'combat' },
-      { kind: 'remove_entity', entityId: target.id, cause: 'killed' },
+      { kind: 'remove_entity', entityId: target.id, cause: 'killed', killerId: entity.id },
       { kind: 'smoke', position: target.position, color: factionSmokeColor(target.ai?.faction) },
     );
   }

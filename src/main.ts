@@ -1307,10 +1307,11 @@ victoryRestartBtn.addEventListener('click', () => {
 
 function showVictoryOverlay() {
   const coherencePct = Math.round(((state.player.coherence ?? 0) / (state.player.maxCoherence ?? 100)) * 100);
-  const killCount = state.killedEntities.length;
+  const playerKills = state.killedEntities.filter(k => k.byPlayer);
+  const playerKillCount = playerKills.length;
 
   const killCounts: Record<string, number> = {};
-  for (const k of state.killedEntities) {
+  for (const k of playerKills) {
     killCounts[k.kind] = (killCounts[k.kind] ?? 0) + 1;
   }
 
@@ -1326,9 +1327,9 @@ function showVictoryOverlay() {
     `<div>Coherence: ${coherencePct}%</div>` +
     `<div>Turns: ${state.tick}</div>` +
     `<div>Privileges bound: ${state.rootPrivileges.length > 0 ? state.rootPrivileges.join(' · ') : 'none'}</div>` +
-    `<div>Entities destroyed: ${killCount}</div>`;
+    `<div>Entities destroyed: ${playerKillCount}</div>`;
 
-  victoryKills.innerHTML = killCount > 0
+  victoryKills.innerHTML = playerKillCount > 0
     ? Object.entries(killCounts).map(([k, n]) => `<div>&gt; ${k}: ${n}</div>`).join('')
     : '<div>&gt; none destroyed</div>';
 
@@ -1336,7 +1337,7 @@ function showVictoryOverlay() {
   const allAchievements = [
     { name: 'SILENT PROTOCOL', desc: 'Finish the game without loading an identity.', unlocked: !state.selfPanelRevealed },
     { name: 'CLEAN SIGNAL', desc: 'Finish the game without firing corrupt.m once.', unlocked: state.corruptShotsFired === 0 },
-    { name: 'ZERO FOOTPRINT', desc: 'Finish the game without destroying any entity.', unlocked: state.killedEntities.length === 0 },
+    { name: 'ZERO FOOTPRINT', desc: 'Finish the game without destroying any entity.', unlocked: state.killedEntities.filter(k => k.byPlayer).length === 0 },
     { name: 'PLAINTEXT', desc: 'Finish the game without activating cloak.m.', unlocked: state.cloakActivations === 0 },
     { name: 'GHOST IN THE MESH', desc: 'Finish the game without reading any terminal.', unlocked: state.terminalsRead === 0 },
   ];
@@ -1387,10 +1388,11 @@ deathRestartBtn.addEventListener('click', () => {
 });
 
 function showDeathOverlay() {
-  const killCount = state.killedEntities.length;
+  const playerKills = state.killedEntities.filter(k => k.byPlayer);
+  const playerKillCount = playerKills.length;
 
   const killCounts: Record<string, number> = {};
-  for (const k of state.killedEntities) {
+  for (const k of playerKills) {
     killCounts[k.kind] = (killCounts[k.kind] ?? 0) + 1;
   }
 
@@ -1405,9 +1407,9 @@ function showDeathOverlay() {
     `<div>Coherence: 0%</div>` +
     `<div>Turns: ${state.tick}</div>` +
     `<div>Cluster reached: ${state.currentClusterId + 1}</div>` +
-    `<div>Entities destroyed: ${killCount}</div>`;
+    `<div>Entities destroyed: ${playerKillCount}</div>`;
 
-  deathKills.innerHTML = killCount > 0
+  deathKills.innerHTML = playerKillCount > 0
     ? Object.entries(killCounts).map(([k, n]) => `<div>&gt; ${k}: ${n}</div>`).join('')
     : '<div>&gt; none destroyed</div>';
 

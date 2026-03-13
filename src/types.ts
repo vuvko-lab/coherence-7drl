@@ -450,6 +450,7 @@ export interface Entity {
   modules?: PlayerModule[];
   ai?: EntityAI;
   propTag?: string; // identifies static prop entities (e.g. 'spacesuit', 'sleever_device')
+  _lastDamagedBy?: number;   // id of entity/player that last dealt damage
   _pendingRemoval?: boolean; // marked for deferred removal after entity loop
 }
 
@@ -488,7 +489,7 @@ export interface GameState {
   markedEntities: Map<number, number>;  // marked entity id → chronicler id that marked it
   // Narrative & progression
   rootPrivileges: string[];            // named privileges collected (ROOT READ, WRITE, EXEC, ID, PASS)
-  killedEntities: { name: string; kind: EntityKind }[];  // for victory stats
+  killedEntities: { name: string; kind: EntityKind; byPlayer: boolean }[];  // for victory stats
   finalClusterId: number;              // cluster ID where victory condition is checked (default 5)
   gameOver?: boolean;                  // true when player exits the final cluster or dies
   playerDead?: boolean;                // true when player coherence reaches 0

@@ -87,6 +87,7 @@ export interface RemoveEntityIntent {
   kind: 'remove_entity';
   entityId: number;
   cause: 'killed' | 'despawn' | 'dissolve';
+  killerId?: number;  // entity/player id that dealt the killing blow
 }
 
 // ── AI state management ──

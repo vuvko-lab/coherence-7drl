@@ -96,12 +96,14 @@ function resolveMeleeAttack(state: GameState, intent: MeleeAttackIntent): void {
   const target = findEntity(state, intent.targetId);
   if (!target || target.coherence == null) return;
   target.coherence = Math.max(0, target.coherence - intent.damage);
+  target._lastDamagedBy = intent.attackerId;
 }
 
 function resolveRangedAttack(state: GameState, intent: RangedAttackIntent): void {
   const target = findEntity(state, intent.targetId);
   if (!target || target.coherence == null) return;
   target.coherence = Math.max(0, target.coherence - intent.damage);
+  target._lastDamagedBy = intent.attackerId;
 }
 
 function resolveAoeAttack(state: GameState, intent: AoeAttackIntent): void {
@@ -109,6 +111,7 @@ function resolveAoeAttack(state: GameState, intent: AoeAttackIntent): void {
     const target = findEntity(state, targetId);
     if (!target || target.coherence == null) continue;
     target.coherence = Math.max(0, target.coherence - intent.damage);
+    target._lastDamagedBy = intent.attackerId;
   }
 }
 
@@ -137,7 +140,8 @@ function resolveRemoveEntity(state: GameState, intent: RemoveEntityIntent): void
   if (!entity || entity.id === state.player.id) return;
   entity._pendingRemoval = true;
   if (intent.cause === 'killed') {
-    state.killedEntities.push({ name: entity.name, kind: entity.ai!.kind });
+    const byPlayer = intent.killerId === state.player.id;
+    state.killedEntities.push({ name: entity.name, kind: entity.ai!.kind, byPlayer });
     state.markedEntities.delete(entity.id);
     // If a chronicler dies, remove all marks it created
     if (entity.ai!.kind === 'chronicler') {

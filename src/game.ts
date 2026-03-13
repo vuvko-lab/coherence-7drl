@@ -936,7 +936,7 @@ export function processAction(state: GameState, action: PlayerAction): boolean {
           });
         }
         if (e.ai) {
-          state.killedEntities.push({ name: e.name, kind: e.ai.kind });
+          state.killedEntities.push({ name: e.name, kind: e.ai.kind, byPlayer: e._lastDamagedBy === state.player.id });
           state.markedEntities.delete(e.id);
           // If a chronicler dies, remove all marks it created
           if (e.ai.kind === 'chronicler') {
