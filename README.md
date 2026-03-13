@@ -43,3 +43,9 @@ Append `#seed=N` to the URL to load a specific map seed.
 
 The `main` branch contains significant changes in project structure and some fixed\added features to the 7drl variant.
 The jam submission can be found at the `7drl` branch.
+
+## Online play
+
+You can play on [itch](https://vuvko.itch.io/coherence-7drl).
+
+Or on CloudFlare [pages](https://coherence.vuvko.net).
